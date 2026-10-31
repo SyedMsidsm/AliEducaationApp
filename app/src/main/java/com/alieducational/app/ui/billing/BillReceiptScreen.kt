@@ -2,6 +2,7 @@ package com.alieducational.app.ui.billing
 
 import android.content.Intent
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -434,70 +435,121 @@ fun BillReceiptScreen(
 
             // Share & Print Actions
             item {
-                Row(
+                val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+                var isSharingPdf by remember { mutableStateOf(false) }
+
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(
+                    // 1. Primary Action: Branded WhatsApp PDF Receipt
+                    Button(
                         onClick = {
-                            val totalRupees = CostCalculator.formatPaiseToRupees(currentSale?.netTotalPaise ?: billingState.netTotalPaise)
-                            val itemsListText = if (saleLines.isNotEmpty()) {
-                                saleLines.joinToString("\n") { l ->
-                                    val unit = if (l.isPack) "pack" else "pc"
-                                    "• ${l.productName}: ${l.quantityBase} $unit @ ${CostCalculator.formatPaiseToRupees(l.unitSellingPricePaise)} = ${CostCalculator.formatPaiseToRupees(l.lineNetPaise)}"
-                                }
-                            } else {
-                                billingState.items.joinToString("\n") { it ->
-                                    val unit = if (it.unitType == "PACK") "pack" else "pc"
-                                    "• ${it.productName}: ${it.quantity} $unit @ ${CostCalculator.formatPaiseToRupees(it.unitPricePaise)} = ${CostCalculator.formatPaiseToRupees(it.lineGrossPaise)}"
+                            val sale = currentSale ?: return@Button
+                            coroutineScope.launch {
+                                isSharingPdf = true
+                                try {
+                                    val intent = viewModel.receiptService.createWhatsAppReceiptIntent(sale, saleLines)
+                                    context.startActivity(intent)
+                                    Toast.makeText(context, "Opened in WhatsApp", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Failed to share: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isSharingPdf = false
                                 }
                             }
-                            val shareText = """
-                                *$shopName - $memoTag*
-                                Receipt #: $receiptNumber
-                                Date: $formattedDate
-                                ${if (currentSale?.customerName != null) "Customer: ${currentSale?.customerName}\n" else ""}Payment Mode: $paymentMethodLabel
-
-                                --- Items ---
-                                $itemsListText
-
-                                Gross Total: ${CostCalculator.formatPaiseToRupees(grossPaise)}
-                                ${if (discountPaise > 0L) "Discount: -${CostCalculator.formatPaiseToRupees(discountPaise)}\n" else ""}Net Total: $totalRupees
-                                Stored safely & offline.
-                            """.trimIndent()
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, shareText)
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Share Receipt"))
                         },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Share,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                        enabled = !isSharingPdf && currentSale != null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.receipt_share_button))
+                    ) {
+                        if (isSharingPdf) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Generating Branded PDF...")
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Share WhatsApp PDF Receipt", fontWeight = FontWeight.Bold)
+                        }
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            Toast.makeText(context, "Receipt sent to printer spool", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
+                    // 2. Secondary Row: Print Receipt (Android PrintManager) & Save/Share PDF
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Print,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.receipt_print_button))
+                        OutlinedButton(
+                            onClick = {
+                                val activity = context as? android.app.Activity
+                                val sale = currentSale
+                                if (activity != null && sale != null) {
+                                    viewModel.receiptService.printReceipt(activity, sale, saleLines)
+                                } else {
+                                    Toast.makeText(context, "Printing not supported on this device", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = currentSale != null,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Print,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Print Receipt")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val sale = currentSale ?: return@OutlinedButton
+                                coroutineScope.launch {
+                                    try {
+                                        val pdfFile = viewModel.receiptService.createReceiptPdf(sale, saleLines)
+                                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                                            context,
+                                            "${context.packageName}.fileprovider",
+                                            pdfFile
+                                        )
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/pdf"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share Receipt PDF"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            enabled = currentSale != null,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Save / Other")
+                        }
                     }
                 }
             }
