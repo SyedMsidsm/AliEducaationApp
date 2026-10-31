@@ -333,64 +333,6 @@ fun HomeScreen(
                 }
             }
 
-            // Recent Activity Section
-            item {
-                Text(
-                    text = stringResource(R.string.home_recent_activity),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-            }
-
-            if (recentMovements.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(R.string.home_no_activity),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                }
-            } else {
-                items(recentMovements.take(5)) { movement ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                    text = "${movement.type}: ${movement.reason ?: "Stock movement"}",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                val format = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
-                                Text(
-                                    text = format.format(Date(movement.timestamp)),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            val qtyChange = movement.quantityChangeBase
-                            val isPos = qtyChange > 0
-                            Text(
-                                text = "${if (isPos) "+" else ""}$qtyChange pcs",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isPos) Color(0xFF75B890) else Color(0xFFE57373)
-                            )
-                        }
-                    }
-                }
-            }
-
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
