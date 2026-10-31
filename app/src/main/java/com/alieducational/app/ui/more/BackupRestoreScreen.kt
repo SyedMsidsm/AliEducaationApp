@@ -75,6 +75,7 @@ fun BackupRestoreScreen(
     val backupStatus by viewModel.backupStatus.collectAsState()
     val availableBackups by viewModel.availableBackups.collectAsState()
     val lastBackupTime by viewModel.lastBackupTime.collectAsState()
+    val isCreatingBackup by viewModel.isCreatingBackup.collectAsState()
 
     var selectedBackupForRestore by remember { mutableStateOf<BackupMetadata?>(null) }
 
@@ -159,12 +160,23 @@ fun BackupRestoreScreen(
                             ) {
                                 Button(
                                     onClick = { viewModel.createBackup() },
+                                    enabled = !isCreatingBackup,
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Create Backup Now")
+                                    if (isCreatingBackup) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Creating...", fontSize = 13.sp)
+                                    } else {
+                                        Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Backup Now")
+                                    }
                                 }
 
                                 OutlinedButton(
@@ -186,17 +198,36 @@ fun BackupRestoreScreen(
                 // Status Message
                 if (backupStatus != null) {
                     item {
+                        val isFailed = backupStatus!!.contains("fail", ignoreCase = true)
+                        val statusColor = if (isFailed) Color(0xFFE57373) else Color(0xFF75B890)
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF75B890).copy(alpha = 0.2f)),
+                            colors = CardDefaults.cardColors(containerColor = statusColor.copy(alpha = 0.15f)),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text(
-                                text = backupStatus!!,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = backupStatus!!,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isFailed) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { viewModel.createBackup() },
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Retry")
+                                    }
+                                }
+                            }
                         }
                     }
                 }

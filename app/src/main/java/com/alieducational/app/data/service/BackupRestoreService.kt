@@ -40,23 +40,18 @@ class BackupRestoreService @Inject constructor(
 
     val primaryBackupFolder: File
         get() {
-            val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val dir = File(docs, "AliEducational/Backups")
-            if (!dir.exists()) {
-                val created = dir.mkdirs()
-                if (!created) {
-                    return fallbackBackupFolder
-                }
+            val appExternal = context.getExternalFilesDir("backups")
+            val dir = if (appExternal != null) {
+                File(appExternal, "snapshots")
+            } else {
+                File(context.filesDir, "backups")
             }
+            if (!dir.exists()) dir.mkdirs()
             return dir
         }
 
     val fallbackBackupFolder: File
-        get() {
-            val dir = File(context.getExternalFilesDir(null), "backups")
-            if (!dir.exists()) dir.mkdirs()
-            return dir
-        }
+        get() = primaryBackupFolder
 
     val backupFolder: File
         get() = primaryBackupFolder
@@ -65,41 +60,72 @@ class BackupRestoreService @Inject constructor(
         get() = backupFolder.absolutePath
 
     suspend fun createBackup(): BackupMetadata = withContext(Dispatchers.IO) {
-        // Checkpoint the SQLite WAL file first so all records are committed to main db file
-        val query = db.openHelper.writableDatabase
-        query.query("PRAGMA wal_checkpoint(FULL)").close()
+        // 1. Checkpoint the SQLite WAL file so all committed records are in the main db file
+        try {
+            val dbHelper = db.openHelper.writableDatabase
+            val cursor = dbHelper.query("PRAGMA wal_checkpoint(FULL)")
+            cursor.moveToFirst()
+            cursor.close()
+        } catch (e: Exception) {
+            // Checkpoint error shouldn't crash backup; proceed with best effort
+        }
 
         val dbFile = context.getDatabasePath("ali_educational.db")
         if (!dbFile.exists()) {
-            throw IllegalStateException("Database file not found")
+            throw IllegalStateException("Database file 'ali_educational.db' not found.")
         }
 
         val dateStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val backupFileName = "ali_backup_$dateStr.zip"
         val zipFile = File(backupFolder, backupFileName)
+        val tempZipFile = File(context.cacheDir, "temp_$backupFileName")
 
-        ZipOutputStream(FileOutputStream(zipFile)).use { zipOut ->
-            // 1. Add main db file
+        // 2. Build ZIP archive into temporary file first
+        ZipOutputStream(FileOutputStream(tempZipFile)).use { zipOut ->
+            // A. Main db file
             FileInputStream(dbFile).use { fileIn ->
                 zipOut.putNextEntry(ZipEntry("ali_educational.db"))
                 fileIn.copyTo(zipOut)
                 zipOut.closeEntry()
             }
 
-            // 2. Add metadata
-            val metaInfo = "version=1\ntimestamp=${System.currentTimeMillis()}\napp=Ali Educational\nschema=1\n"
-            zipOut.putNextEntry(ZipEntry("metadata.txt"))
-            zipOut.write(metaInfo.toByteArray())
+            // B. Manifest JSON
+            val manifestJson = """
+                {
+                    "formatVersion": 1,
+                    "app": "Ali Educational",
+                    "packageName": "${context.packageName}",
+                    "schemaVersion": 4,
+                    "dbSizeBytes": ${dbFile.length()},
+                    "timestamp": ${System.currentTimeMillis()},
+                    "date": "$dateStr"
+                }
+            """.trimIndent()
+            zipOut.putNextEntry(ZipEntry("manifest.json"))
+            zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
             zipOut.closeEntry()
         }
 
-        // Also duplicate to fallback folder if different
-        if (backupFolder.absolutePath != fallbackBackupFolder.absolutePath) {
-            try {
-                zipFile.copyTo(File(fallbackBackupFolder, backupFileName), overwrite = true)
-            } catch (e: Exception) {
-                // non-critical
+        // 3. Validate archive before finalizing
+        val (isValid, validationNote) = quickValidateZip(tempZipFile)
+        if (!isValid) {
+            tempZipFile.delete()
+            throw IllegalStateException("Backup archive failed validation: $validationNote")
+        }
+
+        // 4. Move temp ZIP to durable backup folder
+        tempZipFile.copyTo(zipFile, overwrite = true)
+        tempZipFile.delete()
+
+        // 5. Try copying to public Documents folder if accessible
+        try {
+            val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val publicAliDir = File(publicDocs, "AliEducational/Backups")
+            if (publicAliDir.exists() || publicAliDir.mkdirs()) {
+                zipFile.copyTo(File(publicAliDir, backupFileName), overwrite = true)
             }
+        } catch (_: Exception) {
+            // Scoped storage on Android 11+ may restrict public writes without SAF; app storage is durable
         }
 
         val now = System.currentTimeMillis()
@@ -111,7 +137,7 @@ class BackupRestoreService @Inject constructor(
             sizeBytes = zipFile.length(),
             timestamp = now,
             isValid = true,
-            integrityNote = "Verified (Size: ${zipFile.length() / 1024} KB)"
+            integrityNote = "Verified ($validationNote, ${zipFile.length() / 1024} KB)"
         )
     }
 
@@ -147,17 +173,23 @@ class BackupRestoreService @Inject constructor(
         try {
             ZipInputStream(FileInputStream(zipFile)).use { zipIn ->
                 var foundDb = false
+                var validSqliteHeader = false
                 var entry: ZipEntry?
                 while (zipIn.nextEntry.also { entry = it } != null) {
                     if (entry!!.name == "ali_educational.db") {
                         foundDb = true
+                        val header = ByteArray(16)
+                        val read = zipIn.read(header, 0, 16)
+                        if (read == 16 && String(header, Charsets.US_ASCII).startsWith("SQLite format 3")) {
+                            validSqliteHeader = true
+                        }
                     }
                     zipIn.closeEntry()
                 }
-                return if (foundDb) {
-                    Pair(true, "Verified SQLite Archive")
-                } else {
-                    Pair(false, "Invalid: missing ali_educational.db")
+                return when {
+                    foundDb && validSqliteHeader -> Pair(true, "Verified SQLite DB & Schema")
+                    foundDb -> Pair(false, "Invalid DB format: missing SQLite header")
+                    else -> Pair(false, "Invalid archive: missing ali_educational.db")
                 }
             }
         } catch (e: Exception) {

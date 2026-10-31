@@ -845,6 +845,9 @@ class AliViewModel @Inject constructor(
     private val _availableBackups = MutableStateFlow<List<BackupMetadata>>(emptyList())
     val availableBackups: StateFlow<List<BackupMetadata>> = _availableBackups.asStateFlow()
 
+    private val _isCreatingBackup = MutableStateFlow(false)
+    val isCreatingBackup: StateFlow<Boolean> = _isCreatingBackup.asStateFlow()
+
     fun loadBackups() {
         viewModelScope.launch {
             _availableBackups.value = backupService.getAvailableBackups()
@@ -852,6 +855,9 @@ class AliViewModel @Inject constructor(
     }
 
     fun createBackup(onDone: () -> Unit = {}) {
+        if (_isCreatingBackup.value) return // Prevent overlapping jobs
+        _isCreatingBackup.value = true
+        _backupStatus.value = "Creating backup..."
         viewModelScope.launch {
             try {
                 val meta = backupService.createBackup()
@@ -859,7 +865,9 @@ class AliViewModel @Inject constructor(
                 loadBackups()
                 onDone()
             } catch (e: Exception) {
-                _backupStatus.value = "Backup failed: ${e.message}"
+                _backupStatus.value = "Backup failed: ${e.localizedMessage ?: "Unknown error"}"
+            } finally {
+                _isCreatingBackup.value = false
             }
         }
     }
