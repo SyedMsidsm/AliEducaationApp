@@ -7,13 +7,17 @@ import com.alieducational.app.data.local.dao.AccountPaymentDao
 import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
+import com.alieducational.app.data.local.dao.PigmyDepositDao
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
+import com.alieducational.app.data.local.dao.ProductGiveawayDao
 import com.alieducational.app.data.local.dao.PurchaseDao
 import com.alieducational.app.data.local.dao.SaleDao
+import com.alieducational.app.data.local.dao.ServiceDefinitionDao
 import com.alieducational.app.data.local.dao.ShopExpenseDao
 import com.alieducational.app.data.local.dao.StockMovementDao
 import com.alieducational.app.data.local.dao.SupplierDao
+import com.alieducational.app.data.local.dao.SyncEventDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,8 +37,12 @@ object DatabaseModule {
             AppDatabase::class.java,
             "ali_educational.db"
         )
-        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
-        .fallbackToDestructiveMigration()
+        .addMigrations(
+            AppDatabase.MIGRATION_1_2,
+            AppDatabase.MIGRATION_2_3,
+            AppDatabase.MIGRATION_3_4,
+            AppDatabase.MIGRATION_4_5
+        )
         .build()
     }
 
@@ -70,4 +78,16 @@ object DatabaseModule {
 
     @Provides
     fun provideHeldBillDao(db: AppDatabase): HeldBillDao = db.heldBillDao()
+
+    @Provides
+    fun providePigmyDepositDao(db: AppDatabase): PigmyDepositDao = db.pigmyDepositDao()
+
+    @Provides
+    fun provideProductGiveawayDao(db: AppDatabase): ProductGiveawayDao = db.productGiveawayDao()
+
+    @Provides
+    fun provideServiceDefinitionDao(db: AppDatabase): ServiceDefinitionDao = db.serviceDefinitionDao()
+
+    @Provides
+    fun provideSyncEventDao(db: AppDatabase): SyncEventDao = db.syncEventDao()
 }

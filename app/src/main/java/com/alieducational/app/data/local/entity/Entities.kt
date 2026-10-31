@@ -142,6 +142,8 @@ data class SaleEntity(
     val voidTimestamp: Long? = null,
     val refundPayoutPaise: Long = 0L,
     val stockRestoredCondition: String? = null, // SELLABLE, DAMAGED, NONE
+    val originDeviceId: String? = null,
+    val syncStatus: String = "LOCAL", // LOCAL, PENDING_SYNC, SYNCED
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -150,16 +152,21 @@ data class SaleLineEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
     val saleId: String,
-    val productId: String?, // null for money-only daily summaries
+    val productId: String?, // null for money-only daily summaries or services
     val productName: String,
     val quantityBase: Int,
     val isPack: Boolean = false,
     val unitSellingPricePaise: Long,
-    val unitCostSnapshotPaise: Long?, // cost at time of sale; null if unknown
+    val unitCostSnapshotPaise: Long?, // cost at time of sale; null if unknown or service
     val lineGrossPaise: Long,
     val lineDiscountAllocatedPaise: Long = 0L,
     val lineNetPaise: Long,
-    val lineProfitPaise: Long? // null if cost unknown
+    val lineProfitPaise: Long?, // null if cost unknown or service
+    val lineType: String = "PRODUCT", // PRODUCT, SERVICE
+    val serviceId: String? = null,
+    val serviceName: String? = null,
+    val serviceOption: String? = null, // e.g. "A4 B&W", "A4 Colour"
+    val unitLabel: String? = null // e.g. "sides", "copies", "sheets"
 )
 
 @Entity(tableName = "account_payments")
@@ -179,12 +186,16 @@ data class AccountPaymentEntity(
 data class ShopExpenseEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
-    val category: String, // RENT, ELECTRICITY, SALARY, OTHER_EXPENSE, OTHER_INCOME
+    val category: String, // RENT, ELECTRICITY, SALARY, OTHER_EXPENSE, OTHER_INCOME, SERVICE_EXPENSE, SAVINGS_TRANSFER
     val amountPaise: Long,
     val isIncome: Boolean = false,
     val notes: String? = null,
     val isVoided: Boolean = false,
     val voidReason: String? = null,
+    val expenseCategory: String? = null, // PAPER, INK_TONER, STICKER_SHEETS, MACHINE_REPAIR, OTHER
+    val serviceTarget: String? = null, // PRINTING, PHOTOCOPYING, STICKER_PRINTING, SHARED, or custom serviceId
+    val attachmentUri: String? = null,
+    val isSavingsTransfer: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -213,4 +224,61 @@ data class HeldBillEntity(
     val itemCount: Int = 0,
     val totalPaise: Long = 0L,
     val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "pigmy_deposits")
+data class PigmyDepositEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val accountSchemeId: String = "DEFAULT_PIGMY",
+    val paidTimestamp: Long = System.currentTimeMillis(),
+    val amountPaise: Long,
+    val paymentSource: String = "CASH", // CASH, BANK
+    val notes: String? = null,
+    val linkedExpenseId: String? = null, // links to ShopExpenseEntity
+    val isVoided: Boolean = false,
+    val voidReason: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "product_giveaways")
+data class ProductGiveawayEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val productId: String,
+    val productName: String,
+    val quantityBase: Int,
+    val isPack: Boolean = false,
+    val packSizeSnapshot: Int = 1,
+    val unitCostSnapshotPaise: Long? = null,
+    val reason: String = "FREE_ITEM", // FREE_ITEM, DONATION
+    val recipientNote: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isCancelled: Boolean = false,
+    val cancelledTimestamp: Long? = null
+)
+
+@Entity(tableName = "service_definitions")
+data class ServiceDefinitionEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val unitLabel: String = "job", // sides, copies, sheets, job
+    val isPredefined: Boolean = false,
+    val isArchived: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "sync_events")
+data class SyncEventEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val eventType: String,
+    val entityId: String,
+    val payloadJson: String,
+    val originDeviceId: String,
+    val status: String = "PENDING", // PENDING, SENT, ACKNOWLEDGED, FAILED
+    val retryCount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
 )

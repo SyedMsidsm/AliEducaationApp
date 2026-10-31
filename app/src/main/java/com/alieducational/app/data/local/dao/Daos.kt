@@ -10,15 +10,19 @@ import com.alieducational.app.data.local.entity.AccountPaymentEntity
 import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.ImportBatchEntity
+import com.alieducational.app.data.local.entity.PigmyDepositEntity
 import com.alieducational.app.data.local.entity.ProductBarcodeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
+import com.alieducational.app.data.local.entity.ProductGiveawayEntity
 import com.alieducational.app.data.local.entity.PurchaseEntity
 import com.alieducational.app.data.local.entity.PurchaseLineEntity
 import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
+import com.alieducational.app.data.local.entity.ServiceDefinitionEntity
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
+import com.alieducational.app.data.local.entity.SyncEventEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -200,6 +204,21 @@ interface SaleDao {
     @Query("SELECT * FROM sales WHERE unresolvedStockDetails = 1 AND isVoided = 0 ORDER BY timestamp DESC")
     fun getUnresolvedStockSales(): Flow<List<SaleEntity>>
 
+    @Query("SELECT * FROM sale_lines WHERE lineType = 'SERVICE'")
+    fun getAllServiceLines(): Flow<List<SaleLineEntity>>
+
+    @Query("SELECT sl.* FROM sale_lines sl INNER JOIN sales s ON sl.saleId = s.id WHERE s.isVoided = 0 AND sl.lineType = 'SERVICE' AND s.timestamp >= :startTime AND s.timestamp <= :endTime")
+    fun getServiceLinesInRange(startTime: Long, endTime: Long): Flow<List<SaleLineEntity>>
+
+    @Query("SELECT * FROM sales WHERE syncStatus = 'PENDING_SYNC' ORDER BY timestamp ASC")
+    suspend fun getPendingSyncSales(): List<SaleEntity>
+
+    @Query("SELECT COUNT(*) FROM sales WHERE syncStatus = 'PENDING_SYNC'")
+    fun getPendingSyncSalesCount(): Flow<Int>
+
+    @Query("UPDATE sales SET syncStatus = :status WHERE id = :saleId")
+    suspend fun updateSaleSyncStatus(saleId: String, status: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSale(sale: SaleEntity)
 
@@ -233,11 +252,23 @@ interface ShopExpenseDao {
     @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 AND timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
     fun getExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>>
 
+    @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 AND serviceTarget IS NOT NULL AND timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
+    fun getServiceExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>>
+
+    @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 AND isSavingsTransfer = 0 AND timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
+    fun getOperatingExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>>
+
+    @Query("SELECT * FROM shop_expenses WHERE id = :id")
+    suspend fun getExpenseById(id: String): ShopExpenseEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ShopExpenseEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpenses(expenses: List<ShopExpenseEntity>)
+
+    @Update
+    suspend fun updateExpense(expense: ShopExpenseEntity)
 
     @Query("UPDATE shop_expenses SET isVoided = 1, voidReason = :reason WHERE id = :expenseId")
     suspend fun voidExpense(expenseId: String, reason: String)
@@ -280,4 +311,106 @@ interface HeldBillDao {
 
     @Query("DELETE FROM held_bills WHERE id = :id")
     suspend fun deleteHeldBill(id: String)
+}
+
+@Dao
+interface PigmyDepositDao {
+    @Query("SELECT * FROM pigmy_deposits ORDER BY paidTimestamp DESC")
+    fun getAllDeposits(): Flow<List<PigmyDepositEntity>>
+
+    @Query("SELECT * FROM pigmy_deposits WHERE isVoided = 0 ORDER BY paidTimestamp DESC")
+    fun getActiveDeposits(): Flow<List<PigmyDepositEntity>>
+
+    @Query("SELECT * FROM pigmy_deposits WHERE paidTimestamp >= :startTime AND paidTimestamp <= :endTime ORDER BY paidTimestamp DESC")
+    fun getDepositsInRange(startTime: Long, endTime: Long): Flow<List<PigmyDepositEntity>>
+
+    @Query("SELECT * FROM pigmy_deposits WHERE id = :id")
+    suspend fun getDepositById(id: String): PigmyDepositEntity?
+
+    @Query("SELECT SUM(amountPaise) FROM pigmy_deposits WHERE isVoided = 0")
+    fun getTotalRecordedDepositsPaise(): Flow<Long?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDeposit(deposit: PigmyDepositEntity)
+
+    @Update
+    suspend fun updateDeposit(deposit: PigmyDepositEntity)
+
+    @Query("UPDATE pigmy_deposits SET isVoided = 1, voidReason = :reason, updatedAt = :timestamp WHERE id = :id")
+    suspend fun voidDeposit(id: String, reason: String, timestamp: Long = System.currentTimeMillis())
+}
+
+@Dao
+interface ProductGiveawayDao {
+    @Query("SELECT * FROM product_giveaways ORDER BY timestamp DESC")
+    fun getAllGiveaways(): Flow<List<ProductGiveawayEntity>>
+
+    @Query("SELECT * FROM product_giveaways WHERE isCancelled = 0 ORDER BY timestamp DESC")
+    fun getActiveGiveaways(): Flow<List<ProductGiveawayEntity>>
+
+    @Query("SELECT * FROM product_giveaways WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
+    fun getGiveawaysInRange(startTime: Long, endTime: Long): Flow<List<ProductGiveawayEntity>>
+
+    @Query("SELECT * FROM product_giveaways WHERE id = :id")
+    suspend fun getGiveawayById(id: String): ProductGiveawayEntity?
+
+    @Query("SELECT SUM(quantityBase * COALESCE(unitCostSnapshotPaise, 0)) FROM product_giveaways WHERE isCancelled = 0 AND timestamp >= :startTime AND timestamp <= :endTime")
+    fun getTotalGiveawayCostInRange(startTime: Long, endTime: Long): Flow<Long?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGiveaway(giveaway: ProductGiveawayEntity)
+
+    @Query("UPDATE product_giveaways SET isCancelled = 1, cancelledTimestamp = :timestamp WHERE id = :id")
+    suspend fun cancelGiveaway(id: String, timestamp: Long = System.currentTimeMillis())
+}
+
+@Dao
+interface ServiceDefinitionDao {
+    @Query("SELECT * FROM service_definitions WHERE isArchived = 0 ORDER BY name ASC")
+    fun getAllActiveServices(): Flow<List<ServiceDefinitionEntity>>
+
+    @Query("SELECT * FROM service_definitions ORDER BY name ASC")
+    fun getAllServices(): Flow<List<ServiceDefinitionEntity>>
+
+    @Query("SELECT * FROM service_definitions WHERE id = :id")
+    suspend fun getServiceById(id: String): ServiceDefinitionEntity?
+
+    @Query("SELECT * FROM service_definitions WHERE LOWER(name) = LOWER(:name) AND isArchived = 0 LIMIT 1")
+    suspend fun getServiceByName(name: String): ServiceDefinitionEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertService(service: ServiceDefinitionEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertServices(services: List<ServiceDefinitionEntity>)
+
+    @Update
+    suspend fun updateService(service: ServiceDefinitionEntity)
+
+    @Query("UPDATE service_definitions SET isArchived = 1 WHERE id = :id")
+    suspend fun archiveService(id: String)
+}
+
+@Dao
+interface SyncEventDao {
+    @Query("SELECT * FROM sync_events WHERE status = 'PENDING' ORDER BY timestamp ASC")
+    suspend fun getPendingEvents(): List<SyncEventEntity>
+
+    @Query("SELECT COUNT(*) FROM sync_events WHERE status = 'PENDING'")
+    fun getPendingCount(): Flow<Int>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvent(event: SyncEventEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvents(events: List<SyncEventEntity>)
+
+    @Query("UPDATE sync_events SET status = :status WHERE id = :id")
+    suspend fun updateEventStatus(id: String, status: String)
+
+    @Query("DELETE FROM sync_events WHERE id = :id")
+    suspend fun deleteEvent(id: String)
+
+    @Query("SELECT * FROM sync_events WHERE entityId = :entityId LIMIT 1")
+    suspend fun getEventByEntityId(entityId: String): SyncEventEntity?
 }
