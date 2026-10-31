@@ -9,6 +9,7 @@ import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.ProductEntity
 import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
+import com.alieducational.app.data.local.entity.ServiceDefinitionEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
@@ -26,6 +27,8 @@ import com.alieducational.app.data.service.ImportExportService
 import com.alieducational.app.data.service.ImportResult
 import com.alieducational.app.data.service.ReceiptService
 import com.alieducational.app.data.service.SpreadsheetPreview
+import com.alieducational.app.data.service.SyncConnectionState
+import com.alieducational.app.data.service.TwoPhoneSyncService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,23 +37,30 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import javax.inject.Inject
 
 data class BillingDraftItem(
+    val lineId: String = UUID.randomUUID().toString(),
     val productId: String,
     val productName: String,
     val urduName: String? = null,
-    val unitType: String = "PIECE", // "PIECE" or "PACK"
+    val unitType: String = "PIECE", // "PIECE", "PACK", "SERVICE"
     val packSize: Int = 1,
-    val quantity: Int = 1, // number of chosen units (pieces or packs)
+    val quantity: Int = 1, // number of chosen units (pieces, packs, sides, copies, sheets)
     val unitPricePaise: Long = 0L, // selling price per chosen unit
-    val movingAvgCostPaise: Long = 0L
+    val movingAvgCostPaise: Long = 0L,
+    val lineType: String = "PRODUCT", // "PRODUCT" or "SERVICE"
+    val serviceId: String? = null,
+    val serviceName: String? = null,
+    val serviceOption: String? = null, // e.g. "A4 B&W", "A4 Colour"
+    val unitLabel: String? = null // e.g. "sides", "copies", "sheets"
 ) {
     val totalPieces: Int
-        get() = if (unitType == "PACK") quantity * packSize else quantity
+        get() = if (lineType == "SERVICE") 0 else if (unitType == "PACK") quantity * packSize else quantity
 
     val lineGrossPaise: Long
         get() = quantity.toLong() * unitPricePaise
@@ -106,8 +116,26 @@ class AliViewModel @Inject constructor(
     private val importExportService: ImportExportService,
     private val backupService: BackupRestoreService,
     val receiptService: ReceiptService,
-    val cashTrackerExcelService: CashTrackerExcelService
+    val cashTrackerExcelService: CashTrackerExcelService,
+    val twoPhoneSyncService: TwoPhoneSyncService
 ) : ViewModel() {
+
+    val syncConnectionState: StateFlow<SyncConnectionState> = twoPhoneSyncService.connectionState
+
+    fun startSyncServer(port: Int = 8080) {
+        twoPhoneSyncService.startOwnerServer(port)
+    }
+
+    fun stopSyncServer() {
+        twoPhoneSyncService.stopOwnerServer()
+    }
+
+    fun syncWithMainPhone(host: String, port: Int = 8080, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = twoPhoneSyncService.syncWithMainPhone(host, port)
+            onResult(success)
+        }
+    }
 
     // ── Preferences ────────────────────────────────────────────────────
     val isDarkTheme: StateFlow<Boolean> = preferences.themeMode
@@ -132,9 +160,43 @@ class AliViewModel @Inject constructor(
     val shopName: StateFlow<String> = preferences.shopName
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Ali Educational")
 
+    val pigmyUsualAmountPaise: StateFlow<Long> = preferences.pigmyUsualAmountPaise
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 100000L)
+
+    val deviceRole: StateFlow<String> = preferences.deviceRole
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OWNER")
+
+    val deviceId: StateFlow<String> = preferences.deviceId
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "device-main")
+
+    val pairedOwnerHost: StateFlow<String> = preferences.pairedOwnerHost
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    val allPigmyDeposits = repository.allPigmyDeposits
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activePigmyDeposits = repository.activePigmyDeposits
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalPigmyDepositsPaise = repository.totalPigmyDepositsPaise
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val allGiveaways = repository.allGiveaways
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeGiveaways = repository.activeGiveaways
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeServices = repository.activeServices
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingSyncCount = repository.pendingSyncCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     init {
         viewModelScope.launch {
             preferences.setAppLanguage("en")
+            repository.ensurePredefinedServices()
         }
     }
 
@@ -648,11 +710,17 @@ class AliViewModel @Inject constructor(
             try {
                 val saleItems = state.items.map { item ->
                     SaleItemParam(
-                        productId = item.productId,
+                        productId = if (item.lineType == "SERVICE") null else item.productId,
                         productName = item.productName,
-                        quantityBase = item.totalPieces,
+                        quantityBase = if (item.lineType == "SERVICE") item.quantity else item.totalPieces,
                         isPack = item.unitType == "PACK",
-                        unitSellingPricePaise = item.unitPricePaise
+                        unitSellingPricePaise = item.unitPricePaise,
+                        lineId = item.lineId,
+                        lineType = item.lineType,
+                        serviceId = item.serviceId,
+                        serviceName = item.serviceName,
+                        serviceOption = item.serviceOption,
+                        unitLabel = item.unitLabel
                     )
                 }
 
@@ -674,6 +742,7 @@ class AliViewModel @Inject constructor(
                     state.discountValuePaise / 100.0
                 }
 
+                val devId = deviceId.value
                 val sale = repository.recordSale(
                     customerId = state.customer?.id,
                     customerName = state.customer?.name,
@@ -682,7 +751,8 @@ class AliViewModel @Inject constructor(
                     discountInput = discountInput,
                     amountReceivedPaise = amountPaid,
                     paymentMethod = state.paymentMethod,
-                    notes = null
+                    notes = null,
+                    originDeviceId = devId
                 )
 
                 _billingState.value = _billingState.value.copy(lastSavedSale = sale)
@@ -699,6 +769,7 @@ class AliViewModel @Inject constructor(
         val array = JSONArray()
         for (item in items) {
             val obj = JSONObject()
+            obj.put("lineId", item.lineId)
             obj.put("productId", item.productId)
             obj.put("productName", item.productName)
             obj.put("urduName", item.urduName ?: "")
@@ -707,6 +778,11 @@ class AliViewModel @Inject constructor(
             obj.put("quantity", item.quantity)
             obj.put("unitPricePaise", item.unitPricePaise)
             obj.put("movingAvgCostPaise", item.movingAvgCostPaise)
+            obj.put("lineType", item.lineType)
+            obj.put("serviceId", item.serviceId ?: "")
+            obj.put("serviceName", item.serviceName ?: "")
+            obj.put("serviceOption", item.serviceOption ?: "")
+            obj.put("unitLabel", item.unitLabel ?: "")
             array.put(obj)
         }
         return array.toString()
@@ -720,6 +796,7 @@ class AliViewModel @Inject constructor(
                 val obj = array.getJSONObject(i)
                 list.add(
                     BillingDraftItem(
+                        lineId = obj.optString("lineId").ifBlank { UUID.randomUUID().toString() },
                         productId = obj.getString("productId"),
                         productName = obj.getString("productName"),
                         urduName = obj.optString("urduName").ifBlank { null },
@@ -727,7 +804,12 @@ class AliViewModel @Inject constructor(
                         packSize = obj.optInt("packSize", 1),
                         quantity = obj.optInt("quantity", 1),
                         unitPricePaise = obj.optLong("unitPricePaise", 0L),
-                        movingAvgCostPaise = obj.optLong("movingAvgCostPaise", 0L)
+                        movingAvgCostPaise = obj.optLong("movingAvgCostPaise", 0L),
+                        lineType = obj.optString("lineType", "PRODUCT"),
+                        serviceId = obj.optString("serviceId").ifBlank { null },
+                        serviceName = obj.optString("serviceName").ifBlank { null },
+                        serviceOption = obj.optString("serviceOption").ifBlank { null },
+                        unitLabel = obj.optString("unitLabel").ifBlank { null }
                     )
                 )
             }
@@ -948,6 +1030,180 @@ class AliViewModel @Inject constructor(
             preferences.setAppLanguage(language)
             preferences.setLockEnabled(lockEnabled)
             preferences.setFirstLaunch(false)
+        }
+    }
+
+    // ── Pigmy Savings Actions ──────────────────────────────────────────
+    fun setPigmyUsualAmount(amountPaise: Long) {
+        viewModelScope.launch {
+            preferences.setPigmyUsualAmountPaise(amountPaise)
+        }
+    }
+
+    fun recordPigmyDeposit(
+        amountPaise: Long,
+        paymentSource: String = "CASH",
+        notes: String? = null,
+        paidTimestamp: Long = System.currentTimeMillis(),
+        onDone: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val id = repository.recordPigmyDeposit(amountPaise, paymentSource, notes, paidTimestamp)
+            onDone(id)
+        }
+    }
+
+    fun voidPigmyDeposit(depositId: String, reason: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.voidPigmyDeposit(depositId, reason)
+            onDone()
+        }
+    }
+
+    // ── Product Giveaways & Donations Actions ──────────────────────────
+    fun recordProductGiveaway(
+        productId: String,
+        quantityBase: Int,
+        isPack: Boolean = false,
+        packSizeSnapshot: Int = 1,
+        reason: String = "FREE_ITEM",
+        recipientNote: String? = null,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.recordProductGiveaway(
+                productId = productId,
+                quantityBase = quantityBase,
+                isPack = isPack,
+                packSizeSnapshot = packSizeSnapshot,
+                reason = reason,
+                recipientNote = recipientNote
+            )
+            onDone()
+        }
+    }
+
+    fun cancelProductGiveaway(giveawayId: String, reason: String? = null, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.cancelProductGiveaway(giveawayId, reason)
+            onDone()
+        }
+    }
+
+    // ── Services Actions ───────────────────────────────────────────────
+    fun addCustomService(name: String, unitLabel: String, onDone: (ServiceDefinitionEntity) -> Unit = {}) {
+        viewModelScope.launch {
+            val svc = repository.addCustomService(name, unitLabel)
+            onDone(svc)
+        }
+    }
+
+    fun archiveService(serviceId: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.archiveService(serviceId)
+            onDone()
+        }
+    }
+
+    fun addServiceToBill(
+        serviceName: String,
+        option: String?,
+        unitLabel: String,
+        quantity: Int,
+        unitRatePaise: Long,
+        serviceId: String? = null
+    ) {
+        val currentItems = _billingState.value.items.toMutableList()
+        val displayName = if (!option.isNullOrBlank()) "$serviceName — $option" else serviceName
+        val serviceLine = BillingDraftItem(
+            lineId = java.util.UUID.randomUUID().toString(),
+            productId = serviceId ?: "SERVICE_${serviceName.uppercase().replace(" ", "_")}",
+            productName = displayName,
+            urduName = null,
+            unitType = "SERVICE",
+            packSize = 1,
+            quantity = quantity,
+            unitPricePaise = unitRatePaise,
+            movingAvgCostPaise = 0L,
+            lineType = "SERVICE",
+            serviceId = serviceId,
+            serviceName = serviceName,
+            serviceOption = option,
+            unitLabel = unitLabel
+        )
+        currentItems.add(serviceLine)
+        _billingState.value = _billingState.value.copy(
+            items = currentItems,
+            lastAddedItem = serviceLine
+        )
+    }
+
+    fun updateItemPrice(lineId: String, newPricePaise: Long) {
+        val currentItems = _billingState.value.items.toMutableList()
+        val index = currentItems.indexOfFirst { it.lineId == lineId }
+        if (index >= 0) {
+            val item = currentItems[index]
+            currentItems[index] = item.copy(unitPricePaise = newPricePaise)
+            _billingState.value = _billingState.value.copy(items = currentItems)
+        }
+    }
+
+    fun updateItemQuantity(lineId: String, newQuantity: Int) {
+        val currentItems = _billingState.value.items.toMutableList()
+        val index = currentItems.indexOfFirst { it.lineId == lineId }
+        if (index >= 0) {
+            if (newQuantity <= 0) {
+                currentItems.removeAt(index)
+            } else {
+                currentItems[index] = currentItems[index].copy(quantity = newQuantity)
+            }
+            _billingState.value = _billingState.value.copy(items = currentItems)
+        }
+    }
+
+    fun removeItemFromBill(lineId: String) {
+        val currentItems = _billingState.value.items.toMutableList()
+        currentItems.removeAll { it.lineId == lineId }
+        _billingState.value = _billingState.value.copy(items = currentItems)
+    }
+
+    fun recordServiceExpense(
+        category: String,
+        amountPaise: Long,
+        serviceTarget: String,
+        notes: String? = null,
+        attachmentUri: String? = null,
+        timestamp: Long = System.currentTimeMillis(),
+        onDone: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val id = repository.recordServiceExpense(
+                category = category,
+                amountPaise = amountPaise,
+                serviceTarget = serviceTarget,
+                notes = notes,
+                attachmentUri = attachmentUri,
+                timestamp = timestamp
+            )
+            onDone(id)
+        }
+    }
+
+    fun getServiceExpensesInRange(startTime: Long, endTime: Long) =
+        repository.getServiceExpensesInRange(startTime, endTime)
+
+    fun getServiceLinesInRange(startTime: Long, endTime: Long) =
+        repository.getServiceLinesInRange(startTime, endTime)
+
+    fun setDeviceRole(role: String) {
+        viewModelScope.launch {
+            preferences.setDeviceRole(role)
+        }
+    }
+
+    fun setPairedOwnerHost(host: String) {
+        viewModelScope.launch {
+            preferences.setPairedOwnerHost(host)
         }
     }
 }

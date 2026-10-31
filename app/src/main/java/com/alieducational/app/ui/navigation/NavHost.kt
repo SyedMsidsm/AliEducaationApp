@@ -21,6 +21,7 @@ import com.alieducational.app.ui.more.ExpensesScreen
 import com.alieducational.app.ui.reports.CashTrackerScreen
 import com.alieducational.app.ui.more.MoreScreen
 import com.alieducational.app.ui.reports.ProfitScreen
+import com.alieducational.app.ui.pigmy.PigmySavingsScreen
 import com.alieducational.app.ui.sales.RecordDailyTotalScreen
 import com.alieducational.app.ui.sales.RecordSaleScreen
 import com.alieducational.app.ui.settings.SettingsScreen
@@ -278,6 +279,13 @@ fun AppNavigation(
 
         composable(Screen.BackupRestore.route) {
             BackupRestoreScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.PigmySavings.route) {
+            PigmySavingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )

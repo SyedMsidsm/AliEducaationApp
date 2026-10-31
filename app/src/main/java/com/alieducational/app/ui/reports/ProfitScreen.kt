@@ -1,6 +1,7 @@
 package com.alieducational.app.ui.reports
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,24 +17,36 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,8 +59,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import java.text.SimpleDateFormat
@@ -66,9 +81,12 @@ fun ProfitScreen(
     val allSales by viewModel.allSales.collectAsState()
     val allSaleLines by viewModel.allSaleLines.collectAsState()
     val allExpenses by viewModel.allExpenses.collectAsState()
-    val unresolvedStockSales by viewModel.unresolvedStockSales.collectAsState()
+    val deviceRole by viewModel.deviceRole.collectAsState()
 
+    val isOwner = deviceRole == "OWNER"
+    var activeTab by remember { mutableStateOf("PRODUCTS") } // PRODUCTS or SERVICES
     var selectedPeriod by remember { mutableStateOf("All Time") } // "Today", "This Week", "This Month", "All Time"
+    var showAddExpenseDialog by remember { mutableStateOf(false) }
 
     // Calculate time boundaries
     val now = System.currentTimeMillis()
@@ -104,33 +122,44 @@ fun ProfitScreen(
     val periodSales = allSales.filter { !it.isVoided && it.timestamp in startTime..endTime }
     val periodSaleIds = periodSales.map { it.id }.toSet()
     val periodSaleLines = allSaleLines.filter { it.saleId in periodSaleIds }
-    val periodExpenses = allExpenses.filter { !it.isVoided && !it.isIncome && it.timestamp in startTime..endTime }
 
-    // Core Financial Metrics
-    val totalRevenuePaise = periodSales.sumOf { it.netTotalPaise }
-    val totalCogsPaise = periodSaleLines.sumOf { line ->
+    // Retail Product metrics (exclude service lines)
+    val periodProductLines = periodSaleLines.filter { it.lineType != "SERVICE" }
+    val productRevenuePaise: Long = periodProductLines.sumOf { it.lineNetPaise }
+    val productCogsPaise: Long = periodProductLines.sumOf { line ->
         line.quantityBase.toLong() * (line.unitCostSnapshotPaise ?: 0L)
     }
-    val grossProfitPaise = totalRevenuePaise - totalCogsPaise
-    val grossMarginPct = if (totalRevenuePaise > 0) (grossProfitPaise.toDouble() / totalRevenuePaise.toDouble()) * 100.0 else 0.0
+    val productGrossProfitPaise: Long = productRevenuePaise - productCogsPaise
+    val productGrossMarginPct = if (productRevenuePaise > 0) (productGrossProfitPaise.toDouble() / productRevenuePaise.toDouble()) * 100.0 else 0.0
 
-    val totalExpensesPaise = periodExpenses.sumOf { it.amountPaise }
-    val netProfitPaise = grossProfitPaise - totalExpensesPaise
-    val netMarginPct = if (totalRevenuePaise > 0) (netProfitPaise.toDouble() / totalRevenuePaise.toDouble()) * 100.0 else 0.0
+    // Operating expenses: Exclude Pigmy savings transfers and exclude service supply expenses
+    val periodGeneralExpenses = allExpenses.filter {
+        !it.isVoided && !it.isIncome && !it.isSavingsTransfer && it.category != "SERVICE_EXPENSE" && it.timestamp in startTime..endTime
+    }
+    val totalGeneralExpensesPaise: Long = periodGeneralExpenses.sumOf { it.amountPaise }
+    val productNetProfitPaise: Long = productGrossProfitPaise - totalGeneralExpensesPaise
+    val productNetMarginPct = if (productRevenuePaise > 0) (productNetProfitPaise.toDouble() / productRevenuePaise.toDouble()) * 100.0 else 0.0
 
-    // Potential inventory gross profit (independent of period)
-    val expectedGrossProfitPaise = allProducts.sumOf { p ->
+    // Potential inventory gross profit
+    val expectedGrossProfitPaise: Long = allProducts.sumOf { p ->
         val potentialRevenue = p.currentSellableStock.toLong() * p.sellingPricePiecePaise
         val costValue = p.currentSellableStock.toLong() * p.movingAvgCostPaise
         potentialRevenue - costValue
     }
 
-    val itemizedPeriodSales = periodSales.filter { !it.isSummaryEntry }
+    // Services metrics
+    val periodServiceLines = periodSaleLines.filter { it.lineType == "SERVICE" }
+    val serviceRevenuePaise: Long = periodServiceLines.sumOf { it.lineNetPaise }
+    val periodServiceExpenses = allExpenses.filter {
+        !it.isVoided && !it.isIncome && it.category == "SERVICE_EXPENSE" && it.timestamp in startTime..endTime
+    }
+    val totalServiceExpensesPaise: Long = periodServiceExpenses.sumOf { it.amountPaise }
+    val serviceDifferencePaise: Long = serviceRevenuePaise - totalServiceExpensesPaise
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Financial & Profit Report", fontWeight = FontWeight.Bold) },
+                title = { Text("Sales & Profit", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -155,6 +184,28 @@ fun ProfitScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Tab Switcher (Services tab visible only for Owner)
+                if (isOwner) {
+                    item {
+                        TabRow(
+                            selectedTabIndex = if (activeTab == "PRODUCTS") 0 else 1,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        ) {
+                            Tab(
+                                selected = activeTab == "PRODUCTS",
+                                onClick = { activeTab = "PRODUCTS" },
+                                text = { Text("Products", fontWeight = FontWeight.Bold) }
+                            )
+                            Tab(
+                                selected = activeTab == "SERVICES",
+                                onClick = { activeTab = "SERVICES" },
+                                text = { Text("Services (Owner)", fontWeight = FontWeight.Bold) }
+                            )
+                        }
+                    }
+                }
+
                 // Period Filter Tabs
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -177,290 +228,406 @@ fun ProfitScreen(
                     }
                 }
 
-                // Primary Net Profit Highlight Card
-                item {
-                    val isProfitPositive = netProfitPaise >= 0
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isProfitPositive) Color(0xFF1B3828) else Color(0xFF3E1B1B)
-                        ),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(18.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = if (isProfitPositive) Icons.Filled.TrendingUp else Icons.Filled.TrendingDown,
-                                        contentDescription = null,
-                                        tint = if (isProfitPositive) Color(0xFF75B890) else Color(0xFFE57373),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Net Operating Profit ($selectedPeriod)",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = Color.White
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            if (isProfitPositive) Color(0xFF75B890).copy(alpha = 0.2f) else Color(0xFFE57373).copy(alpha = 0.2f),
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                if (activeTab == "PRODUCTS" || !isOwner) {
+                    // ── PRODUCTS TAB CONTENT ───────────────────────────
+                    item {
+                        val isProfitPositive = productNetProfitPaise >= 0
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isProfitPositive) Color(0xFF1B3828) else Color(0xFF3E1B1B)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(18.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = if (isProfitPositive) Icons.Filled.TrendingUp else Icons.Filled.TrendingDown,
+                                            contentDescription = null,
+                                            tint = if (isProfitPositive) Color(0xFF75B890) else Color(0xFFE57373),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Product Net Profit ($selectedPeriod)",
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                     Text(
-                                        text = String.format(Locale.US, "%.1f%% Net", netMarginPct),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        text = "${String.format(Locale.getDefault(), "%.1f", productNetMarginPct)}%",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                         color = if (isProfitPositive) Color(0xFF75B890) else Color(0xFFE57373)
                                     )
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Text(
-                                text = (if (netProfitPaise < 0) "-" else "") + CostCalculator.formatPaiseToRupees(kotlin.math.abs(netProfitPaise)),
-                                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
-                                color = if (isProfitPositive) Color(0xFF75B890) else Color(0xFFE57373)
-                            )
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Gross profit minus all recorded shop expenses (rent, electricity, etc.) for $selectedPeriod.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-                }
-
-                // 4-Row Financial Summary Card (Revenue, COGS, Gross Profit, Expenses)
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                text = "Financial Breakdown ($selectedPeriod)",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-
-                            // 1. Total Revenue
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("1. Total Sales Revenue", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                    Text("${periodSales.size} completed sales", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = CostCalculator.formatPaiseToRupees(totalRevenuePaise),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = CostCalculator.formatPaiseToRupees(productNetProfitPaise),
+                                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isProfitPositive) Color(0xFF75B890) else Color(0xFFE57373)
                                 )
-                            }
 
-                            // 2. COGS
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("2. Cost of Goods Sold (COGS)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                    Text("Moving avg cost & allocated delivery", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "-${CostCalculator.formatPaiseToRupees(totalCogsPaise)}",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFE4B765)
-                                )
-                            }
-
-                            // 3. Gross Profit
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("Gross Profit (1 - 2)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                                    Text(String.format(Locale.US, "%.1f%% Gross Margin", grossMarginPct), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                }
-                                Text(
-                                    text = CostCalculator.formatPaiseToRupees(grossProfitPaise),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-
-                            // 4. Shop Expenses
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("3. Shop Operating Expenses", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                    Text("${periodExpenses.size} recorded expense entries", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Text(
-                                    text = "-${CostCalculator.formatPaiseToRupees(totalExpensesPaise)}",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFE57373)
+                                    text = "Gross Profit ${CostCalculator.formatPaiseToRupees(productGrossProfitPaise)} minus Expenses ${CostCalculator.formatPaiseToRupees(totalGeneralExpensesPaise)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     }
-                }
 
-                // Inventory Potential Gross Profit Card
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Expected Profit on Current Stock",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Estimated profit if all current warehouse/shelf stock is sold at saved retail prices.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = CostCalculator.formatPaiseToRupees(expectedGrossProfitPaise),
-                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF75B890)
-                            )
-                        }
-                    }
-                }
-
-                // Incomplete Coverage Warning
-                if (unresolvedStockSales.isNotEmpty()) {
                     item {
-                        Card(
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFE4B765).copy(alpha = 0.15f)),
-                            shape = RoundedCornerShape(14.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Warning, contentDescription = null, tint = Color(0xFFE4B765), modifier = Modifier.size(26.dp))
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("Product Sales", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "${unresolvedStockSales.size} Sales Need Stock Details",
-                                        fontWeight = FontWeight.Bold,
+                                        CostCalculator.formatPaiseToRupees(productRevenuePaise),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+                                }
+                            }
+
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("Cost of Goods Sold", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Daily cash totals exist without item details. Actual profit calculation is marked incomplete for those records.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        CostCalculator.formatPaiseToRupees(productCogsPaise),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
                         }
                     }
-                }
 
-                // Sales Breakdown List
-                item {
-                    Text(
-                        text = "Sales in this period (${itemizedPeriodSales.size})",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-
-                if (itemizedPeriodSales.isEmpty()) {
                     item {
-                        Text(
-                            text = "No sales recorded in this period.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    val dateFormat = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
-                    items(itemizedPeriodSales) { sale ->
-                        val saleLines = periodSaleLines.filter { it.saleId == sale.id }
-                        val saleCogsPaise = saleLines.sumOf { it.quantityBase.toLong() * (it.unitCostSnapshotPaise ?: 0L) }
-                        val saleProfitPaise = sale.netTotalPaise - saleCogsPaise
-
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(12.dp)
                         ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Inventory Gross Potential", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text(
+                                        CostCalculator.formatPaiseToRupees(expectedGrossProfitPaise),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Projected gross profit when current warehouse stock is fully sold at marked prices.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // ── SERVICES TAB CONTENT (OWNER ONLY) ───────────────
+                    // Prominent Disclaimer Box
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2411)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Icon(
+                                    imageVector = Icons.Filled.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFFE4B765),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Not exact service profit. Supplies may be used across months, and some sales may be unpaid.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFF0D69A)
+                                )
+                            }
+                        }
+                    }
+
+                    // Services Summary Cards (3 metrics)
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (serviceDifferencePaise >= 0) Color(0xFF1B3828) else Color(0xFF3E1B1B)
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Revenue Minus Recorded Expenses", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Receipt ${sale.receiptNumber ?: sale.id.take(8)}",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        text = CostCalculator.formatPaiseToRupees(serviceDifferencePaise),
+                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (serviceDifferencePaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
                                     )
-                                    Text(
-                                        text = dateFormat.format(Date(sale.timestamp)),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    if (!sale.customerName.isNullOrBlank()) {
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text("Service Sales", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "Customer: ${sale.customerName}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            CostCalculator.formatPaiseToRupees(serviceRevenuePaise),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
 
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "Sale: ${CostCalculator.formatPaiseToRupees(sale.netTotalPaise)}",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Profit: +${CostCalculator.formatPaiseToRupees(saleProfitPaise)}",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                        color = Color(0xFF75B890)
-                                    )
+                                Card(
+                                    modifier = Modifier.weight(1f),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text("Service Expenses", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            CostCalculator.formatPaiseToRupees(totalServiceExpensesPaise),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = Color(0xFFE57373)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Recorded Service Expenses Header with "+ Add Expense"
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Recorded Service Expenses",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Button(
+                                onClick = { showAddExpenseDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                contentPadding = ButtonDefaults.TextButtonContentPadding
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add Expense", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (periodServiceExpenses.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Box(modifier = Modifier.padding(20.dp), contentAlignment = Alignment.Center) {
+                                    Text("No service expenses recorded for $selectedPeriod", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    } else {
+                        items(periodServiceExpenses) { exp ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${exp.expenseCategory ?: "Supply"} · ${exp.serviceTarget ?: "Shared"}",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        val dateStr = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(exp.timestamp))
+                                        Text(
+                                            text = "$dateStr ${if (!exp.notes.isNullOrBlank()) "· " + exp.notes else ""}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = CostCalculator.formatPaiseToRupees(exp.amountPaise),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = Color(0xFFE57373)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = { viewModel.voidExpense(exp.id, "Voided by user") },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.DeleteOutline,
+                                                contentDescription = "Void",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                item { Spacer(modifier = Modifier.height(24.dp)) }
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
             }
         }
     }
+
+    if (showAddExpenseDialog) {
+        AddServiceExpenseDialog(
+            onDismiss = { showAddExpenseDialog = false },
+            onSave = { category, target, amountPaise, notes ->
+                viewModel.recordServiceExpense(
+                    category = category,
+                    amountPaise = amountPaise,
+                    serviceTarget = target,
+                    notes = notes
+                )
+                showAddExpenseDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun AddServiceExpenseDialog(
+    onDismiss: () -> Unit,
+    onSave: (category: String, target: String, amountPaise: Long, notes: String?) -> Unit
+) {
+    val categories = listOf("Paper", "Ink / Toner", "Sticker sheets", "Machine repair", "Other")
+    val targets = listOf("Printing", "Photocopying", "Sticker printing", "Shared")
+
+    var selectedCategory by remember { mutableStateOf(categories.first()) }
+    var selectedTarget by remember { mutableStateOf(targets.first()) }
+    var amountText by remember { mutableStateOf("") }
+    var notesText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Service Expense", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Supply Category", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text(cat, fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                Text("Service Target", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(targets) { tgt ->
+                        FilterChip(
+                            selected = selectedTarget == tgt,
+                            onClick = { selectedTarget = tgt },
+                            label = { Text(tgt, fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Amount (₹) *") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                OutlinedTextField(
+                    value = notesText,
+                    onValueChange = { notesText = it },
+                    label = { Text("Notes (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amt = amountText.toDoubleOrNull() ?: 0.0
+                    if (amt > 0.0) {
+                        onSave(selectedCategory, selectedTarget, (amt * 100).toLong(), notesText.trim().ifBlank { null })
+                    }
+                },
+                enabled = (amountText.toDoubleOrNull() ?: 0.0) > 0.0,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Save Expense")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

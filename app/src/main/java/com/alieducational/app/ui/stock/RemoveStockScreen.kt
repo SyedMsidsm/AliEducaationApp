@@ -63,12 +63,16 @@ fun RemoveStockScreen(
     var selectedProduct by remember { mutableStateOf<ProductEntity?>(null) }
     var productExpanded by remember { mutableStateOf(false) }
 
-    var movementType by remember { mutableStateOf("DAMAGE") } // DAMAGE, SHOP_USE, GIVEAWAY, RETURN, CORRECTION
+    var isPack by remember { mutableStateOf(false) }
+    var recipientNote by remember { mutableStateOf("") }
+    var movementType by remember { mutableStateOf("DAMAGE") } // DAMAGE, SHOP_USE, FREE_ITEM, DONATION, RETURN, CORRECTION
     var quantityStr by remember { mutableStateOf("1") }
     var countedTotalStr by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
 
-    val quantity = quantityStr.toIntOrNull() ?: 0
+    val rawQuantity = quantityStr.toIntOrNull() ?: 0
+    val packSize = selectedProduct?.packSize ?: 1
+    val baseQuantity = if (isPack) rawQuantity * packSize else rawQuantity
     val countedTotal = countedTotalStr.toIntOrNull()
 
     Scaffold(
@@ -203,9 +207,10 @@ fun RemoveStockScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         val options = listOf(
+                            "FREE_ITEM" to "Giveaway (Free Item / Sample)",
+                            "DONATION" to "Donation (Charity / Educational Gift)",
                             "DAMAGE" to "Damaged / Broken (Move to Damaged Stock)",
                             "SHOP_USE" to "Shop Use (e.g. pens, paper used in shop)",
-                            "GIVEAWAY" to "Giveaway / Sample / Gift",
                             "RETURN" to "Supplier Return",
                             "CORRECTION" to "Physical Count Counted Total Correction"
                         )
@@ -240,6 +245,27 @@ fun RemoveStockScreen(
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
+                        val isGiveawayOrDonation = movementType == "FREE_ITEM" || movementType == "DONATION"
+
+                        if (selectedProduct != null && selectedProduct!!.packSize > 1 && movementType != "CORRECTION") {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                androidx.compose.material3.FilterChip(
+                                    selected = !isPack,
+                                    onClick = { isPack = false },
+                                    label = { Text("Loose Pieces") }
+                                )
+                                androidx.compose.material3.FilterChip(
+                                    selected = isPack,
+                                    onClick = { isPack = true },
+                                    label = { Text("Full Packs (${selectedProduct!!.packSize} pcs/pack)") }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
                         if (movementType == "CORRECTION") {
                             OutlinedTextField(
                                 value = countedTotalStr,
@@ -260,28 +286,74 @@ fun RemoveStockScreen(
                                 )
                             }
                         } else {
+                            val unitLabel = if (isPack) "packs" else "pieces"
                             OutlinedTextField(
                                 value = quantityStr,
                                 onValueChange = { quantityStr = it },
-                                label = { Text("Quantity to Remove (pieces)") },
+                                label = { Text("Quantity to Remove ($unitLabel)") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp)
                             )
 
-                            if (selectedProduct != null && quantity > selectedProduct!!.currentSellableStock) {
+                            if (isPack && selectedProduct != null) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "$rawQuantity packs = $baseQuantity total pieces leaving stock",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            if (selectedProduct != null && baseQuantity > selectedProduct!!.currentSellableStock) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Filled.Warning, contentDescription = null, tint = Color(0xFFE4B765), modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "Quantity exceeds current stock (${selectedProduct!!.currentSellableStock} pcs)",
+                                        text = "Quantity ($baseQuantity pcs) exceeds current stock (${selectedProduct!!.currentSellableStock} pcs)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color(0xFFE4B765)
                                     )
                                 }
                             }
+                        }
+
+                        if (isGiveawayOrDonation && selectedProduct != null) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            val costPaise = selectedProduct!!.movingAvgCostPaise
+                            val totalCostPaise = costPaise * baseQuantity
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = if (costPaise > 0) "Known unit cost: ${com.alieducational.app.domain.calculation.CostCalculator.formatPaiseToRupees(costPaise)}/pc • Total cost: ${com.alieducational.app.domain.calculation.CostCalculator.formatPaiseToRupees(totalCostPaise)}"
+                                        else "Purchase cost: Unknown (Cost snapshot marked incomplete)",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Reduces sellable stock. Creates zero sales revenue, bill payment or customer credit.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = recipientNote,
+                                onValueChange = { recipientNote = it },
+                                label = { Text("Recipient / Purpose (Optional)") },
+                                placeholder = { Text("e.g. Student aid, Madrasa, Sample for teacher") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp)
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -301,22 +373,34 @@ fun RemoveStockScreen(
                 Button(
                     onClick = {
                         val product = selectedProduct ?: return@Button
-                        val change = if (movementType == "CORRECTION") {
-                            (countedTotal ?: product.currentSellableStock) - product.currentSellableStock
+                        if (movementType == "FREE_ITEM" || movementType == "DONATION") {
+                            viewModel.recordProductGiveaway(
+                                productId = product.id,
+                                quantityBase = baseQuantity,
+                                isPack = isPack,
+                                packSizeSnapshot = packSize,
+                                reason = movementType,
+                                recipientNote = recipientNote.trim().ifBlank { reason.trim().ifBlank { null } },
+                                onDone = onNavigateBack
+                            )
                         } else {
-                            -quantity
-                        }
+                            val change = if (movementType == "CORRECTION") {
+                                (countedTotal ?: product.currentSellableStock) - product.currentSellableStock
+                            } else {
+                                -baseQuantity
+                            }
 
-                        viewModel.recordStockAdjustment(
-                            productId = product.id,
-                            type = movementType,
-                            quantityChange = change,
-                            countedTotal = if (movementType == "CORRECTION") countedTotal else null,
-                            reason = reason.trim().ifBlank { null },
-                            onDone = onNavigateBack
-                        )
+                            viewModel.recordStockAdjustment(
+                                productId = product.id,
+                                type = movementType,
+                                quantityChange = change,
+                                countedTotal = if (movementType == "CORRECTION") countedTotal else null,
+                                reason = reason.trim().ifBlank { null },
+                                onDone = onNavigateBack
+                            )
+                        }
                     },
-                    enabled = selectedProduct != null && (if (movementType == "CORRECTION") countedTotal != null else quantity > 0),
+                    enabled = selectedProduct != null && (if (movementType == "CORRECTION") countedTotal != null else baseQuantity > 0),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),

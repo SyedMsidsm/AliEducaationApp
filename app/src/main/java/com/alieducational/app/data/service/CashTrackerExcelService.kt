@@ -509,11 +509,19 @@ class CashTrackerExcelService @Inject constructor(
         tBal.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
         tBal.cellStyle = totalStyle
 
-        // Auto-size columns
-        for (i in headers.indices) {
-            sheet.autoSizeColumn(i)
-            // Extra padding
-            sheet.setColumnWidth(i, sheet.getColumnWidth(i) + 1200)
+        // Explicit column widths in units of 1/256th character width
+        // (Avoids POI autoSizeColumn which crashes on Android due to missing java.awt.font.FontRenderContext)
+        val columnWidths = intArrayOf(
+            14 * 256, // Date (dd-MMM-yyyy)
+            11 * 256, // Time (hh:mm a)
+            32 * 256, // Description / Particulars
+            22 * 256, // Payment Mode / Notes
+            16 * 256, // Cash In (₹)
+            16 * 256, // Cash Out (₹)
+            18 * 256  // Running Balance (₹)
+        )
+        for (i in columnWidths.indices) {
+            sheet.setColumnWidth(i, columnWidths[i])
         }
 
         val timeStampStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())

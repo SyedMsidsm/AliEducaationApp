@@ -6,25 +6,33 @@ import com.alieducational.app.data.local.dao.AccountPaymentDao
 import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
+import com.alieducational.app.data.local.dao.PigmyDepositDao
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
+import com.alieducational.app.data.local.dao.ProductGiveawayDao
 import com.alieducational.app.data.local.dao.PurchaseDao
 import com.alieducational.app.data.local.dao.SaleDao
+import com.alieducational.app.data.local.dao.ServiceDefinitionDao
 import com.alieducational.app.data.local.dao.ShopExpenseDao
 import com.alieducational.app.data.local.dao.StockMovementDao
 import com.alieducational.app.data.local.dao.SupplierDao
+import com.alieducational.app.data.local.dao.SyncEventDao
 import com.alieducational.app.data.local.entity.AccountPaymentEntity
 import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
+import com.alieducational.app.data.local.entity.PigmyDepositEntity
 import com.alieducational.app.data.local.entity.ProductBarcodeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
+import com.alieducational.app.data.local.entity.ProductGiveawayEntity
 import com.alieducational.app.data.local.entity.PurchaseEntity
 import com.alieducational.app.data.local.entity.PurchaseLineEntity
 import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
+import com.alieducational.app.data.local.entity.ServiceDefinitionEntity
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
+import com.alieducational.app.data.local.entity.SyncEventEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.domain.calculation.PurchaseLineInput
 import com.alieducational.app.domain.calculation.SaleLineInput
@@ -43,11 +51,17 @@ data class PurchaseItemParam(
 )
 
 data class SaleItemParam(
-    val productId: String,
+    val productId: String?,
     val productName: String,
     val quantityBase: Int,
-    val isPack: Boolean,
-    val unitSellingPricePaise: Long
+    val isPack: Boolean = false,
+    val unitSellingPricePaise: Long,
+    val lineId: String = UUID.randomUUID().toString(),
+    val lineType: String = "PRODUCT", // "PRODUCT", "SERVICE"
+    val serviceId: String? = null,
+    val serviceName: String? = null,
+    val serviceOption: String? = null,
+    val unitLabel: String? = null
 )
 
 data class BarcodeLookupResult(
@@ -69,7 +83,11 @@ class AppRepository @Inject constructor(
     private val saleDao: SaleDao,
     private val paymentDao: AccountPaymentDao,
     private val expenseDao: ShopExpenseDao,
-    private val heldBillDao: HeldBillDao
+    private val heldBillDao: HeldBillDao,
+    private val pigmyDepositDao: PigmyDepositDao,
+    private val productGiveawayDao: ProductGiveawayDao,
+    private val serviceDefinitionDao: ServiceDefinitionDao,
+    private val syncEventDao: SyncEventDao
 ) {
 
     // ── Stock & Inventory ──────────────────────────────────────────────
@@ -560,12 +578,14 @@ class AppRepository @Inject constructor(
         discountInput: Double, // percent value e.g. 10.0 or fixed rupee value e.g. 50.0
         amountReceivedPaise: Long,
         paymentMethod: String,
-        notes: String?
+        notes: String?,
+        originDeviceId: String? = null
     ): SaleEntity = db.withTransaction {
         val saleId = UUID.randomUUID().toString()
         val dateStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
         val randomSuffix = (1000..9999).random()
-        val receiptNumber = "AE-$dateStr-$randomSuffix"
+        val devicePrefix = if (originDeviceId != null && originDeviceId != "device-main") "AE-B1" else "AE-M"
+        val receiptNumber = "$devicePrefix-$dateStr-$randomSuffix"
 
         val grossTotalPaise = items.sumOf { it.quantityBase.toLong() * it.unitSellingPricePaise }
 
@@ -583,12 +603,15 @@ class AppRepository @Inject constructor(
         val remainingCreditPaise = (netTotalPaise - amountReceivedPaise).coerceAtLeast(0L)
         val changeGivenPaise = (amountReceivedPaise - netTotalPaise).coerceAtLeast(0L)
 
-        // Allocate whole-sale discount proportionally across items
+        // Allocate whole-sale discount proportionally across items using lineId (not productId)
         val saleLineInputs = items.map { item ->
-            val product = productDao.getProductById(item.productId)
-            val costSnapshot = product?.movingAvgCostPaise
+            val costSnapshot = if (item.lineType == "PRODUCT" && item.productId != null) {
+                val product = productDao.getProductById(item.productId)
+                product?.movingAvgCostPaise
+            } else null
+
             SaleLineInput(
-                id = item.productId,
+                id = item.lineId,
                 quantity = item.quantityBase,
                 unitSellingPricePaise = item.unitSellingPricePaise,
                 unitCostPaise = costSnapshot
@@ -598,11 +621,15 @@ class AppRepository @Inject constructor(
         val allocatedDiscountLines = CostCalculator.allocateWholeSaleDiscount(saleLineInputs, discountValuePaise)
 
         val saleLines = items.map { item ->
-            val alloc = allocatedDiscountLines.first { it.lineId == item.productId }
-            val product = productDao.getProductById(item.productId)
-            val costSnapshot = product?.movingAvgCostPaise
+            val alloc = allocatedDiscountLines.first { it.lineId == item.lineId }
+            val isProduct = item.lineType == "PRODUCT" && item.productId != null
+            val costSnapshot = if (isProduct) {
+                val product = productDao.getProductById(item.productId!!)
+                product?.movingAvgCostPaise
+            } else null
 
             SaleLineEntity(
+                id = item.lineId,
                 saleId = saleId,
                 productId = item.productId,
                 productName = item.productName,
@@ -613,23 +640,29 @@ class AppRepository @Inject constructor(
                 lineGrossPaise = alloc.grossValuePaise,
                 lineDiscountAllocatedPaise = alloc.allocatedDiscountPaise,
                 lineNetPaise = alloc.netValuePaise,
-                lineProfitPaise = alloc.actualProfitPaise
+                lineProfitPaise = if (isProduct) alloc.actualProfitPaise else null,
+                lineType = item.lineType,
+                serviceId = item.serviceId,
+                serviceName = item.serviceName,
+                serviceOption = item.serviceOption,
+                unitLabel = item.unitLabel
             )
         }
 
         saleDao.insertSaleLines(saleLines)
 
-        // Deduct stock for each sold item
-        items.forEach { item ->
-            productDao.adjustSellableStock(item.productId, -item.quantityBase)
-            val product = productDao.getProductById(item.productId)
+        // Deduct stock ONLY for products. Services DO NOT deduct product inventory.
+        items.filter { it.lineType == "PRODUCT" && it.productId != null }.forEach { item ->
+            val pId = item.productId!!
+            productDao.adjustSellableStock(pId, -item.quantityBase)
+            val product = productDao.getProductById(pId)
             stockMovementDao.insertMovement(
                 StockMovementEntity(
-                    productId = item.productId,
+                    productId = pId,
                     type = "SALE",
                     quantityChangeBase = -item.quantityBase,
                     unitCostPaise = product?.movingAvgCostPaise ?: 0L,
-                    reason = if (!receiptNumber.isNullOrBlank()) "Sale $receiptNumber" else "Sale recorded",
+                    reason = "Sale $receiptNumber",
                     referenceId = saleId
                 )
             )
@@ -651,7 +684,9 @@ class AppRepository @Inject constructor(
             paymentMethod = paymentMethod,
             isSummaryEntry = false,
             unresolvedStockDetails = false,
-            notes = notes
+            notes = notes,
+            originDeviceId = originDeviceId,
+            syncStatus = "LOCAL"
         )
         saleDao.insertSale(sale)
 
@@ -660,7 +695,241 @@ class AppRepository @Inject constructor(
             customerDao.adjustBalance(customerId, remainingCreditPaise)
         }
 
-        return@withTransaction sale
+        sale
+    }
+
+    // ── Pigmy Daily Savings Tracker ─────────────────────────────────────
+
+    val allPigmyDeposits: Flow<List<PigmyDepositEntity>> = pigmyDepositDao.getAllDeposits()
+    val activePigmyDeposits: Flow<List<PigmyDepositEntity>> = pigmyDepositDao.getActiveDeposits()
+    val totalPigmyDepositsPaise: Flow<Long?> = pigmyDepositDao.getTotalRecordedDepositsPaise()
+
+    fun getPigmyDepositsInRange(startTime: Long, endTime: Long): Flow<List<PigmyDepositEntity>> =
+        pigmyDepositDao.getDepositsInRange(startTime, endTime)
+
+    suspend fun recordPigmyDeposit(
+        amountPaise: Long,
+        paymentSource: String = "CASH",
+        notes: String? = null,
+        paidTimestamp: Long = System.currentTimeMillis()
+    ): String = db.withTransaction {
+        val depositId = UUID.randomUUID().toString()
+        var linkedExpenseId: String? = null
+
+        // If paid from shop cash, create a linked savings-transfer expense entry atomically
+        if (paymentSource == "CASH") {
+            linkedExpenseId = UUID.randomUUID().toString()
+            val expense = ShopExpenseEntity(
+                id = linkedExpenseId,
+                category = "SAVINGS_TRANSFER",
+                amountPaise = amountPaise,
+                isIncome = false,
+                notes = "Pigmy Deposit: ${notes ?: ""}".trim(),
+                isSavingsTransfer = true,
+                timestamp = paidTimestamp
+            )
+            expenseDao.insertExpense(expense)
+        }
+
+        val deposit = PigmyDepositEntity(
+            id = depositId,
+            accountSchemeId = "DEFAULT_PIGMY",
+            paidTimestamp = paidTimestamp,
+            amountPaise = amountPaise,
+            paymentSource = paymentSource,
+            notes = notes,
+            linkedExpenseId = linkedExpenseId,
+            isVoided = false,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        pigmyDepositDao.insertDeposit(deposit)
+        depositId
+    }
+
+    suspend fun voidPigmyDeposit(depositId: String, reason: String) = db.withTransaction {
+        val deposit = pigmyDepositDao.getDepositById(depositId) ?: return@withTransaction
+        pigmyDepositDao.voidDeposit(depositId, reason)
+        if (deposit.linkedExpenseId != null) {
+            expenseDao.voidExpense(deposit.linkedExpenseId, "Voided with Pigmy deposit: $reason")
+        }
+    }
+
+    // ── Product Giveaways & Donations ───────────────────────────────────
+
+    val allGiveaways: Flow<List<ProductGiveawayEntity>> = productGiveawayDao.getAllGiveaways()
+    val activeGiveaways: Flow<List<ProductGiveawayEntity>> = productGiveawayDao.getActiveGiveaways()
+
+    fun getGiveawaysInRange(startTime: Long, endTime: Long): Flow<List<ProductGiveawayEntity>> =
+        productGiveawayDao.getGiveawaysInRange(startTime, endTime)
+
+    suspend fun recordProductGiveaway(
+        productId: String,
+        quantityBase: Int,
+        isPack: Boolean = false,
+        packSizeSnapshot: Int = 1,
+        reason: String = "FREE_ITEM", // FREE_ITEM or DONATION
+        recipientNote: String? = null,
+        timestamp: Long = System.currentTimeMillis()
+    ): String = db.withTransaction {
+        val product = productDao.getProductById(productId)
+            ?: throw IllegalArgumentException("Product not found")
+
+        val giveawayId = UUID.randomUUID().toString()
+        val costSnapshot = if (product.movingAvgCostPaise > 0) product.movingAvgCostPaise else null
+
+        // 1. Deduct sellable stock
+        productDao.adjustSellableStock(productId, -quantityBase, timestamp)
+
+        // 2. Insert audit stock movement
+        stockMovementDao.insertMovement(
+            StockMovementEntity(
+                productId = productId,
+                type = "GIVEAWAY",
+                quantityChangeBase = -quantityBase,
+                unitCostPaise = product.movingAvgCostPaise,
+                reason = "${if (reason == "DONATION") "Donation" else "Free item"}: ${recipientNote ?: ""}".trim(),
+                referenceId = giveawayId,
+                timestamp = timestamp
+            )
+        )
+
+        // 3. Record giveaway record
+        val giveaway = ProductGiveawayEntity(
+            id = giveawayId,
+            productId = productId,
+            productName = product.name,
+            quantityBase = quantityBase,
+            isPack = isPack,
+            packSizeSnapshot = packSizeSnapshot,
+            unitCostSnapshotPaise = costSnapshot,
+            reason = reason,
+            recipientNote = recipientNote,
+            timestamp = timestamp,
+            isCancelled = false
+        )
+        productGiveawayDao.insertGiveaway(giveaway)
+        giveawayId
+    }
+
+    suspend fun cancelProductGiveaway(giveawayId: String, reason: String? = null) = db.withTransaction {
+        val giveaway = productGiveawayDao.getGiveawayById(giveawayId) ?: return@withTransaction
+        if (giveaway.isCancelled) return@withTransaction
+
+        // 1. Mark cancelled
+        productGiveawayDao.cancelGiveaway(giveawayId)
+
+        // 2. Restore sellable stock once
+        productDao.adjustSellableStock(giveaway.productId, giveaway.quantityBase)
+
+        // 3. Insert audit reversal movement
+        stockMovementDao.insertMovement(
+            StockMovementEntity(
+                productId = giveaway.productId,
+                type = "CORRECTION",
+                quantityChangeBase = giveaway.quantityBase,
+                unitCostPaise = giveaway.unitCostSnapshotPaise ?: 0L,
+                reason = "Cancelled giveaway: ${reason ?: ""}".trim(),
+                referenceId = giveawayId
+            )
+        )
+    }
+
+    // ── Services & Owner Expenses ───────────────────────────────────────
+
+    val activeServices: Flow<List<ServiceDefinitionEntity>> = serviceDefinitionDao.getAllActiveServices()
+    val allServices: Flow<List<ServiceDefinitionEntity>> = serviceDefinitionDao.getAllServices()
+
+    suspend fun ensurePredefinedServices() {
+        val existing = serviceDefinitionDao.getServiceByName("Printing")
+        if (existing == null) {
+            val predefined = listOf(
+                ServiceDefinitionEntity(
+                    name = "Printing",
+                    unitLabel = "sides",
+                    isPredefined = true
+                ),
+                ServiceDefinitionEntity(
+                    name = "Photocopying",
+                    unitLabel = "copies",
+                    isPredefined = true
+                ),
+                ServiceDefinitionEntity(
+                    name = "Sticker printing",
+                    unitLabel = "sheets",
+                    isPredefined = true
+                )
+            )
+            serviceDefinitionDao.insertServices(predefined)
+        }
+    }
+
+    suspend fun addCustomService(name: String, unitLabel: String): ServiceDefinitionEntity {
+        val service = ServiceDefinitionEntity(
+            name = name.trim(),
+            unitLabel = unitLabel.trim().ifBlank { "job" },
+            isPredefined = false
+        )
+        serviceDefinitionDao.insertService(service)
+        return service
+    }
+
+    suspend fun archiveService(serviceId: String) {
+        serviceDefinitionDao.archiveService(serviceId)
+    }
+
+    suspend fun recordServiceExpense(
+        category: String, // PAPER, INK_TONER, STICKER_SHEETS, MACHINE_REPAIR, OTHER
+        amountPaise: Long,
+        serviceTarget: String, // PRINTING, PHOTOCOPYING, STICKER_PRINTING, SHARED
+        notes: String? = null,
+        attachmentUri: String? = null,
+        timestamp: Long = System.currentTimeMillis()
+    ): String {
+        val expenseId = UUID.randomUUID().toString()
+        val expense = ShopExpenseEntity(
+            id = expenseId,
+            category = "SERVICE_EXPENSE",
+            amountPaise = amountPaise,
+            isIncome = false,
+            notes = notes,
+            expenseCategory = category,
+            serviceTarget = serviceTarget,
+            attachmentUri = attachmentUri,
+            isSavingsTransfer = false,
+            timestamp = timestamp
+        )
+        expenseDao.insertExpense(expense)
+        return expenseId
+    }
+
+    fun getServiceExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>> =
+        expenseDao.getServiceExpensesInRange(startTime, endTime)
+
+    fun getServiceLinesInRange(startTime: Long, endTime: Long): Flow<List<SaleLineEntity>> =
+        saleDao.getServiceLinesInRange(startTime, endTime)
+
+    // ── Two-Phone Sync Foundations ─────────────────────────────────────
+
+    val pendingSyncCount: Flow<Int> = syncEventDao.getPendingCount()
+
+    suspend fun getPendingSyncEvents(): List<SyncEventEntity> =
+        syncEventDao.getPendingEvents()
+
+    suspend fun markEventSynced(eventId: String) {
+        syncEventDao.updateEventStatus(eventId, "ACKNOWLEDGED")
+    }
+
+    suspend fun insertSyncEvent(eventType: String, entityId: String, payloadJson: String, originDeviceId: String) {
+        syncEventDao.insertEvent(
+            SyncEventEntity(
+                eventType = eventType,
+                entityId = entityId,
+                payloadJson = payloadJson,
+                originDeviceId = originDeviceId,
+                status = "PENDING"
+            )
+        )
     }
 
     suspend fun recordDailyMonetaryTotal(

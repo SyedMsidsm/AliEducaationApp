@@ -31,6 +31,12 @@ class AppPreferences @Inject constructor(
         val LAST_BACKUP_TIME = longPreferencesKey("last_backup_time")
         val RECEIPT_ACTION = stringPreferencesKey("receipt_action")
         val RECEIPT_LANGUAGE = stringPreferencesKey("receipt_language")
+        val PIGMY_USUAL_AMOUNT_PAISE = longPreferencesKey("pigmy_usual_amount_paise")
+        val DEVICE_ROLE = stringPreferencesKey("device_role") // "OWNER" or "BILLING"
+        val DEVICE_ID = stringPreferencesKey("device_id")
+        val PAIRED_OWNER_HOST = stringPreferencesKey("paired_owner_host")
+        val SYNC_TOKEN = stringPreferencesKey("sync_token")
+        val SYNC_PORT = intPreferencesKey("sync_port")
     }
 
     val isFirstLaunch: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -50,7 +56,8 @@ class AppPreferences @Inject constructor(
     }
 
     val appLanguage: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[Keys.APP_LANGUAGE] ?: "en"
+        // Enforce English UI as per latest decision
+        "en"
     }
 
     val shopName: Flow<String> = context.dataStore.data.map { preferences ->
@@ -67,6 +74,66 @@ class AppPreferences @Inject constructor(
 
     val receiptLanguage: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[Keys.RECEIPT_LANGUAGE] ?: "en"
+    }
+
+    val pigmyUsualAmountPaise: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[Keys.PIGMY_USUAL_AMOUNT_PAISE] ?: 100000L // default ₹1,000.00
+    }
+
+    val deviceRole: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.DEVICE_ROLE] ?: "OWNER"
+    }
+
+    val deviceId: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.DEVICE_ID] ?: "device-main"
+    }
+
+    val pairedOwnerHost: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.PAIRED_OWNER_HOST] ?: ""
+    }
+
+    val syncToken: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.SYNC_TOKEN] ?: ""
+    }
+
+    val syncPort: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[Keys.SYNC_PORT] ?: 8080
+    }
+
+    suspend fun setPigmyUsualAmountPaise(amountPaise: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.PIGMY_USUAL_AMOUNT_PAISE] = amountPaise
+        }
+    }
+
+    suspend fun setDeviceRole(role: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.DEVICE_ROLE] = role
+        }
+    }
+
+    suspend fun setDeviceId(id: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.DEVICE_ID] = id
+        }
+    }
+
+    suspend fun setPairedOwnerHost(host: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.PAIRED_OWNER_HOST] = host
+        }
+    }
+
+    suspend fun setSyncToken(token: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.SYNC_TOKEN] = token
+        }
+    }
+
+    suspend fun setSyncPort(port: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.SYNC_PORT] = port
+        }
     }
 
     suspend fun setFirstLaunch(isFirst: Boolean) {

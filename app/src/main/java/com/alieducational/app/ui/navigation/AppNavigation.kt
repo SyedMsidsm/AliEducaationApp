@@ -46,6 +46,7 @@ sealed class Screen(val route: String) {
     data object Expenses : Screen("expenses")
     data object CashTracker : Screen("cash_tracker")
     data object BackupRestore : Screen("backup_restore")
+    data object PigmySavings : Screen("pigmy_savings")
     data object Settings : Screen("settings")
 }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -74,6 +75,7 @@ fun HomeScreen(
     onNavigateToCashTracker: () -> Unit,
     onNavigateToBackup: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToPigmy: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val shopName by viewModel.shopName.collectAsState()
@@ -328,6 +330,24 @@ fun HomeScreen(
                             icon = Icons.Filled.PointOfSale,
                             modifier = Modifier.weight(1f),
                             onClick = onNavigateToCashTracker
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ToolQuickCard(
+                            title = "Pigmy Daily Savings",
+                            icon = Icons.Filled.AccountBalanceWallet,
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToPigmy
+                        )
+                        ToolQuickCard(
+                            title = "Settings",
+                            icon = Icons.Filled.Settings,
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToSettings
                         )
                     }
                 }

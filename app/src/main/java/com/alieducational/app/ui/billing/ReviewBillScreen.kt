@@ -26,11 +26,13 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
+import com.alieducational.app.ui.BillingDraftItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -87,6 +89,7 @@ fun ReviewBillScreen(
     var showCustomerDialog by remember { mutableStateOf(false) }
     var showDiscountDialog by remember { mutableStateOf(false) }
     var showHeldBillsDialog by remember { mutableStateOf(false) }
+    var itemToOverridePrice by remember { mutableStateOf<BillingDraftItem?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -277,7 +280,7 @@ fun ReviewBillScreen(
                     }
                 }
             } else {
-                items(billingState.items, key = { "${it.productId}_${it.unitType}" }) { item ->
+                items(billingState.items, key = { it.lineId }) { item ->
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
@@ -290,7 +293,7 @@ fun ReviewBillScreen(
                                 .fillMaxWidth()
                                 .padding(12.dp)
                         ) {
-                            // Row 1: Product Name, Delete Button, Line Total
+                            // Row 1: Product / Service Name, Line Total, Delete Button
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -302,13 +305,32 @@ fun ReviewBillScreen(
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    Text(
-                                        text = "@ ${CostCalculator.formatPaiseToRupees(item.unitPricePaise)} / ${
-                                            if (item.unitType == "PACK") stringResource(R.string.billing_pack) else stringResource(R.string.billing_piece)
-                                        }",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val unitStr = if (item.lineType == "SERVICE") {
+                                            item.unitLabel ?: "unit"
+                                        } else if (item.unitType == "PACK") {
+                                            stringResource(R.string.billing_pack)
+                                        } else {
+                                            stringResource(R.string.billing_piece)
+                                        }
+                                        Text(
+                                            text = "@ ${CostCalculator.formatPaiseToRupees(item.unitPricePaise)} / $unitStr",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = { itemToOverridePrice = item },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Edit,
+                                                contentDescription = "Edit Price",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -318,7 +340,7 @@ fun ReviewBillScreen(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     IconButton(
-                                        onClick = { viewModel.removeDraftItem(item.productId, item.unitType) },
+                                        onClick = { viewModel.removeItemFromBill(item.lineId) },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
@@ -333,56 +355,70 @@ fun ReviewBillScreen(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Row 2: Unit Type Switcher & Quantity Stepper
+                            // Row 2: Unit Type Switcher / Service Tag & Quantity Stepper
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Unit Switcher (Piece vs Pack)
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .padding(2.dp)
-                                ) {
-                                    Box(
+                                if (item.lineType == "PRODUCT") {
+                                    // Unit Switcher (Piece vs Pack)
+                                    Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(
-                                                if (item.unitType == "PIECE") MaterialTheme.colorScheme.primary else Color.Transparent
-                                            )
-                                            .clickable {
-                                                if (item.unitType != "PIECE") {
-                                                    viewModel.updateDraftItemUnit(item.productId, item.unitType, "PIECE")
-                                                }
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .padding(2.dp)
                                     ) {
-                                        Text(
-                                            text = stringResource(R.string.billing_piece),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = if (item.unitType == "PIECE") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(
+                                                    if (item.unitType == "PIECE") MaterialTheme.colorScheme.primary else Color.Transparent
+                                                )
+                                                .clickable {
+                                                    if (item.unitType != "PIECE") {
+                                                        viewModel.updateDraftItemUnit(item.productId, item.unitType, "PIECE")
+                                                    }
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.billing_piece),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = if (item.unitType == "PIECE") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(
-                                                if (item.unitType == "PACK") MaterialTheme.colorScheme.primary else Color.Transparent
-                                            )
-                                            .clickable {
-                                                if (item.unitType != "PACK") {
-                                                    viewModel.updateDraftItemUnit(item.productId, item.unitType, "PACK")
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(
+                                                    if (item.unitType == "PACK") MaterialTheme.colorScheme.primary else Color.Transparent
+                                                )
+                                                .clickable {
+                                                    if (item.unitType != "PACK") {
+                                                        viewModel.updateDraftItemUnit(item.productId, item.unitType, "PACK")
+                                                    }
                                                 }
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = "${stringResource(R.string.billing_pack)} (${item.packSize})",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = if (item.unitType == "PACK") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(8.dp)
                                     ) {
                                         Text(
-                                            text = "${stringResource(R.string.billing_pack)} (${item.packSize})",
+                                            text = "Service: ${item.unitLabel ?: "unit"}",
                                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = if (item.unitType == "PACK") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                         )
                                     }
                                 }
@@ -401,7 +437,7 @@ fun ReviewBillScreen(
                                 ) {
                                     IconButton(
                                         onClick = {
-                                            viewModel.updateDraftItemQuantity(item.productId, item.unitType, -1)
+                                            viewModel.updateItemQuantity(item.lineId, item.quantity - 1)
                                         },
                                         modifier = Modifier.size(32.dp)
                                     ) {
@@ -420,7 +456,7 @@ fun ReviewBillScreen(
 
                                     IconButton(
                                         onClick = {
-                                            viewModel.updateDraftItemQuantity(item.productId, item.unitType, 1)
+                                            viewModel.updateItemQuantity(item.lineId, item.quantity + 1)
                                         },
                                         modifier = Modifier.size(32.dp)
                                     ) {
@@ -699,4 +735,66 @@ fun ReviewBillScreen(
             onDismiss = { showHeldBillsDialog = false }
         )
     }
+
+    if (itemToOverridePrice != null) {
+        OverrideItemPriceDialog(
+            item = itemToOverridePrice!!,
+            onDismiss = { itemToOverridePrice = null },
+            onSave = { newPricePaise ->
+                viewModel.updateItemPrice(itemToOverridePrice!!.lineId, newPricePaise)
+                itemToOverridePrice = null
+            }
+        )
+    }
+}
+
+@Composable
+fun OverrideItemPriceDialog(
+    item: BillingDraftItem,
+    onDismiss: () -> Unit,
+    onSave: (newPricePaise: Long) -> Unit
+) {
+    var priceText by remember {
+        mutableStateOf(String.format(java.util.Locale.ENGLISH, "%.2f", item.unitPricePaise / 100.0))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Override Item Price", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = item.productName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("New Unit Price (₹)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val p = priceText.toDoubleOrNull() ?: 0.0
+                    if (p >= 0.0) {
+                        onSave((p * 100).toLong())
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Save Price")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
