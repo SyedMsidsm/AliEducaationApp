@@ -1,0 +1,125 @@
+package com.alieducational.app.data.preferences
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ali_educational_preferences")
+
+@Singleton
+class AppPreferences @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private object Keys {
+        val IS_FIRST_LAUNCH = booleanPreferencesKey("is_first_launch")
+        val IS_LOCK_ENABLED = booleanPreferencesKey("is_lock_enabled")
+        val LOCK_TIMEOUT_SECONDS = intPreferencesKey("lock_timeout_seconds")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val APP_LANGUAGE = stringPreferencesKey("app_language")
+        val SHOP_NAME = stringPreferencesKey("shop_name")
+        val LAST_BACKUP_TIME = longPreferencesKey("last_backup_time")
+        val RECEIPT_ACTION = stringPreferencesKey("receipt_action")
+        val RECEIPT_LANGUAGE = stringPreferencesKey("receipt_language")
+    }
+
+    val isFirstLaunch: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[Keys.IS_FIRST_LAUNCH] ?: true
+    }
+
+    val isLockEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[Keys.IS_LOCK_ENABLED] ?: false
+    }
+
+    val lockTimeoutSeconds: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LOCK_TIMEOUT_SECONDS] ?: 120
+    }
+
+    val themeMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.THEME_MODE] ?: "dark"
+    }
+
+    val appLanguage: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.APP_LANGUAGE] ?: "en"
+    }
+
+    val shopName: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.SHOP_NAME] ?: "Ali Educational"
+    }
+
+    val lastBackupTime: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LAST_BACKUP_TIME] ?: 0L
+    }
+
+    val receiptAction: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.RECEIPT_ACTION] ?: "preview"
+    }
+
+    val receiptLanguage: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.RECEIPT_LANGUAGE] ?: "en"
+    }
+
+    suspend fun setFirstLaunch(isFirst: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.IS_FIRST_LAUNCH] = isFirst
+        }
+    }
+
+    suspend fun setLockEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.IS_LOCK_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setLockTimeoutSeconds(seconds: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.LOCK_TIMEOUT_SECONDS] = seconds
+        }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.THEME_MODE] = mode
+        }
+    }
+
+    suspend fun setAppLanguage(language: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.APP_LANGUAGE] = language
+        }
+    }
+
+    suspend fun setShopName(name: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.SHOP_NAME] = name
+        }
+    }
+
+    suspend fun setLastBackupTime(timestamp: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.LAST_BACKUP_TIME] = timestamp
+        }
+    }
+
+    suspend fun setReceiptAction(action: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.RECEIPT_ACTION] = action
+        }
+    }
+
+    suspend fun setReceiptLanguage(language: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.RECEIPT_LANGUAGE] = language
+        }
+    }
+}

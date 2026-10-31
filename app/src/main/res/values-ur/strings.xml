@@ -1,0 +1,210 @@
+<resources>
+    <string name="app_name">علی ایجوکیشنل</string>
+    <string name="nav_home">ہوم</string>
+    <string name="nav_stock">اسٹاک</string>
+    <string name="nav_billing">بلنگ</string>
+    <string name="nav_accounts">کھاتے</string>
+    <string name="nav_more">مزید</string>
+
+    <string name="action_new_bill">نیا بل</string>
+    <string name="action_add_stock">اسٹاک شامل کریں</string>
+    <string name="action_remove_stock">اسٹاک نکالیں</string>
+    <string name="action_record_payment">ادائیگی درج کریں</string>
+    <string name="action_record_sale">فروخت درج کریں</string>
+
+    <string name="common_cancel">منسوخ</string>
+
+    <string name="unlock_title">علی ایجوکیشنل</string>
+    <string name="unlock_subtitle">اسٹیشنری شاپ مینجمنٹ</string>
+    <string name="unlock_prompt">اپنا فنگر پرنٹ یا ڈیوائس لاک تصدیق کریں</string>
+    <string name="unlock_button">ایپ کھولیں</string>
+    <string name="unlock_failed">تصدیق ناکام ہو گئی۔ دوبارہ کوشش کیجیے۔</string>
+    <string name="unlock_no_credential">ڈیوائس پر اسکرین لاک سیٹ نہیں ہے۔ ترتیبات میں جا کر پن یا فنگر پرنٹ سیٹ کیجیے۔</string>
+
+    <string name="setup_welcome">علی ایجوکیشنل میں خوش آمدید</string>
+    <string name="setup_title">علی ایجوکیشنل میں خوش آمدید</string>
+    <string name="setup_continue">آگے بڑھیں</string>
+    <string name="setup_subtitle">اسٹاک اور کھاتہ جات کا تیز ترین نظام</string>
+    <string name="setup_shop_name">دکان کا نام</string>
+    <string name="setup_default_shop_name">علی ایجوکیشنل</string>
+    <string name="setup_select_language">زبان منتخب کریں</string>
+    <string name="setup_lang_english">English</string>
+    <string name="setup_lang_urdu">اردو</string>
+    <string name="setup_enable_lock">ایپ لاک آن کریں (فنگر پرنٹ / پن)</string>
+    <string name="setup_enable_lock_desc">ایپ کھولنے کے لیے ڈیوائس لاک ضروری ہو گا</string>
+    <string name="setup_get_started">شروع کریں</string>
+
+    <string name="stock_title">اسٹاک</string>
+    <string name="accounts_title">کھاتے</string>
+    <string name="more_title">مزید</string>
+    <string name="home_stock_value">اسٹاک کی کل مالیت</string>
+    <string name="home_low_stock">کم اسٹاک والی اشیاء</string>
+    <string name="home_we_owe">ہم نے سپلائرز کو ادا کرنا ہے</string>
+    <string name="home_customers_owe">گاہکوں سے رقم وصول کرنی ہے</string>
+    <string name="home_recent_activity">حالیہ سرگرمیاں</string>
+    <string name="home_backup_status">آخری بیک اپ: کبھی نہیں</string>
+    <string name="home_backup_now">ابھی بیک اپ لیں</string>
+    <string name="home_stationery_subtitle">اسٹیشنری اور کتب</string>
+    <string name="home_record_sale_desc">آئٹم فروخت کریں، رعایت دیں اور رسید جاری کریں</string>
+    <string name="home_no_activity">ابھی کوئی سرگرمی موجود نہیں ہے۔ نیا اسٹاک شامل کر کے شروعات کریں۔</string>
+    <string name="home_stored_safely">اس فون پر محفوظ رکھا گیا ہے</string>
+    <string name="home_last_backup_prefix">آخری بیک اپ: %1$s</string>
+    <string name="home_items_count">%1$d اشیاء</string>
+    <string name="home_reports_and_tools">رپورٹس اور اوزار</string>
+    <string name="home_profit_analysis">منافع اور مارجن کی رپورٹ</string>
+    <string name="home_backup_restore">بیک اپ اور بحالی</string>
+    <string name="home_settings">ترتیبات</string>
+    <string name="home_expenses">دکان کے اخراجات</string>
+
+    <!-- Billing Strings -->
+    <string name="billing_title">بلنگ</string>
+    <string name="billing_header_subtitle">کاؤنٹر سیل</string>
+    <string name="billing_offline_badge">آف لائن</string>
+    <string name="billing_offline_ready">100% آف لائن</string>
+    <string name="billing_new_bill_title">نیا بل</string>
+    <string name="billing_new_bill_desc">کاؤنٹر سیل کے لیے بارکوڈ اسکین کریں یا اشیاء منتخب کریں</string>
+    <string name="billing_scan_barcode">بارکوڈ اسکین کریں</string>
+    <string name="billing_scan_with_camera">کیمرے سے اسکین کریں</string>
+    <string name="billing_search_placeholder">پراڈکٹ کا نام، برانڈ یا کوڈ تلاش کریں...</string>
+    <string name="billing_filter_all">سبھی</string>
+    <string name="billing_filter_favourites">پسندیدہ</string>
+    <string name="billing_filter_category">کیٹیگری</string>
+    <string name="billing_in_this_bill">اس بل میں</string>
+    <string name="billing_in_this_bill_title">اس بل میں</string>
+    <string name="billing_items_summary">%1$d آئٹمز · %2$s</string>
+    <string name="billing_review_pill">بل دیکھیں %1$d آئٹمز · %2$s ←</string>
+    <string name="billing_review_action">بل دیکھیں (%1$d آئٹمز)</string>
+    <string name="billing_add_btn">شامل کریں</string>
+    <string name="billing_add_again">دوبارہ شامل کریں</string>
+    <string name="billing_undo">منسوخ کریں</string>
+    <string name="billing_piece">عدد</string>
+    <string name="billing_pack">ڈبہ / پیک</string>
+    <string name="billing_held_bills">محفوظ ڈرافٹس</string>
+    <string name="billing_held_tag">ڈرافٹ</string>
+    <string name="billing_hold_bill">بل ہولڈ کریں</string>
+    <string name="billing_resume">بحال کریں</string>
+    <string name="billing_discard">ختم کریں</string>
+    <string name="billing_no_items">ڈرافٹ میں کوئی آئٹم نہیں ہے</string>
+    <string name="billing_no_items_desc">بارکوڈ اسکین کریں، پسندیدہ پر ٹیپ کریں یا نام تلاش کر کے شامل کریں</string>
+    <string name="billing_stock_tag">اسٹاک: %1$d</string>
+    <string name="billing_unknown_barcode_title">نامعلوم بارکوڈ</string>
+    <string name="billing_unknown_barcode_desc">بارکوڈ %1$s کسی پراڈکٹ سے منسلک نہیں ہے۔</string>
+    <string name="billing_link_existing">موجودہ پراڈکٹ سے جوڑیں</string>
+    <string name="billing_create_new">نئی پراڈکٹ بنائیں</string>
+
+    <!-- Scanner Strings -->
+    <string name="scanner_title">بارکوڈ اسکین کریں</string>
+    <string name="scanner_guidance">پراڈکٹ کا بارکوڈ فریم کے اندر لائیں</string>
+    <string name="scanner_permission_needed">پراڈکٹ بارکوڈ اسکین کرنے کے لیے کیمرے کی اجازت درکار ہے۔</string>
+    <string name="scanner_grant_permission">کیمرے کی اجازت دیں</string>
+    <string name="scanner_torch">ٹارچ</string>
+    <string name="scanner_added_label">شامل کیا گیا</string>
+    <string name="scanner_undo">واپس لیں</string>
+    <string name="scanner_debounce_hint">اگلا آئٹم اسکین کرنے کے لیے بارکوڈ فریم سے باہر لے جائیں</string>
+    <string name="scanner_add_again">دوبارہ شامل کریں</string>
+    <string name="scanner_view_bill">بل دیکھیں</string>
+    <string name="scanner_no_barcode_fallback">بارکوڈ نہیں ہے؟ اشیاء تلاش یا براؤز کریں</string>
+    <string name="scanner_unknown_title">نامعلوم بارکوڈ</string>
+    <string name="scanner_scanned_code">اسکین شدہ کوڈ</string>
+    <string name="scanner_unknown_prompt">یہ بارکوڈ کسی پراڈکٹ سے منسلک نہیں ہے۔ کیا آپ اسے ابھی جوڑنا چاہتے ہیں؟</string>
+    <string name="scanner_select_product_to_link">پراڈکٹ منتخب کریں</string>
+    <string name="scanner_link_btn">بارکوڈ جوڑیں</string>
+
+    <!-- Review Screen Strings -->
+    <string name="review_title">بل کا جائزہ</string>
+    <string name="review_customer">گاہک</string>
+    <string name="review_walk_in">عام گاہک (نقد)</string>
+    <string name="review_select_customer">گاہک منتخب یا تبدیل کریں</string>
+    <string name="billing_existing_customer">موجودہ گاہک</string>
+    <string name="billing_new_customer">+ نیا گاہک</string>
+    <string name="billing_search_customer">نام یا فون سے تلاش کریں...</string>
+    <string name="billing_customer_name">گاہک کا نام *</string>
+    <string name="billing_customer_phone">فون نمبر (اختیاری)</string>
+    <string name="billing_customer_notes">پتہ / نوٹس (اختیاری)</string>
+    <string name="billing_save_select_customer">محفوظ کریں اور منتخب کریں</string>
+    <string name="billing_customer_khata_due">واجب الادا: %1$s</string>
+    <string name="billing_customer_khata_clear">بے باق (₹0)</string>
+    <string name="review_items">بل کے آئٹمز</string>
+    <string name="review_add_item">+ مزید آئٹم شامل یا اسکین کریں</string>
+    <string name="review_subtotal">کل رقم</string>
+    <string name="review_discount">رعایت</string>
+    <string name="review_add_discount">رعایت شامل کریں ←</string>
+    <string name="review_remove_discount">ہٹائیں</string>
+    <string name="review_net_total">خالص قابل ادائیگی رقم</string>
+    <string name="review_notice">اسٹاک اس وقت کم ہوگا جب بل محفوظ کیا جائے گا۔ اس ڈرافٹ کے آئٹمز ابھی اسٹاک سے نہیں نکالے گئے۔</string>
+    <string name="review_continue_payment">ادائیگی کی طرف بڑھیں ←</string>
+    <string name="review_discount_title">پورے بل پر رعایت</string>
+    <string name="review_discount_percent">فیصد (%)</string>
+    <string name="review_discount_fixed">مقررہ رقم (₹)</string>
+    <string name="review_apply">لاگو کریں</string>
+    <string name="review_cancel">منسوخ</string>
+
+    <!-- Payment Screen Strings -->
+    <string name="payment_title">ادائیگی اور بقایا رقم</string>
+    <string name="payment_summary">بل کا خلاصہ</string>
+    <string name="payment_method">طریقہ ادائیگی</string>
+    <string name="payment_cash">نقد</string>
+    <string name="payment_upi">یو پی آئی</string>
+    <string name="payment_credit">گاہک کا کھاتہ / ادھار</string>
+    <string name="payment_other">دیگر</string>
+    <string name="payment_cash_received">وصول شدہ نقد رقم (₹)</string>
+    <string name="payment_exact">پوری رقم</string>
+    <string name="payment_change_to_give">گاہک کو بقایا واپس کریں: %1$s</string>
+    <string name="payment_short_amount">کم رقم: %1$s</string>
+    <string name="payment_treat_as_discount">فرق کو رعایت شمار کریں</string>
+    <string name="payment_treat_as_credit">فرق گاہک کے کھاتے میں ادھار درج کریں</string>
+    <string name="payment_credit_req_customer">ادھار یا نامکمل ادائیگی کے لیے گاہک کا کھاتہ ضروری ہے</string>
+    <string name="payment_receipt_action">محفوظ کرنے کے بعد رسید</string>
+    <string name="payment_action_none">کوئی عمل نہیں (فوری محفوظ)</string>
+    <string name="payment_action_preview">رسید دیکھیں</string>
+    <string name="payment_action_print">رسید پرنٹ کریں</string>
+    <string name="payment_action_share">واٹس ایپ یا پی ڈی ایف شیئر کریں</string>
+    <string name="payment_save_bill">بل محفوظ کریں · %1$s</string>
+
+    <!-- Receipt Screen Strings -->
+    <string name="receipt_saved_title">بل کامیابی سے محفوظ ہو گیا!</string>
+    <string name="receipt_reference">رسید نمبر</string>
+    <string name="receipt_date">تاریخ و وقت</string>
+    <string name="receipt_items_total">کل آئٹمز</string>
+    <string name="receipt_gross_total">ابتدائی رقم</string>
+    <string name="receipt_discount_given">دی گئی رعایت</string>
+    <string name="receipt_payment_mode">طریقہ ادائیگی</string>
+    <string name="receipt_items_purchased">خریدے گئے آئٹمز</string>
+    <string name="receipt_net_paid">وصول شدہ رقم</string>
+    <string name="receipt_cash_tendered">دی گئی نقد رقم</string>
+    <string name="receipt_change_given">واپس کیا گیا بقایا</string>
+    <string name="receipt_new_bill">نیا بل</string>
+    <string name="receipt_done">مکمل / ہوم پر جائیں</string>
+    <string name="receipt_share_button">رسید شیئر کریں</string>
+    <string name="receipt_print_button">رسید پرنٹ کریں</string>
+
+    <!-- Held Bills Strings -->
+    <string name="held_bills_title">محفوظ شدہ ڈرافٹس</string>
+    <string name="held_bills_empty">اس وقت کوئی ڈرافٹ محفوظ نہیں ہے</string>
+    <string name="held_bills_resume">ڈرافٹ کھولیں</string>
+    <string name="held_bills_discard">ختم کریں</string>
+    <string name="held_bill_prompt_note">ڈرافٹ کا نوٹ (اختیاری)</string>
+    <string name="held_bill_confirm_hold">موجودہ بل محفوظ کریں</string>
+
+    <!-- Sale Void & Return Strings -->
+    <string name="receipt_void_button">بل منسوخ کریں / واپسی</string>
+    <string name="receipt_void_title">بل منسوخ کریں اور رقم واپس کریں</string>
+    <string name="receipt_void_warning">یہ بل منسوخ ہو جائے گا، گاہک کو رقم واپس کی جائے گی اور اسٹاک درست ہو گا۔</string>
+    <string name="receipt_void_refund_payout">گاہک کو نقد واپسی</string>
+    <string name="receipt_void_stock_question">واپس آنے والے سامان کی حالت:</string>
+    <string name="receipt_void_condition_sellable">قابل فروخت (اسٹاک میں واپس شامل کریں)</string>
+    <string name="receipt_void_condition_damaged">خراب / ناقابل فروخت (خراب اسٹاک میں درج کریں)</string>
+    <string name="receipt_void_reason_label">منسوخی کی وجہ (اختیاری)</string>
+    <string name="receipt_void_confirm">منسوخی اور رقم واپسی کی تصدیق کریں</string>
+    <string name="receipt_voided_badge">منسوخ شدہ اور رقم واپس</string>
+
+    <!-- Account Payment & Receipt Voucher Strings -->
+    <string name="voucher_title">رسید برائے ادائیگی (واؤچر)</string>
+    <string name="voucher_recorded_success">ادائیگی کامیابی سے درج ہو گئی!</string>
+    <string name="voucher_amount_paid">ادا شدہ رقم</string>
+    <string name="voucher_payment_mode">طریقہ ادائیگی</string>
+    <string name="voucher_remaining_balance">باقی واجب الادا رقم</string>
+    <string name="voucher_share_button">واؤچر شیئر کریں</string>
+    <string name="voucher_print_button">واؤچر پرنٹ کریں</string>
+    <string name="voucher_done_button">مکمل</string>
+</resources>
