@@ -89,4 +89,31 @@ class CashTrackerExcelServiceTest {
 
         workbook.close()
     }
+
+    @Test
+    fun testParseRealExcelFiles() {
+        val file29 = java.io.File("C:/Users/Musid/Downloads/Ali Educational 29-Oct-2026.xls")
+        if (file29.exists()) {
+            val wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(file29)
+            println("File 29 sheets: " + (0 until wb.numberOfSheets).map { wb.getSheetName(it) })
+            val preview29 = service.parseWorkbook(wb, file29.name)
+            println("29-Oct items: ${preview29.items.size}, income: ${preview29.incomeCount} (₹${preview29.totalIncomePaise/100}), expense: ${preview29.expenseCount} (₹${preview29.totalExpensePaise/100}), err: ${preview29.errorMessage}")
+            wb.close()
+            assertNull(preview29.errorMessage)
+            assertTrue(preview29.items.isNotEmpty())
+            // Verify no item has a blank category/description
+            val blankDescItems = preview29.items.filter { it.category.isBlank() }
+            assertEquals("All items should have a non-blank description/category", 0, blankDescItems.size)
+        }
+
+        val file31 = java.io.File("C:/Users/Musid/Downloads/Ali Educational 31-Oct-2026.xls")
+        if (file31.exists()) {
+            val wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(file31)
+            val preview31 = service.parseWorkbook(wb, file31.name)
+            println("31-Oct items: ${preview31.items.size}, income: ${preview31.incomeCount} (₹${preview31.totalIncomePaise/100}), expense: ${preview31.expenseCount} (₹${preview31.totalExpensePaise/100}), err: ${preview31.errorMessage}")
+            wb.close()
+            assertNull(preview31.errorMessage)
+            assertTrue(preview31.items.isNotEmpty())
+        }
+    }
 }

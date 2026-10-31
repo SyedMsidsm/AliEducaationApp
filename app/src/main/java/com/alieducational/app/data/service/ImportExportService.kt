@@ -17,6 +17,7 @@ import org.apache.poi.ss.usermodel.WorkbookFactory
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,7 +28,8 @@ data class SpreadsheetPreview(
     val headers: List<String> = emptyList(),
     val previewRows: List<List<String>> = emptyList(),
     val totalEstimatedRows: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val isCashLedger: Boolean = false
 )
 
 data class ColumnMapping(
@@ -105,6 +107,20 @@ class ImportExportService @Inject constructor(
         }
     }
 
+    private fun isCashLedgerHeaders(headers: List<String>, sheetOrFileName: String = ""): Boolean {
+        val hLower = headers.map { it.trim().lowercase(Locale.ROOT) }
+        val hasIncomeOrExpense = hLower.any {
+            it.contains("income") || it.contains("expense") || it.contains("cash in") ||
+                    it.contains("cash out") || it.contains("credit") || it.contains("debit")
+        }
+        val hasBalanceOrDate = hLower.any {
+            it.contains("balance") || it.contains("notes") || it.contains("particular") || it.contains("date")
+        }
+        val isTransactionsContext = sheetOrFileName.contains("transaction", ignoreCase = true) ||
+                sheetOrFileName.contains("cash", ignoreCase = true)
+        return (hasIncomeOrExpense && (hasBalanceOrDate || isTransactionsContext)) || (isTransactionsContext && hasIncomeOrExpense)
+    }
+
     private fun previewCsv(stream: InputStream, fileName: String): SpreadsheetPreview {
         val reader = BufferedReader(InputStreamReader(stream))
         val lines = mutableListOf<List<String>>()
@@ -117,7 +133,7 @@ class ImportExportService @Inject constructor(
             if (parts.any { it.isNotBlank() }) {
                 lines.add(parts)
             }
-            if (lines.size >= 12) break
+            if (lines.size >= 15) break
         }
         reader.close()
 
@@ -128,8 +144,31 @@ class ImportExportService @Inject constructor(
             )
         }
 
-        val headers = lines[0]
-        val preview = if (lines.size > 1) lines.subList(1, lines.size) else emptyList()
+        // Detect header row (first row with multiple non-blank items)
+        var headerIndex = 0
+        for (i in 0 until minOf(5, lines.size)) {
+            if (lines[i].count { it.isNotBlank() } >= 2) {
+                headerIndex = i
+                break
+            }
+        }
+
+        val headers = lines[headerIndex]
+        val preview = if (lines.size > headerIndex + 1) lines.subList(headerIndex + 1, lines.size) else emptyList()
+
+        if (isCashLedgerHeaders(headers, fileName)) {
+            return SpreadsheetPreview(
+                fileName = fileName,
+                sheetNames = listOf("CSV Data"),
+                selectedSheetIndex = 0,
+                headers = headers,
+                previewRows = preview,
+                totalEstimatedRows = lineCount,
+                isCashLedger = true,
+                errorMessage = "This file contains Cash In/Out transactions, not product stock. Import it from Cash In/Out Tracker."
+            )
+        }
+
         return SpreadsheetPreview(
             fileName = fileName,
             sheetNames = listOf("CSV Data"),
@@ -153,13 +192,13 @@ class ImportExportService @Inject constructor(
         val activeSheetIndex = if (sheetIndex in 0 until numSheets) sheetIndex else 0
         val sheet = workbook.getSheetAt(activeSheetIndex)
 
-        val allRows = mutableListOf<List<String>>()
+        val allRows = mutableListOf<Pair<Int, List<String>>>()
         val lastRow = sheet.lastRowNum
-        for (i in 0..minOf(lastRow, 15)) {
+        for (i in 0..minOf(lastRow, 25)) {
             val row = sheet.getRow(i) ?: continue
             val rowValues = (0 until row.lastCellNum).map { getCellString(row, it) }
             if (rowValues.any { it.isNotBlank() }) {
-                allRows.add(rowValues)
+                allRows.add(Pair(i, rowValues))
             }
         }
         workbook.close()
@@ -174,8 +213,47 @@ class ImportExportService @Inject constructor(
             )
         }
 
-        val headers = allRows[0]
-        val preview = if (allRows.size > 1) allRows.subList(1, allRows.size) else emptyList()
+        // Find the best header row (e.g. Row with maximum non-blank columns, or explicit keywords)
+        var bestRowIdx = 0
+        var maxColCount = 0
+        for (idx in 0 until minOf(allRows.size, 10)) {
+            val cols = allRows[idx].second
+            val nonBlank = cols.count { it.isNotBlank() }
+            val hasKeywords = cols.any { c ->
+                val l = c.lowercase(Locale.ROOT)
+                l.contains("name") || l.contains("product") || l.contains("item") ||
+                        l.contains("price") || l.contains("cost") || l.contains("stock") ||
+                        l.contains("sku") || l.contains("barcode") || l.contains("income") ||
+                        l.contains("expense") || l.contains("date")
+            }
+            if (hasKeywords && nonBlank >= 2) {
+                bestRowIdx = idx
+                break
+            }
+            if (nonBlank > maxColCount) {
+                maxColCount = nonBlank
+                bestRowIdx = idx
+            }
+        }
+
+        val headers = allRows[bestRowIdx].second
+        val preview = if (allRows.size > bestRowIdx + 1) {
+            allRows.subList(bestRowIdx + 1, allRows.size).map { it.second }
+        } else emptyList()
+
+        if (isCashLedgerHeaders(headers, sheetNames[activeSheetIndex]) || isCashLedgerHeaders(headers, fileName)) {
+            return SpreadsheetPreview(
+                fileName = fileName,
+                sheetNames = sheetNames,
+                selectedSheetIndex = activeSheetIndex,
+                headers = headers,
+                previewRows = preview,
+                totalEstimatedRows = lastRow + 1,
+                isCashLedger = true,
+                errorMessage = "This file contains Cash In/Out transactions, not product stock. Import it from Cash In/Out Tracker."
+            )
+        }
+
         return SpreadsheetPreview(
             fileName = fileName,
             sheetNames = sheetNames,
@@ -212,6 +290,20 @@ class ImportExportService @Inject constructor(
 
         if (rows.size <= 1) {
             return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "No product rows found to import.")
+        }
+
+        // Safety check: block writing products if file is detected as cash-ledger
+        val firstFewRows = rows.take(minOf(10, rows.size))
+        for (r in firstFewRows) {
+            if (isCashLedgerHeaders(r, fileName)) {
+                return@withContext ImportResult(
+                    totalRead = 0,
+                    importedCount = 0,
+                    skippedDuplicatesCount = 0,
+                    isSuccess = false,
+                    failureReason = "This file contains Cash In/Out transactions, not product stock. Import it from Cash In/Out Tracker."
+                )
+            }
         }
 
         var imported = 0

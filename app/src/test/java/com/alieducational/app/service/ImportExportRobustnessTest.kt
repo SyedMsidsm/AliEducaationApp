@@ -108,4 +108,33 @@ class ImportExportRobustnessTest {
         assertNotNull(friendlyMessage)
         assertTrue(friendlyMessage!!.contains("not a recognized Excel spreadsheet"))
     }
+
+    @Test
+    fun testCashLedgerDetection_RealReferenceFiles() {
+        val file29 = java.io.File("C:/Users/Musid/Downloads/Ali Educational 29-Oct-2026.xls")
+        if (file29.exists()) {
+            val wb = WorkbookFactory.create(file29)
+            val sheet = wb.getSheetAt(0)
+            val headers = mutableListOf<String>()
+            // Find header on row 5
+            for (r in 0..minOf(10, sheet.lastRowNum)) {
+                val row = sheet.getRow(r) ?: continue
+                val rowVals = (0 until row.lastCellNum).map { c ->
+                    val cell = row.getCell(c) ?: return@map ""
+                    try { cell.stringCellValue?.trim() ?: "" } catch (_: Exception) { "" }
+                }
+                if (rowVals.any { it.contains("Income", ignoreCase = true) }) {
+                    headers.addAll(rowVals)
+                    break
+                }
+            }
+            wb.close()
+
+            assertTrue("Should find header with Income in 29-Oct file", headers.isNotEmpty())
+            val hLower = headers.map { it.lowercase() }
+            val isCash = hLower.any { it.contains("income") || it.contains("expense") } &&
+                    hLower.any { it.contains("balance") || it.contains("notes") || it.contains("date") }
+            assertTrue("29-Oct file should be detected as a cash ledger", isCash)
+        }
+    }
 }

@@ -218,19 +218,28 @@ fun ImportCatalogScreen(
                     }
                 }
 
-                // Error Message Card (if file invalid / encrypted / corrupt)
+                // Error Message Card (if file invalid / encrypted / corrupt / cash ledger)
                 if (previewData != null && previewData?.errorMessage != null) {
                     item {
+                        val isCash = previewData?.isCashLedger == true
+                        val cardBg = if (isCash) Color(0xFFF9A825).copy(alpha = 0.15f) else Color(0xFFE57373).copy(alpha = 0.15f)
+                        val iconColor = if (isCash) Color(0xFFF9A825) else Color(0xFFE57373)
+                        val titleText = if (isCash) "Cash In/Out Ledger Detected" else "Cannot Read Spreadsheet"
+
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFE57373).copy(alpha = 0.15f)),
+                            colors = CardDefaults.cardColors(containerColor = cardBg),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = Color(0xFFE57373))
+                                    Icon(
+                                        if (isCash) Icons.Filled.Warning else Icons.Filled.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = iconColor
+                                    )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Cannot Read Spreadsheet", fontWeight = FontWeight.Bold, color = Color(0xFFE57373))
+                                    Text(titleText, fontWeight = FontWeight.Bold, color = iconColor)
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
@@ -240,7 +249,8 @@ fun ImportCatalogScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Tip: Ensure your file contains headers like 'Product Name', 'Category', 'Selling Price', 'Stock Qty', and is not password protected.",
+                                    text = if (isCash) "To import transactions from this file, please open the Cash In / Out Tracker from the Home screen."
+                                    else "Tip: Ensure your file contains headers like 'Product Name', 'Category', 'Selling Price', 'Stock Qty', and is not password protected.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -250,7 +260,7 @@ fun ImportCatalogScreen(
                 }
 
                 // Multiple Worksheets Selector
-                if (previewData != null && previewData!!.sheetNames.size > 1) {
+                if (previewData != null && previewData!!.sheetNames.size > 1 && !previewData!!.isCashLedger) {
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -284,8 +294,8 @@ fun ImportCatalogScreen(
                     }
                 }
 
-                // Preview & Column Mapping Section
-                if (previewData != null && previewData?.headers?.isNotEmpty() == true) {
+                // Preview & Column Mapping Section (Only show if valid product stock spreadsheet)
+                if (previewData != null && previewData?.headers?.isNotEmpty() == true && !previewData!!.isCashLedger) {
                     val preview = previewData!!
                     val headersWithNone = listOf("None / Do Not Import") + preview.headers
 

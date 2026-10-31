@@ -175,8 +175,18 @@ class CashTrackerExcelService @Inject constructor(
             if (isRowEmpty(row)) continue
 
             val dateTimestamp = if (dateCol != -1) parseCellDate(row.getCell(dateCol)) else System.currentTimeMillis()
-            val desc = if (descCol != -1) getCellString(row.getCell(descCol)).trim() else "Transaction"
+            val desc = if (descCol != -1) getCellString(row.getCell(descCol)).trim() else ""
             val mode = if (modeCol != -1) getCellString(row.getCell(modeCol)).trim() else ""
+
+            // Exclude summary rows, opening/previous balance, and totals from transactions
+            val combinedText = (desc + " " + mode).lowercase(Locale.ROOT)
+            if (combinedText.contains("previous balance") || combinedText.contains("opening balance") ||
+                combinedText.contains("closing balance") || combinedText.contains("total") ||
+                combinedText.contains("subtotal") || combinedText.contains("grand total")
+            ) {
+                skipped++
+                continue
+            }
 
             var incomePaise = 0L
             var expensePaise = 0L
@@ -203,7 +213,17 @@ class CashTrackerExcelService @Inject constructor(
                 }
             }
 
-            val finalDesc = if (desc.isBlank()) "Imported Entry" else desc
+            if (incomePaise == 0L && expensePaise == 0L) {
+                skipped++
+                continue
+            }
+
+            // Use Notes as description if Category/Description is blank, as common in shop's historical files
+            val finalDesc = when {
+                desc.isNotBlank() -> desc
+                mode.isNotBlank() -> mode
+                else -> "Imported Entry"
+            }
             val finalNotes = mode.ifBlank { "Excel Import" }
 
             if (incomePaise > 0L) {
