@@ -12,7 +12,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val ErrorColor = Color(0xFFCF6679)
+private val ErrorColorDark = Color(0xFFCF6679)
+private val ErrorColorLight = Color(0xFFBA1A1A)
 
 private val DarkColorScheme = darkColorScheme(
     primary = GoldDark,
@@ -23,7 +24,7 @@ private val DarkColorScheme = darkColorScheme(
     onSecondary = DarkBackground,
     secondaryContainer = GoldDark.copy(alpha = 0.15f),
     onSecondaryContainer = GoldDark,
-    tertiary = SuccessDark,
+    tertiary = PositiveGreenDark,
     onTertiary = DarkBackground,
     background = DarkBackground,
     onBackground = DarkOnSurface,
@@ -33,21 +34,21 @@ private val DarkColorScheme = darkColorScheme(
     onSurfaceVariant = DarkOnSurfaceVariant,
     outline = DarkOutline,
     outlineVariant = DarkOutline.copy(alpha = 0.5f),
-    error = ErrorColor,
+    error = ErrorColorDark,
     onError = DarkBackground,
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = GoldLight,
-    onPrimary = LightSurface,
-    primaryContainer = GoldLight.copy(alpha = 0.12f),
-    onPrimaryContainer = GoldLight,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFF4EAD7),
+    onPrimaryContainer = Color(0xFF5D400A),
     secondary = GoldLight,
-    onSecondary = LightSurface,
-    secondaryContainer = GoldLight.copy(alpha = 0.1f),
-    onSecondaryContainer = GoldLight,
-    tertiary = SuccessLight,
-    onTertiary = LightSurface,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFF4EAD7),
+    onSecondaryContainer = Color(0xFF5D400A),
+    tertiary = PositiveGreenLight,
+    onTertiary = Color.White,
     background = LightBackground,
     onBackground = LightOnSurface,
     surface = LightSurface,
@@ -56,8 +57,8 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant = LightOnSurfaceVariant,
     outline = LightOutline,
     outlineVariant = LightOutline.copy(alpha = 0.5f),
-    error = ErrorColor,
-    onError = LightSurface,
+    error = ErrorColorLight,
+    onError = Color.White,
 )
 
 @Composable

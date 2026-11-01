@@ -5,35 +5,44 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_widget_slim_bar"
     android:orientation="vertical"
-    android:paddingStart="8dp"
-    android:paddingEnd="8dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
 
-    <!-- Subtle Heading -->
+    <!-- Prominent Light Heading matching Reference -->
     <TextView
         android:id="@+id/widget_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="@string/app_name"
-        android:textColor="#D9AC46"
-        android:textSize="11sp"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
         android:textStyle="bold"
-        android:letterSpacing="0.05"
         android:paddingStart="6dp"
         android:paddingEnd="6dp"
-        android:paddingBottom="3dp"
+        android:paddingBottom="6dp"
         android:singleLine="true"
         android:clickable="true"
         android:focusable="true"
         android:contentDescription="@string/app_name" />
 
-    <!-- 4 Equal Action Columns -->
+    <!-- Subtle Horizontal Divider Line matching Reference -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:layout_marginBottom="6dp"
+        android:background="#2E3A33" />
+
+    <!-- 4 Equal Action Columns with Vertical Dividers -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:baselineAligned="false"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <!-- Action 1: Cash In -->
@@ -52,24 +61,31 @@
             android:contentDescription="@string/widget_action_cash_in">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:src="@drawable/ic_widget_cash_in"
                 android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="3dp"
                 android:text="@string/widget_action_cash_in"
-                android:textColor="#F6F2E9"
-                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:singleLine="true"
                 android:lines="1"
                 android:ellipsize="none"
                 android:importantForAccessibility="no" />
         </LinearLayout>
+
+        <!-- Vertical Divider 1 -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center_vertical"
+            android:background="#2E3A33" />
 
         <!-- Action 2: Cash Out -->
         <LinearLayout
@@ -87,24 +103,31 @@
             android:contentDescription="@string/widget_action_cash_out">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:src="@drawable/ic_widget_cash_out"
                 android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="3dp"
                 android:text="@string/widget_action_cash_out"
-                android:textColor="#F6F2E9"
-                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:singleLine="true"
                 android:lines="1"
                 android:ellipsize="none"
                 android:importantForAccessibility="no" />
         </LinearLayout>
+
+        <!-- Vertical Divider 2 -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center_vertical"
+            android:background="#2E3A33" />
 
         <!-- Action 3: New Bill -->
         <LinearLayout
@@ -122,24 +145,31 @@
             android:contentDescription="@string/widget_action_new_bill">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:src="@drawable/ic_widget_new_bill"
                 android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="3dp"
                 android:text="@string/widget_action_new_bill"
-                android:textColor="#F6F2E9"
-                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:singleLine="true"
                 android:lines="1"
                 android:ellipsize="none"
                 android:importantForAccessibility="no" />
         </LinearLayout>
+
+        <!-- Vertical Divider 3 -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center_vertical"
+            android:background="#2E3A33" />
 
         <!-- Action 4: Add Stock -->
         <LinearLayout
@@ -157,18 +187,18 @@
             android:contentDescription="@string/widget_action_add_stock">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:src="@drawable/ic_widget_add_stock"
                 android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="3dp"
                 android:text="@string/widget_action_add_stock"
-                android:textColor="#F6F2E9"
-                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:singleLine="true"
                 android:lines="1"

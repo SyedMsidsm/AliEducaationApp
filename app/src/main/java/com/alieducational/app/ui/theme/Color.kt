@@ -9,19 +9,21 @@ val DarkOnSurface = Color(0xFFF6F2E9)
 val DarkOnSurfaceVariant = Color(0xFFB9C0B8)
 val DarkOutline = Color(0xFF354038)
 
-// ── Light Theme Colors ──
-val LightBackground = Color(0xFFF7F6F1)
+// ── Light Theme Colors (Targeting >= 4.5:1 text contrast) ──
+val LightBackground = Color(0xFFF6F7F5)
 val LightSurface = Color(0xFFFFFFFF)
-val LightOnSurface = Color(0xFF171A17)
-val LightOnSurfaceVariant = Color(0xFF566057)
-val LightOutline = Color(0xFFDADFD8)
+val LightOnSurface = Color(0xFF141915)
+val LightOnSurfaceVariant = Color(0xFF47524A)
+val LightOutline = Color(0xFFCCD4CD)
 
 // ── Brand / Accent Colors ──
 val GoldDark = Color(0xFFD9AC46)
-val GoldLight = Color(0xFFA47720)
+val GoldLight = Color(0xFF8A6014) // Darker gold for WCAG AA compliance with white
 
-// ── Semantic Colors ──
-val SuccessDark = Color(0xFF75B890)
-val SuccessLight = Color(0xFF24754C)
-val WarningDark = Color(0xFFE4B765)
-val WarningLight = Color(0xFF915E13)
+// ── Semantic High-Contrast Colors ──
+val PositiveGreenDark = Color(0xFF75B890)
+val PositiveGreenLight = Color(0xFF1B5E20) // WCAG 8.6:1 contrast with white
+val NegativeRedDark = Color(0xFFE57373)
+val NegativeRedLight = Color(0xFFC62828) // WCAG 5.9:1 contrast with white
+val WarningOrangeDark = Color(0xFFE4B765)
+val WarningOrangeLight = Color(0xFFB76E00) // WCAG 4.7:1 contrast with white

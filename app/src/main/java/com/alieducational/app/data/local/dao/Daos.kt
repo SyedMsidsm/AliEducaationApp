@@ -30,6 +30,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ProductDao {
+    @Query("SELECT * FROM products ORDER BY name ASC")
+    fun getAllProducts(): Flow<List<ProductEntity>>
+
     @Query("SELECT * FROM products WHERE isArchived = 0 ORDER BY name ASC")
     fun getAllActiveProducts(): Flow<List<ProductEntity>>
 
@@ -96,6 +99,9 @@ interface ProductDao {
 
 @Dao
 interface StockMovementDao {
+    @Query("SELECT * FROM stock_movements ORDER BY timestamp DESC")
+    fun getAllMovements(): Flow<List<StockMovementEntity>>
+
     @Query("SELECT * FROM stock_movements WHERE productId = :productId ORDER BY timestamp DESC")
     fun getMovementsForProduct(productId: String): Flow<List<StockMovementEntity>>
 
@@ -168,6 +174,9 @@ interface CustomerDao {
 
 @Dao
 interface PurchaseDao {
+    @Query("SELECT * FROM purchase_lines")
+    fun getAllPurchaseLines(): Flow<List<PurchaseLineEntity>>
+
     @Query("SELECT * FROM purchases ORDER BY timestamp DESC")
     fun getAllPurchases(): Flow<List<PurchaseEntity>>
 
@@ -246,6 +255,9 @@ interface SaleDao {
 
 @Dao
 interface AccountPaymentDao {
+    @Query("SELECT * FROM account_payments ORDER BY timestamp DESC")
+    fun getAllAccountPayments(): Flow<List<AccountPaymentEntity>>
+
     @Query("SELECT * FROM account_payments WHERE accountType = :accountType AND accountId = :accountId ORDER BY timestamp DESC")
     fun getPaymentsForAccount(accountType: String, accountId: String): Flow<List<AccountPaymentEntity>>
 

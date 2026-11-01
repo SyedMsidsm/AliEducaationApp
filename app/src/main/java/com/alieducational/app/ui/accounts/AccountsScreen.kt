@@ -1,6 +1,7 @@
 package com.alieducational.app.ui.accounts
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +72,7 @@ import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -125,6 +127,9 @@ fun AccountsScreen(
     var paymentTargetCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
     var completedVoucher by remember { mutableStateOf<PaymentVoucher?>(null) }
     val shopName by viewModel.shopName.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val positiveColor = if (isDarkTheme) PositiveGreenDark else PositiveGreenLight
+    val negativeColor = if (isDarkTheme) NegativeRedDark else NegativeRedLight
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -142,7 +147,7 @@ fun AccountsScreen(
                         onClick = { selectedTab = 0 },
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.ArrowUpward, contentDescription = null, tint = negativeColor, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("We Owe (${suppliers.size})", fontWeight = FontWeight.Bold)
                             }
@@ -153,7 +158,7 @@ fun AccountsScreen(
                         onClick = { selectedTab = 1 },
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.ArrowDownward, contentDescription = null, tint = Color(0xFF75B890), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.ArrowDownward, contentDescription = null, tint = positiveColor, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Customers Owe (${customers.size})", fontWeight = FontWeight.Bold)
                             }
@@ -165,116 +170,142 @@ fun AccountsScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (selectedTab == 0) Color(0xFFE57373).copy(alpha = 0.15f)
-                        else Color(0xFF75B890).copy(alpha = 0.15f)
+                        containerColor = if (isDarkTheme) {
+                            if (selectedTab == 0) NegativeRedDark.copy(alpha = 0.15f)
+                            else PositiveGreenDark.copy(alpha = 0.15f)
+                        } else {
+                            if (selectedTab == 0) Color(0xFFFFEBEE)
+                            else Color(0xFFE8F5E9)
+                        }
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (selectedTab == 0) negativeColor.copy(alpha = 0.35f)
+                        else positiveColor.copy(alpha = 0.35f)
                     ),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(16.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = if (selectedTab == 0) "Amount We Owe Suppliers" else "Amount Customers Owe Us",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = CostCalculator.formatPaiseToRupees(
-                                    if (selectedTab == 0) totalWeOwe ?: 0L else totalCustomersOwe ?: 0L
-                                ),
-                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                                color = if (selectedTab == 0) Color(0xFFE57373) else Color(0xFF75B890)
-                            )
-                            Text(
-                                text = if (selectedTab == 0) {
-                                    if (distinctCreditors > 0) "$distinctCreditors suppliers with outstanding dues" else "No outstanding supplier balances"
-                                } else {
-                                    if (distinctDebtors > 0) "$distinctDebtors customers with outstanding dues" else "No outstanding customer balances"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Button(
-                            onClick = {
-                                if (selectedTab == 0) showAddSupplierDialog = true
-                                else showAddCustomerDialog = true
+                        Text(
+                            text = if (selectedTab == 0) "Amount We Owe Suppliers" else "Amount Customers Owe Us",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = CostCalculator.formatPaiseToRupees(
+                                if (selectedTab == 0) totalWeOwe ?: 0L else totalCustomersOwe ?: 0L
+                            ),
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (selectedTab == 0) negativeColor else positiveColor
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (selectedTab == 0) {
+                                if (distinctCreditors > 0) "$distinctCreditors suppliers with outstanding dues" else "No outstanding supplier balances"
+                            } else {
+                                if (distinctDebtors > 0) "$distinctDebtors customers with outstanding dues" else "No outstanding customer balances"
                             },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedTab == 0) Color(0xFFE57373) else Color(0xFF75B890),
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (selectedTab == 0) "Add Supplier" else "Add Customer", fontWeight = FontWeight.Bold)
-                        }
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                // Search & Filter Chips (All vs Outstanding)
+                // Dedicated Full-Width Add Action Button Row
+                Button(
+                    onClick = {
+                        if (selectedTab == 0) showAddSupplierDialog = true
+                        else showAddCustomerDialog = true
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedTab == 0) negativeColor else positiveColor,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .height(46.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (selectedTab == 0) "+ Add Supplier" else "+ Add Customer",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                // Dedicated Full-Width Search Field Row
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(if (selectedTab == 0) "Search suppliers..." else "Search customers...", fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                // Dedicated Filter Chips Row (All vs Outstanding)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text(if (selectedTab == 0) "Search suppliers..." else "Search customers...", fontSize = 13.sp) },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        trailingIcon = if (searchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        } else null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
                     FilterChip(
                         selected = !showOnlyOutstanding,
                         onClick = { showOnlyOutstanding = false },
-                        label = { Text("All", fontSize = 12.sp) }
+                        label = { Text("All", fontWeight = if (!showOnlyOutstanding) FontWeight.Bold else FontWeight.Normal) }
                     )
                     FilterChip(
                         selected = showOnlyOutstanding,
                         onClick = { showOnlyOutstanding = true },
-                        label = { Text("Outstanding", fontSize = 12.sp) }
+                        label = { Text("Outstanding", fontWeight = if (showOnlyOutstanding) FontWeight.Bold else FontWeight.Normal) }
                     )
                 }
+
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Accounts List
+                // Accounts List or Explanatory Empty State
                 if (selectedTab == 0) {
                     // Suppliers List
                     if (filteredSuppliers.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
-                                .padding(24.dp),
+                                .padding(top = 36.dp, start = 24.dp, end = 24.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             val emptyMsg = when {
-                                suppliers.isEmpty() -> "No suppliers added yet. Tap 'Add Supplier' to create one."
-                                showOnlyOutstanding && suppliers.none { it.currentBalancePaise > 0L } -> "No outstanding supplier balances. All supplier dues are cleared."
+                                suppliers.isEmpty() -> "No suppliers added yet.\nTap '+ Add Supplier' above to create one."
+                                showOnlyOutstanding && suppliers.none { it.currentBalancePaise > 0L } -> "No outstanding supplier balances.\nAll supplier dues are cleared."
                                 else -> "No matching suppliers found."
                             }
-                            Text(emptyMsg, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            Text(
+                                emptyMsg,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
                     } else {
                         LazyColumn(
@@ -287,6 +318,7 @@ fun AccountsScreen(
                             items(filteredSuppliers) { supplier ->
                                 SupplierAccountCard(
                                     supplier = supplier,
+                                    isDarkTheme = isDarkTheme,
                                     onRecordPayment = { paymentTargetSupplier = supplier }
                                 )
                             }
@@ -299,16 +331,20 @@ fun AccountsScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
-                                .padding(24.dp),
+                                .padding(top = 36.dp, start = 24.dp, end = 24.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             val emptyMsg = when {
-                                customers.isEmpty() -> "No customer credit accounts. Tap 'Add Customer' to create one."
-                                showOnlyOutstanding && customers.none { it.currentBalancePaise > 0L } -> "No outstanding customer balances. All customer credit dues are cleared."
+                                customers.isEmpty() -> "No customers added yet.\nTap '+ Add Customer' above to create one."
+                                showOnlyOutstanding && customers.none { it.currentBalancePaise > 0L } -> "No outstanding customer balances.\nAll customer credit dues are cleared."
                                 else -> "No matching customers found."
                             }
-                            Text(emptyMsg, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            Text(
+                                emptyMsg,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
                     } else {
                         LazyColumn(
@@ -321,6 +357,7 @@ fun AccountsScreen(
                             items(filteredCustomers) { customer ->
                                 CustomerAccountCard(
                                     customer = customer,
+                                    isDarkTheme = isDarkTheme,
                                     onRecordRepayment = { paymentTargetCustomer = customer },
                                     onNavigateToBillHistory = onNavigateToBillHistory
                                 )
@@ -755,11 +792,14 @@ fun PaymentVoucherDialog(
 @Composable
 fun SupplierAccountCard(
     supplier: SupplierEntity,
+    isDarkTheme: Boolean = true,
     onRecordPayment: () -> Unit
 ) {
+    val negColor = if (isDarkTheme) NegativeRedDark else NegativeRedLight
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.3f else 0.5f)),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -792,7 +832,7 @@ fun SupplierAccountCard(
                 Text(
                     text = CostCalculator.formatPaiseToRupees(supplier.currentBalancePaise),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (supplier.currentBalancePaise > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface
+                    color = if (supplier.currentBalancePaise > 0) negColor else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Button(
@@ -816,12 +856,15 @@ fun SupplierAccountCard(
 @Composable
 fun CustomerAccountCard(
     customer: CustomerEntity,
+    isDarkTheme: Boolean = true,
     onRecordRepayment: () -> Unit,
     onNavigateToBillHistory: () -> Unit = {}
 ) {
+    val posColor = if (isDarkTheme) PositiveGreenDark else PositiveGreenLight
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.3f else 0.5f)),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -854,7 +897,7 @@ fun CustomerAccountCard(
                 Text(
                     text = CostCalculator.formatPaiseToRupees(customer.currentBalancePaise),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (customer.currentBalancePaise > 0) Color(0xFF75B890) else MaterialTheme.colorScheme.onSurface
+                    color = if (customer.currentBalancePaise > 0) posColor else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

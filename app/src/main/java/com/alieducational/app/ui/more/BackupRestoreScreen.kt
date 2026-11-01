@@ -59,6 +59,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alieducational.app.data.service.BackupMetadata
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.ui.theme.*
+import androidx.compose.foundation.BorderStroke
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -80,6 +82,11 @@ fun BackupRestoreScreen(
     val lastExternalSaveDestination by viewModel.lastExternalSaveDestination.collectAsState()
 
     var selectedBackupForRestore by remember { mutableStateOf<BackupMetadata?>(null) }
+    var viewingDetailsBackup by remember { mutableStateOf<BackupMetadata?>(null) }
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val positiveColor = if (isDarkTheme) PositiveGreenDark else PositiveGreenLight
+    val negativeColor = if (isDarkTheme) NegativeRedDark else NegativeRedLight
+    val warningColor = if (isDarkTheme) WarningOrangeDark else WarningOrangeLight
 
     LaunchedEffect(Unit) {
         viewModel.loadBackups()
@@ -165,71 +172,176 @@ fun BackupRestoreScreen(
                     }
                 }
 
-                // Info Card
+                // Backup Status Card matching Section 4 recommendation
                 item {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    val latestBackup = availableBackups.firstOrNull()
+                    val hasBackup = latestBackup != null
+                    val dateFormatted = if (hasBackup) {
+                        SimpleDateFormat("d MMMM yyyy, h:mm a", Locale.getDefault()).format(Date(latestBackup!!.timestamp))
+                    } else if (lastBackupTime > 0) {
+                        SimpleDateFormat("d MMMM yyyy, h:mm a", Locale.getDefault()).format(Date(lastBackupTime))
+                    } else "Never"
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.3f else 0.5f)),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Filled.Backup,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Column {
                                     Text(
-                                        "Local Phone Backup",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                        text = if (hasBackup) "Backup ready" else "Local Phone Backup",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    val localDateStr = if (lastBackupTime > 0) {
-                                        SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastBackupTime))
-                                    } else "Never"
-                                    val externalDateStr = if (lastExternalSaveTime > 0) {
-                                        SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastExternalSaveTime))
-                                    } else "None recorded"
                                     Text(
-                                        "Last local backup: $localDateStr",
+                                        text = dateFormatted,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            color = if (hasBackup) positiveColor.copy(alpha = 0.15f) else warningColor.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
                                     Text(
-                                        "Last external copy: $externalDateStr",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (lastExternalSaveTime > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = if (hasBackup) "Verified Ready" else "Pending",
+                                        color = if (hasBackup) positiveColor else warningColor,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelSmall
                                     )
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // Three status rows from Section 4
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Complete recovery file", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Text(if (hasBackup) "Ready" else "Not created", fontWeight = FontWeight.SemiBold, color = if (hasBackup) positiveColor else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Readable Excel records", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Text(if (hasBackup) "Ready" else "Not created", fontWeight = FontWeight.SemiBold, color = if (hasBackup) positiveColor else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Photos and files", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    if (hasBackup) "${latestBackup!!.photoCount} verified" else "0 files",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Primary Save Both Button
+                            Button(
+                                onClick = {
+                                    val target = latestBackup ?: return@Button
+                                    val f = File(target.packageFilePath ?: target.filePath)
+                                    pendingFileToSave = f
+                                    saveToDriveLauncher.launch(f.name)
+                                },
+                                enabled = hasBackup && !isCreatingBackup,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Save Both to Drive / Files", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Secondary actions: Share Package + View Details
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val target = latestBackup ?: return@OutlinedButton
+                                        val path = target.packageFilePath ?: target.filePath
+                                        val shareIntent = viewModel.getBackupShareIntent(path)
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Backup Package"))
+                                    },
+                                    enabled = hasBackup,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Share package", fontSize = 12.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        viewingDetailsBackup = latestBackup
+                                    },
+                                    enabled = hasBackup,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Filled.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("View details", fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Action buttons: Create Backup Now & Restore from File
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = { viewModel.createBackup() },
                                     enabled = !isCreatingBackup,
                                     modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurface
+                                    )
                                 ) {
                                     if (isCreatingBackup) {
                                         androidx.compose.material3.CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
-                                            color = MaterialTheme.colorScheme.onPrimary,
                                             strokeWidth = 2.dp
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Creating...", fontSize = 13.sp)
+                                        Text("Creating...", fontSize = 12.sp)
                                     } else {
-                                        Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Backup Now")
+                                        Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Backup Now", fontSize = 12.sp)
                                     }
                                 }
 
@@ -238,42 +350,16 @@ fun BackupRestoreScreen(
                                         restoreFilePicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                                     },
                                     modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Restore from File")
+                                    Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Restore Backup", fontSize = 12.sp)
                                 }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            OutlinedButton(
-                                onClick = {
-                                    val latest = availableBackups.firstOrNull()
-                                    if (latest != null) {
-                                        pendingFileToSave = File(latest.filePath)
-                                        saveToDriveLauncher.launch(latest.fileName)
-                                    } else {
-                                        viewModel.createBackup {
-                                            viewModel.availableBackups.value.firstOrNull()?.let { b ->
-                                                pendingFileToSave = File(b.filePath)
-                                                saveToDriveLauncher.launch(b.fileName)
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Save Copy to Google Drive / Files")
                             }
                         }
                     }
                 }
-
                 // Status Message
                 if (backupStatus != null) {
                     item {
@@ -557,6 +643,43 @@ fun BackupRestoreScreen(
             dismissButton = {
                 OutlinedButton(onClick = { selectedBackupForRestore = null }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+// View Details Dialog
+    if (viewingDetailsBackup != null) {
+        val b = viewingDetailsBackup!!
+        val dateStr = SimpleDateFormat("dd MMMM yyyy, hh:mm a", Locale.getDefault()).format(Date(b.timestamp))
+
+        AlertDialog(
+            onDismissRequest = { viewingDetailsBackup = null },
+            icon = {
+                Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+            },
+            title = { Text("Backup Package Details", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Snapshot ID: ${b.snapshotId.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text("Date: $dateStr", style = MaterialTheme.typography.bodySmall)
+                    Text("Package Size: ${b.sizeBytes / 1024} KB", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Verified Record Counts:", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    Text("• Products in Catalog: ${b.productCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Total Bills / Invoices: ${b.billCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Customer Credit Accounts: ${b.customerCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Supplier Accounts: ${b.supplierCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Cash Ledger Transactions: ${b.cashInOutCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Pigmy Savings Records: ${b.pigmyCount}", style = MaterialTheme.typography.bodySmall)
+                    Text("• Photos & Attachments: ${b.photoCount}", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Status: ${b.integrityNote}", style = MaterialTheme.typography.labelSmall, color = positiveColor)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewingDetailsBackup = null }) {
+                    Text("Close")
                 }
             }
         )

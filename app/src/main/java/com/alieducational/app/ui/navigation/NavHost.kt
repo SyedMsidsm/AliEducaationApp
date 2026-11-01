@@ -82,6 +82,7 @@ fun AppNavigation(
                 onNavigateToPigmy = { navController.navigate(Screen.PigmySavings.route) },
                 onNavigateToBackup = { navController.navigate(Screen.BackupRestore.route) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                onNavigateToBillHistory = { navController.navigate(Screen.BillHistory.route) },
             )
         }
 

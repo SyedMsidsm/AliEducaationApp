@@ -1,9 +1,14 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
+    android:width="32dp"
+    android:height="32dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- Upright Down Arrow (Green) -->
     <path
-        android:fillColor="#75B890"
-        android:pathData="M20,5.41L18.59,4 7,15.59V9H5v10h10v-2H8.41z"/>
+        android:fillColor="#4CAF50"
+        android:pathData="M12,16.5 L6,10.5 H10 V3 H14 V10.5 H18 Z" />
+    <!-- Horizontal Baseline Tray -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M4.5,19 H19.5 C20.3,19 21,19.7 21,20.5 C21,21.3 20.3,22 19.5,22 H4.5 C3.7,22 3,21.3 3,20.5 C3,19.7 3.7,19 4.5,19 Z" />
 </vector>
