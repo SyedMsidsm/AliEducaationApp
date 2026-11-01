@@ -104,6 +104,18 @@ class BackupRestoreService @Inject constructor(
             zipOut.putNextEntry(ZipEntry("manifest.json"))
             zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
             zipOut.closeEntry()
+
+            // C. Include durable photo attachments
+            val attachmentsDir = File(context.filesDir, "attachments")
+            if (attachmentsDir.exists() && attachmentsDir.isDirectory) {
+                attachmentsDir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.length() > 0) {
+                        zipOut.putNextEntry(ZipEntry("attachments/${file.name}"))
+                        FileInputStream(file).use { fIn -> fIn.copyTo(zipOut) }
+                        zipOut.closeEntry()
+                    }
+                }
+            }
         }
 
         // 3. Validate archive before finalizing
@@ -232,6 +244,14 @@ class BackupRestoreService @Inject constructor(
                     File(dbFile.parent, "ali_educational.db-shm").delete()
 
                     restoredDb = true
+                } else if (entry!!.name.startsWith("attachments/") && !entry!!.isDirectory) {
+                    val destDir = File(context.filesDir, "attachments")
+                    if (!destDir.exists()) destDir.mkdirs()
+                    val filename = File(entry!!.name).name
+                    val destFile = File(destDir, filename)
+                    FileOutputStream(destFile).use { out ->
+                        zipIn.copyTo(out)
+                    }
                 }
                 zipIn.closeEntry()
             }

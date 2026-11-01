@@ -196,7 +196,19 @@ data class ShopExpenseEntity(
     val serviceTarget: String? = null, // PRINTING, PHOTOCOPYING, STICKER_PRINTING, SHARED, or custom serviceId
     val attachmentUri: String? = null,
     val isSavingsTransfer: Boolean = false,
+    val categoryId: String? = null,
     val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "cash_categories")
+data class CashCategoryEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val isSystem: Boolean = false,
+    val isArchived: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "import_batches")
@@ -233,6 +245,8 @@ data class PigmySchemeEntity(
     val name: String,
     val usualDailyAmountPaise: Long = 10000L, // in paise (e.g. ₹100.00)
     val isArchived: Boolean = false,
+    val openingBalancePaise: Long = 0L,
+    val openingBalanceDate: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
@@ -247,6 +261,22 @@ data class PigmyDepositEntity(
     val paymentSource: String = "CASH", // CASH, BANK
     val notes: String? = null,
     val linkedExpenseId: String? = null, // links to ShopExpenseEntity
+    val isVoided: Boolean = false,
+    val voidReason: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "pigmy_withdrawals")
+data class PigmyWithdrawalEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val accountSchemeId: String,
+    val withdrawalTimestamp: Long = System.currentTimeMillis(),
+    val amountPaise: Long,
+    val destination: String = "CASH", // CASH, BANK
+    val notes: String? = null,
+    val linkedExpenseId: String? = null, // links to ShopExpenseEntity (Cash In)
     val isVoided: Boolean = false,
     val voidReason: String? = null,
     val createdAt: Long = System.currentTimeMillis(),

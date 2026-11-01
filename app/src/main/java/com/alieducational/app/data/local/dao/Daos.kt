@@ -7,6 +7,8 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import com.alieducational.app.data.local.entity.AccountPaymentEntity
+import com.alieducational.app.data.local.entity.CashCategoryEntity
+import com.alieducational.app.data.local.entity.PigmyWithdrawalEntity
 import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.ImportBatchEntity
@@ -450,4 +452,74 @@ interface PigmySchemeDao {
 
     @Query("SELECT COUNT(*) FROM pigmy_schemes")
     suspend fun getSchemeCount(): Int
+
+    @Query("UPDATE pigmy_schemes SET openingBalancePaise = :openingBalancePaise, openingBalanceDate = :date, updatedAt = :updatedAt WHERE id = :schemeId")
+    suspend fun updateOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long?, updatedAt: Long = System.currentTimeMillis())
 }
+
+@Dao
+interface CashCategoryDao {
+    @Query("SELECT * FROM cash_categories ORDER BY name ASC")
+    fun getAllCategories(): Flow<List<CashCategoryEntity>>
+
+    @Query("SELECT * FROM cash_categories WHERE isArchived = 0 ORDER BY name ASC")
+    fun getActiveCategories(): Flow<List<CashCategoryEntity>>
+
+    @Query("SELECT * FROM cash_categories WHERE id = :id LIMIT 1")
+    suspend fun getCategoryById(id: String): CashCategoryEntity?
+
+    @Query("SELECT * FROM cash_categories WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun getCategoryByName(name: String): CashCategoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategory(category: CashCategoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategories(categories: List<CashCategoryEntity>)
+
+    @Update
+    suspend fun updateCategory(category: CashCategoryEntity)
+
+    @Query("UPDATE cash_categories SET isArchived = :isArchived, updatedAt = :timestamp WHERE id = :id")
+    suspend fun setArchived(id: String, isArchived: Boolean, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cash_categories SET name = :newName, updatedAt = :timestamp WHERE id = :id")
+    suspend fun renameCategory(id: String, newName: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("SELECT COUNT(*) FROM cash_categories")
+    suspend fun getCategoryCount(): Int
+}
+
+@Dao
+interface PigmyWithdrawalDao {
+    @Query("SELECT * FROM pigmy_withdrawals WHERE accountSchemeId = :schemeId ORDER BY withdrawalTimestamp DESC")
+    fun getWithdrawalsForScheme(schemeId: String): Flow<List<PigmyWithdrawalEntity>>
+
+    @Query("SELECT * FROM pigmy_withdrawals ORDER BY withdrawalTimestamp DESC")
+    fun getAllWithdrawals(): Flow<List<PigmyWithdrawalEntity>>
+
+    @Query("SELECT * FROM pigmy_withdrawals WHERE isVoided = 0 ORDER BY withdrawalTimestamp DESC")
+    fun getActiveWithdrawals(): Flow<List<PigmyWithdrawalEntity>>
+
+    @Query("SELECT * FROM pigmy_withdrawals WHERE withdrawalTimestamp BETWEEN :startTime AND :endTime ORDER BY withdrawalTimestamp DESC")
+    fun getWithdrawalsInRange(startTime: Long, endTime: Long): Flow<List<PigmyWithdrawalEntity>>
+
+    @Query("SELECT * FROM pigmy_withdrawals WHERE id = :id LIMIT 1")
+    suspend fun getWithdrawalById(id: String): PigmyWithdrawalEntity?
+
+    @Query("SELECT SUM(amountPaise) FROM pigmy_withdrawals WHERE isVoided = 0")
+    fun getTotalRecordedWithdrawalsPaise(): Flow<Long?>
+
+    @Query("SELECT SUM(amountPaise) FROM pigmy_withdrawals WHERE accountSchemeId = :schemeId AND isVoided = 0")
+    fun getTotalForScheme(schemeId: String): Flow<Long?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertWithdrawal(withdrawal: PigmyWithdrawalEntity)
+
+    @Update
+    suspend fun updateWithdrawal(withdrawal: PigmyWithdrawalEntity)
+
+    @Query("UPDATE pigmy_withdrawals SET isVoided = 1, voidReason = :reason, updatedAt = :timestamp WHERE id = :id")
+    suspend fun voidWithdrawal(id: String, reason: String, timestamp: Long = System.currentTimeMillis())
+}
+

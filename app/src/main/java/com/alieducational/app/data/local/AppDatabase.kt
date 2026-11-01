@@ -9,7 +9,11 @@ import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.PigmyDepositDao
+import com.alieducational.app.data.local.dao.CashCategoryDao
 import com.alieducational.app.data.local.dao.PigmySchemeDao
+import com.alieducational.app.data.local.dao.PigmyWithdrawalDao
+import com.alieducational.app.data.local.entity.CashCategoryEntity
+import com.alieducational.app.data.local.entity.PigmyWithdrawalEntity
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.ProductGiveawayDao
@@ -52,15 +56,17 @@ import com.alieducational.app.data.local.entity.SyncEventEntity
         SaleLineEntity::class,
         AccountPaymentEntity::class,
         ShopExpenseEntity::class,
+        CashCategoryEntity::class,
         ImportBatchEntity::class,
         HeldBillEntity::class,
         PigmyDepositEntity::class,
+        PigmyWithdrawalEntity::class,
         PigmySchemeEntity::class,
         ProductGiveawayEntity::class,
         ServiceDefinitionEntity::class,
         SyncEventEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -76,7 +82,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun importBatchDao(): ImportBatchDao
     abstract fun heldBillDao(): HeldBillDao
     abstract fun pigmyDepositDao(): PigmyDepositDao
+    abstract fun pigmyWithdrawalDao(): PigmyWithdrawalDao
     abstract fun pigmySchemeDao(): PigmySchemeDao
+    abstract fun cashCategoryDao(): CashCategoryDao
     abstract fun productGiveawayDao(): ProductGiveawayDao
     abstract fun serviceDefinitionDao(): ServiceDefinitionDao
     abstract fun syncEventDao(): SyncEventDao
@@ -242,6 +250,62 @@ abstract class AppDatabase : RoomDatabase() {
                         ('scheme_2', 'Pigmy Scheme 2', 20000, 0, $now + 1, $now + 1),
                         ('scheme_3', 'Pigmy Scheme 3', 30000, 0, $now + 2, $now + 2)
                 """.trimIndent())
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Create cash_categories table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `cash_categories` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `isSystem` INTEGER NOT NULL DEFAULT 0,
+                        `isArchived` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                """.trimIndent())
+
+                // 2. Populate default categories
+                val now = System.currentTimeMillis()
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `cash_categories` (`id`, `name`, `isSystem`, `isArchived`, `createdAt`, `updatedAt`)
+                    VALUES
+                        ('cat_general', 'General', 1, 0, $now, $now),
+                        ('cat_pigmy', 'Pigmy', 1, 0, $now + 1, $now + 1),
+                        ('cat_rent', 'Rent', 0, 0, $now + 2, $now + 2),
+                        ('cat_electricity', 'Electricity', 0, 0, $now + 3, $now + 3),
+                        ('cat_transport', 'Transport', 0, 0, $now + 4, $now + 4),
+                        ('cat_salary', 'Salary', 0, 0, $now + 5, $now + 5),
+                        ('cat_tea_snacks', 'Tea & Snacks', 0, 0, $now + 6, $now + 6)
+                """.trimIndent())
+
+                // 3. Alter shop_expenses to add categoryId
+                db.execSQL("ALTER TABLE shop_expenses ADD COLUMN categoryId TEXT DEFAULT NULL")
+
+                // 4. Create pigmy_withdrawals table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `pigmy_withdrawals` (
+                        `id` TEXT NOT NULL,
+                        `accountSchemeId` TEXT NOT NULL,
+                        `withdrawalTimestamp` INTEGER NOT NULL,
+                        `amountPaise` INTEGER NOT NULL,
+                        `destination` TEXT NOT NULL,
+                        `notes` TEXT,
+                        `linkedExpenseId` TEXT,
+                        `isVoided` INTEGER NOT NULL DEFAULT 0,
+                        `voidReason` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                """.trimIndent())
+
+                // 5. Alter pigmy_schemes to add openingBalancePaise and openingBalanceDate
+                db.execSQL("ALTER TABLE pigmy_schemes ADD COLUMN openingBalancePaise INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE pigmy_schemes ADD COLUMN openingBalanceDate INTEGER DEFAULT NULL")
             }
         }
 

@@ -11,6 +11,9 @@ import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.data.local.entity.ServiceDefinitionEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
+import com.alieducational.app.data.local.entity.CashCategoryEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
+import com.alieducational.app.data.local.entity.PigmyWithdrawalEntity
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
 import com.alieducational.app.data.preferences.AppPreferences
@@ -194,6 +197,21 @@ class AliViewModel @Inject constructor(
     val totalPigmyDepositsPaise = repository.totalPigmyDepositsPaise
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
+    val allPigmyWithdrawals = repository.allPigmyWithdrawals
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activePigmyWithdrawals = repository.activePigmyWithdrawals
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalPigmyWithdrawalsPaise = repository.totalPigmyWithdrawalsPaise
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val allCashCategories = repository.allCashCategories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeCashCategories = repository.activeCashCategories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allGiveaways = repository.allGiveaways
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -207,7 +225,10 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     init {
-        viewModelScope.launch { repository.ensureDefaultPigmySchemes() }
+        viewModelScope.launch {
+            repository.ensureDefaultPigmySchemes()
+            repository.ensureDefaultCashCategories()
+        }
         viewModelScope.launch {
             preferences.setAppLanguage("en")
             repository.ensurePredefinedServices()
@@ -850,10 +871,19 @@ class AliViewModel @Inject constructor(
         isIncome: Boolean,
         notes: String?,
         timestamp: Long = System.currentTimeMillis(),
+        categoryId: String? = null,
+        attachmentUri: String? = null,
         onDone: () -> Unit = {}
     ) {
         viewModelScope.launch {
-            repository.recordShopExpense(category, amountPaise, isIncome, notes, timestamp)
+            repository.recordShopExpense(category, amountPaise, isIncome, notes, timestamp, categoryId, attachmentUri)
+            onDone()
+        }
+    }
+
+    fun updateExpenseAttachment(expenseId: String, attachmentUri: String?, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.updateExpenseAttachment(expenseId, attachmentUri)
             onDone()
         }
     }
@@ -1116,6 +1146,77 @@ class AliViewModel @Inject constructor(
     fun voidPigmyDeposit(depositId: String, reason: String, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             repository.voidPigmyDeposit(depositId, reason)
+            onDone()
+        }
+    }
+
+    fun recordPigmyWithdrawal(
+        schemeId: String,
+        amountPaise: Long,
+        destination: String = "CASH",
+        notes: String? = null,
+        withdrawalTimestamp: Long = System.currentTimeMillis(),
+        onDone: (String) -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val id = repository.recordPigmyWithdrawal(schemeId, amountPaise, destination, notes, withdrawalTimestamp)
+                onDone(id)
+            } catch (e: Exception) {
+                onError(e.message ?: "Failed to record withdrawal")
+            }
+        }
+    }
+
+    fun updatePigmyWithdrawal(
+        withdrawalId: String,
+        schemeId: String,
+        amountPaise: Long,
+        destination: String,
+        notes: String?,
+        withdrawalTimestamp: Long,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.updatePigmyWithdrawal(withdrawalId, schemeId, amountPaise, destination, notes, withdrawalTimestamp)
+            onDone()
+        }
+    }
+
+    fun voidPigmyWithdrawal(withdrawalId: String, reason: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.voidPigmyWithdrawal(withdrawalId, reason)
+            onDone()
+        }
+    }
+
+    fun updatePigmySchemeOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long? = null, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.updatePigmySchemeOpeningBalance(schemeId, openingBalancePaise, date)
+            onDone()
+        }
+    }
+
+    fun createCashCategory(name: String, onDone: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val id = repository.createCashCategory(name)
+                onDone(id)
+            } catch (ignored: Exception) {}
+        }
+    }
+
+    fun renameCashCategory(id: String, newName: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.renameCashCategory(id, newName)
+            onDone()
+        }
+    }
+
+    fun setCashCategoryArchived(id: String, isArchived: Boolean, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.setCashCategoryArchived(id, isArchived)
             onDone()
         }
     }

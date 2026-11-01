@@ -2,18 +2,20 @@ package com.alieducational.app.ui.reports
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.Toast
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.AccessTime
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,15 +29,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -53,14 +62,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,11 +74,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -83,6 +92,9 @@ import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.service.CashTrackerImportPreview
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.util.AttachmentManager
+import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -96,8 +108,11 @@ fun CashTrackerScreen(
     modifier: Modifier = Modifier
 ) {
     val allExpenses by viewModel.allExpenses.collectAsState()
+    val activeCategories by viewModel.activeCashCategories.collectAsState()
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var isImporting by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var importPreview by remember { mutableStateOf<CashTrackerImportPreview?>(null) }
@@ -116,12 +131,15 @@ fun CashTrackerScreen(
     }
 
     // 0: All, 1: Daily, 2: Weekly, 3: Monthly, 4: Yearly
-    var selectedTab by remember { mutableIntStateOf(3) } // Default to Monthly (like in Picture 4)
+    var selectedTab by remember { mutableIntStateOf(3) } // Default to Monthly
     var anchorTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    var selectedCategoryFilter by remember { mutableStateOf<String?>(null) } // null = All Categories
 
     var showAddDialog by remember { mutableStateOf(false) }
     var isIncomeMode by remember { mutableStateOf(true) }
     var selectedItemForVoid by remember { mutableStateOf<ShopExpenseEntity?>(null) }
+    var viewingPhotoFile by remember { mutableStateOf<File?>(null) }
 
     // Date calculations based on anchor timestamp and selected tab
     val (startDate, endDate, rangeText) = remember(selectedTab, anchorTimestamp) {
@@ -194,9 +212,17 @@ fun CashTrackerScreen(
         }
     }
 
-    // Filter transactions in active range
-    val filteredItems = remember(allExpenses, startDate, endDate) {
-        allExpenses.filter { it.timestamp in startDate..endDate }
+    // Filter transactions in active range and category filter
+    val filteredItems = remember(allExpenses, startDate, endDate, selectedCategoryFilter) {
+        allExpenses.filter { item ->
+            val inDate = item.timestamp in startDate..endDate
+            val matchesCategory = if (selectedCategoryFilter == null) {
+                true
+            } else {
+                item.categoryId == selectedCategoryFilter || item.category.equals(selectedCategoryFilter, ignoreCase = true)
+            }
+            inDate && matchesCategory
+        }
     }
 
     // Totals
@@ -238,7 +264,7 @@ fun CashTrackerScreen(
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Ali Educational",
+                    text = "Cash In & Out",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
@@ -273,7 +299,7 @@ fun CashTrackerScreen(
                     }
                 }
 
-                // Share / Export via WhatsApp / Others Button
+                // Share / Export via WhatsApp Button
                 IconButton(
                     onClick = {
                         val itemsToExport = if (filteredItems.isNotEmpty()) filteredItems else allExpenses
@@ -356,21 +382,16 @@ fun CashTrackerScreen(
                         }
                         anchorTimestamp = cal.timeInMillis
                     },
-                    enabled = selectedTab != 0
+                    enabled = selectedTab != 0,
+                    modifier = Modifier.size(32.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.ChevronLeft,
-                        contentDescription = "Previous",
-                        tint = if (selectedTab != 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous")
                 }
 
                 Text(
                     text = rangeText,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 IconButton(
@@ -384,12 +405,37 @@ fun CashTrackerScreen(
                         }
                         anchorTimestamp = cal.timeInMillis
                     },
-                    enabled = selectedTab != 0
+                    enabled = selectedTab != 0,
+                    modifier = Modifier.size(32.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = "Next",
-                        tint = if (selectedTab != 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Next")
+                }
+            }
+
+            // Category Filter Scrollable Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = selectedCategoryFilter == null,
+                    onClick = { selectedCategoryFilter = null },
+                    label = { Text("All Categories (${allExpenses.size})", fontSize = 11.sp) }
+                )
+
+                activeCategories.forEach { cat ->
+                    val count = allExpenses.count { it.categoryId == cat.id || it.category.equals(cat.name, ignoreCase = true) }
+                    FilterChip(
+                        selected = selectedCategoryFilter == cat.id || selectedCategoryFilter == cat.name,
+                        onClick = {
+                            selectedCategoryFilter = if (selectedCategoryFilter == cat.id || selectedCategoryFilter == cat.name) null else cat.id
+                        },
+                        label = { Text("${cat.name} ($count)", fontSize = 11.sp) }
                     )
                 }
             }
@@ -398,36 +444,33 @@ fun CashTrackerScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Date",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = "Description / Details",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1.5f)
                 )
                 Text(
                     text = "Income",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF75B890),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF2E7D32),
                     textAlign = TextAlign.End,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
                     text = "Expense",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFFE57373),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFFD32F2F),
                     textAlign = TextAlign.End,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-            // Transaction List Grouped by Date
+            // Content List
             if (filteredItems.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -482,14 +525,64 @@ fun CashTrackerScreen(
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Description & Time
+                                // Description, Category pill, Time & Photo Icon
                                 Column(modifier = Modifier.weight(1.5f)) {
-                                    val noteSuffix = if (!entry.notes.isNullOrBlank()) " - ${entry.notes}" else ""
-                                    Text(
-                                        text = "${entry.category}$noteSuffix",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // Category Pill
+                                        Card(
+                                            shape = RoundedCornerShape(4.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (entry.isSavingsTransfer) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                            )
+                                        ) {
+                                            Text(
+                                                text = entry.category,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (entry.isSavingsTransfer) Color(0xFFE65100) else MaterialTheme.colorScheme.onPrimaryContainer,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+
+                                        // Photo Attachment Indicator
+                                        if (!entry.attachmentUri.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .background(Color(0xFFE0F2FE), RoundedCornerShape(4.dp))
+                                                    .clickable {
+                                                        val f = AttachmentManager.getAttachmentFile(context, entry.attachmentUri)
+                                                        if (f != null && f.exists()) {
+                                                            viewingPhotoFile = f
+                                                        } else {
+                                                            Toast.makeText(context, "Attachment file not found", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Image,
+                                                    contentDescription = "View Photo",
+                                                    tint = Color(0xFF0284C7),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    val noteSuffix = if (!entry.notes.isNullOrBlank()) entry.notes else ""
+                                    if (!noteSuffix.isNullOrBlank()) {
+                                        Text(
+                                            text = noteSuffix,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
                                     Text(
                                         text = timeFormat.format(Date(entry.timestamp)),
                                         style = MaterialTheme.typography.labelSmall,
@@ -501,7 +594,7 @@ fun CashTrackerScreen(
                                 Text(
                                     text = if (entry.isIncome) CostCalculator.formatPaiseToRupees(entry.amountPaise) else "",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF75B890),
+                                    color = Color(0xFF2E7D32),
                                     textAlign = TextAlign.End,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -510,7 +603,7 @@ fun CashTrackerScreen(
                                 Text(
                                     text = if (!entry.isIncome) CostCalculator.formatPaiseToRupees(entry.amountPaise) else "",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFE57373),
+                                    color = Color(0xFFD32F2F),
                                     textAlign = TextAlign.End,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -541,7 +634,7 @@ fun CashTrackerScreen(
                         .height(48.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF4CAF50),
+                        containerColor = Color(0xFF2E7D32),
                         contentColor = Color.White
                     )
                 ) {
@@ -560,7 +653,7 @@ fun CashTrackerScreen(
                         .height(48.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE53935),
+                        containerColor = Color(0xFFD32F2F),
                         contentColor = Color.White
                     )
                 ) {
@@ -570,7 +663,7 @@ fun CashTrackerScreen(
                 }
             }
 
-            // Summary Footer: Total Income | Total Expense | Balance
+            // Summary Footer
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
@@ -591,12 +684,12 @@ fun CashTrackerScreen(
                         Text(
                             text = "Total Income",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF75B890)
+                            color = Color(0xFF2E7D32)
                         )
                         Text(
                             text = CostCalculator.formatPaiseToRupees(totalIncomePaise),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF75B890)
+                            color = Color(0xFF2E7D32)
                         )
                     }
 
@@ -614,12 +707,12 @@ fun CashTrackerScreen(
                         Text(
                             text = "Total Expense",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFE57373)
+                            color = Color(0xFFD32F2F)
                         )
                         Text(
                             text = CostCalculator.formatPaiseToRupees(totalExpensePaise),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFFE57373)
+                            color = Color(0xFFD32F2F)
                         )
                     }
 
@@ -637,12 +730,12 @@ fun CashTrackerScreen(
                         Text(
                             text = "Balance",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (netBalancePaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                            color = if (netBalancePaise >= 0) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )
                         Text(
                             text = CostCalculator.formatPaiseToRupees(netBalancePaise),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = if (netBalancePaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                            color = if (netBalancePaise >= 0) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )
                     }
                 }
@@ -650,15 +743,41 @@ fun CashTrackerScreen(
         }
     }
 
-    // Add Income / Expense Dialog with Editable Date & Time (F3)
+    // Add Income / Expense Dialog with Dedicated Category Selector & Photo Attachment
     if (showAddDialog) {
         var amountStr by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
         var paymentMode by remember { mutableStateOf("CASH") }
         var note by remember { mutableStateOf("") }
-        var entryTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
-        val dialogContext = LocalContext.current
+        var entryTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
+        // Category selection
+        var selectedCatId by remember { mutableStateOf(activeCategories.firstOrNull { it.name == "General" }?.id ?: activeCategories.firstOrNull()?.id ?: "") }
+        var selectedCatName by remember { mutableStateOf(activeCategories.firstOrNull { it.id == selectedCatId }?.name ?: "General") }
+
+        var showCreateCategoryDialog by remember { mutableStateOf(false) }
+
+        // Photo attachment
+        var attachedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+        var tempCameraFile by remember { mutableStateOf<File?>(null) }
+
+        val cameraLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.TakePicture()
+        ) { success ->
+            if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
+                attachedPhotoUri = Uri.fromFile(tempCameraFile)
+            }
+        }
+
+        val galleryLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri ->
+            if (uri != null) {
+                attachedPhotoUri = uri
+            }
+        }
+
+        val dialogContext = LocalContext.current
         val cal = Calendar.getInstance().apply { timeInMillis = entryTimestamp }
         val entryDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(entryTimestamp))
         val entryTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(entryTimestamp))
@@ -670,135 +789,270 @@ fun CashTrackerScreen(
                 Text(
                     text = if (isIncomeMode) "Add Income (Cash In)" else "Add Expense (Cash Out)",
                     fontWeight = FontWeight.Bold,
-                    color = if (isIncomeMode) Color(0xFF75B890) else Color(0xFFE57373)
+                    color = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // Date & Time pickers
-                    Text(
-                        text = "Transaction Date & Time",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                DatePickerDialog(
-                                    dialogContext,
-                                    { _, y, m, d ->
-                                        val c = Calendar.getInstance().apply {
-                                            timeInMillis = entryTimestamp
-                                            set(Calendar.YEAR, y)
-                                            set(Calendar.MONTH, m)
-                                            set(Calendar.DAY_OF_MONTH, d)
-                                        }
-                                        entryTimestamp = c.timeInMillis
-                                    },
-                                    cal.get(Calendar.YEAR),
-                                    cal.get(Calendar.MONTH),
-                                    cal.get(Calendar.DAY_OF_MONTH)
-                                ).show()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1.1f)
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        // Category Selector
+                        Text(
+                            text = "Category *",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(entryDateStr, fontSize = 12.sp, maxLines = 1)
-                        }
+                            activeCategories.forEach { cat ->
+                                FilterChip(
+                                    selected = selectedCatId == cat.id || selectedCatName == cat.name,
+                                    onClick = {
+                                        selectedCatId = cat.id
+                                        selectedCatName = cat.name
+                                    },
+                                    label = { Text(cat.name, fontSize = 11.5.sp) }
+                                )
+                            }
 
-                        OutlinedButton(
-                            onClick = {
-                                TimePickerDialog(
-                                    dialogContext,
-                                    { _, hour, minute ->
-                                        val c = Calendar.getInstance().apply {
-                                            timeInMillis = entryTimestamp
-                                            set(Calendar.HOUR_OF_DAY, hour)
-                                            set(Calendar.MINUTE, minute)
-                                        }
-                                        entryTimestamp = c.timeInMillis
-                                    },
-                                    cal.get(Calendar.HOUR_OF_DAY),
-                                    cal.get(Calendar.MINUTE),
-                                    false
-                                ).show()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(0.9f)
-                        ) {
-                            Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(entryTimeStr, fontSize = 12.sp, maxLines = 1)
+                            // Add New Category Chip / Action
+                            OutlinedButton(
+                                onClick = { showCreateCategoryDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("New Category", fontSize = 11.sp)
+                            }
                         }
                     }
 
-                    if (isFuture) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(8.dp),
+                    item {
+                        // Date & Time pickers
+                        Text(
+                            text = "Transaction Date & Time",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    DatePickerDialog(
+                                        dialogContext,
+                                        { _, y, m, d ->
+                                            val c = Calendar.getInstance().apply {
+                                                timeInMillis = entryTimestamp
+                                                set(Calendar.YEAR, y)
+                                                set(Calendar.MONTH, m)
+                                                set(Calendar.DAY_OF_MONTH, d)
+                                            }
+                                            entryTimestamp = c.timeInMillis
+                                        },
+                                        cal.get(Calendar.YEAR),
+                                        cal.get(Calendar.MONTH),
+                                        cal.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1.1f)
+                            ) {
+                                Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(entryDateStr, fontSize = 12.sp, maxLines = 1)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    TimePickerDialog(
+                                        dialogContext,
+                                        { _, hour, minute ->
+                                            val c = Calendar.getInstance().apply {
+                                                timeInMillis = entryTimestamp
+                                                set(Calendar.HOUR_OF_DAY, hour)
+                                                set(Calendar.MINUTE, minute)
+                                            }
+                                            entryTimestamp = c.timeInMillis
+                                        },
+                                        cal.get(Calendar.HOUR_OF_DAY),
+                                        cal.get(Calendar.MINUTE),
+                                        false
+                                    ).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(0.9f)
+                            ) {
+                                Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(entryTimeStr, fontSize = 12.sp, maxLines = 1)
+                            }
+                        }
+
+                        if (isFuture) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    text = "⚠️ Notice: This entry has a future date/time. It will be recorded with this timestamp.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = amountStr,
+                            onValueChange = { amountStr = it },
+                            label = { Text("Amount (₹) *") },
+                            placeholder = { Text("0") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
                             modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { description = it },
+                            label = { Text("Description / Particulars *") },
+                            placeholder = { Text(if (isIncomeMode) "e.g. Counter Sales, Customer Payment" else "e.g. Office Rent, Electricity Bill, Tea") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    item {
+                        // Payment Mode Chips
+                        Text(
+                            text = "Payment Mode",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "⚠️ Notice: This entry has a future date/time. It will be recorded with this timestamp.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.padding(8.dp)
-                            )
+                            listOf("CASH" to "Cash", "GPAY" to "GPAY / UPI", "BANK" to "Bank").forEach { (key, label) ->
+                                FilterChip(
+                                    selected = paymentMode == key,
+                                    onClick = { paymentMode = key },
+                                    label = { Text(label, fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
 
-                    OutlinedTextField(
-                        value = amountStr,
-                        onValueChange = { amountStr = it },
-                        label = { Text("Amount (₹) *") },
-                        placeholder = { Text("0") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = { Text("Description / Name *") },
-                        placeholder = { Text(if (isIncomeMode) "e.g. Sales, Customer Payment" else "e.g. Tea, Rent, Pigmy, Kuree") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // Payment Mode Chips
-                    Text(
-                        text = "Payment Mode",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("CASH" to "Cash", "GPAY" to "GPAY / UPI", "BANK" to "Bank").forEach { (key, label) ->
-                            FilterChip(
-                                selected = paymentMode == key,
-                                onClick = { paymentMode = key },
-                                label = { Text(label, fontSize = 12.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                    item {
+                        OutlinedTextField(
+                            value = note,
+                            onValueChange = { note = it },
+                            label = { Text("Extra Note (Optional)") },
+                            placeholder = { Text("Optional details / voucher #") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
-                    OutlinedTextField(
-                        value = note,
-                        onValueChange = { note = it },
-                        label = { Text("Extra Note (Optional)") },
-                        placeholder = { Text("Optional details") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    item {
+                        // Optional Photo Attachment Section
+                        Text(
+                            text = "Receipt / Evidence Photo (Optional)",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (attachedPhotoUri != null) {
+                            // Show thumbnail with actions
+                            Card(
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Filled.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text("Photo Attached", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                            Text("Ready to save", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(onClick = {
+                                            val (camUri, file) = AttachmentManager.createTempCameraUri(dialogContext)
+                                            tempCameraFile = file
+                                            cameraLauncher.launch(camUri)
+                                        }) {
+                                            Text("Replace", fontSize = 11.sp)
+                                        }
+                                        IconButton(onClick = { attachedPhotoUri = null }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val (camUri, file) = AttachmentManager.createTempCameraUri(dialogContext)
+                                        tempCameraFile = file
+                                        cameraLauncher.launch(camUri)
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Take Photo", fontSize = 12.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { galleryLauncher.launch("image/*") },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Filled.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Choose Photo", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -810,19 +1064,31 @@ fun CashTrackerScreen(
                         val paymentNote = buildString {
                             append(paymentMode)
                             if (note.isNotBlank()) append(" - ${note.trim()}")
+                            if (description.isNotBlank() && description.trim() != selectedCatName) {
+                                append(" (${description.trim()})")
+                            }
                         }
 
-                        viewModel.recordShopExpense(
-                            category = description.trim(),
-                            amountPaise = amountPaise,
-                            isIncome = isIncomeMode,
-                            notes = paymentNote,
-                            timestamp = entryTimestamp,
-                            onDone = { showAddDialog = false }
-                        )
+                        coroutineScope.launch {
+                            var persistedPath: String? = null
+                            if (attachedPhotoUri != null) {
+                                persistedPath = AttachmentManager.persistImageAttachment(context, attachedPhotoUri!!)
+                            }
+
+                            viewModel.recordShopExpense(
+                                category = selectedCatName,
+                                amountPaise = amountPaise,
+                                isIncome = isIncomeMode,
+                                notes = paymentNote,
+                                timestamp = entryTimestamp,
+                                categoryId = selectedCatId.ifBlank { null },
+                                attachmentUri = persistedPath,
+                                onDone = { showAddDialog = false }
+                            )
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isIncomeMode) Color(0xFF4CAF50) else Color(0xFFE53935)
+                        containerColor = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                     )
                 ) {
                     Text("Save", fontWeight = FontWeight.Bold)
@@ -831,6 +1097,122 @@ fun CashTrackerScreen(
             dismissButton = {
                 OutlinedButton(onClick = { showAddDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+
+        // Sub-dialog: Add New Category (Preserves parent form intact)
+        if (showCreateCategoryDialog) {
+            var newCatName by remember { mutableStateOf("") }
+            var catError by remember { mutableStateOf<String?>(null) }
+
+            AlertDialog(
+                onDismissRequest = { showCreateCategoryDialog = false },
+                title = { Text("New Category") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Create a new organizational category for cash entries.")
+                        OutlinedTextField(
+                            value = newCatName,
+                            onValueChange = {
+                                newCatName = it
+                                catError = null
+                            },
+                            label = { Text("Category Name *") },
+                            placeholder = { Text("e.g. Repairs, Shipping, Tea") },
+                            singleLine = true,
+                            isError = catError != null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (catError != null) {
+                            Text(catError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val trimmed = newCatName.trim()
+                            if (trimmed.isBlank()) {
+                                catError = "Category name cannot be empty"
+                                return@Button
+                            }
+                            if (activeCategories.any { it.name.equals(trimmed, ignoreCase = true) }) {
+                                catError = "Category with this name already exists"
+                                return@Button
+                            }
+                            viewModel.createCashCategory(trimmed) { newId ->
+                                selectedCatId = newId
+                                selectedCatName = trimmed
+                                showCreateCategoryDialog = false
+                            }
+                        }
+                    ) {
+                        Text("Create & Select")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCreateCategoryDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+
+    // View Attachment Full Photo Dialog
+    viewingPhotoFile?.let { file ->
+        val bitmap = remember(file) {
+            try {
+                BitmapFactory.decodeFile(file.absolutePath)
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { viewingPhotoFile = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Receipt Evidence Photo", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    IconButton(onClick = { viewingPhotoFile = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Receipt Photo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(380.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        Text("Unable to render image file.", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "File: ${file.name} (${file.length() / 1024} KB)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewingPhotoFile = null }) {
+                    Text("Close")
                 }
             }
         )
@@ -852,8 +1234,22 @@ fun CashTrackerScreen(
                     Text(
                         text = "${entry.category}: ${CostCalculator.formatPaiseToRupees(entry.amountPaise)} (${if (entry.isIncome) "Income" else "Expense"})",
                         fontWeight = FontWeight.Bold,
-                        color = if (entry.isIncome) Color(0xFF75B890) else Color(0xFFE57373)
+                        color = if (entry.isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                     )
+                    if (entry.isSavingsTransfer) {
+                        Text(
+                            text = "• Notice: This is a linked Pigmy savings transfer. Voiding here will maintain accounting integrity.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFE65100)
+                        )
+                    }
+                    if (!entry.attachmentUri.isNullOrBlank()) {
+                        Text(
+                            text = "• Attached photo evidence will be retained in history for audit purposes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     OutlinedTextField(
                         value = voidReason,
                         onValueChange = { voidReason = it },
@@ -918,12 +1314,12 @@ fun CashTrackerScreen(
                         Text("Total entries found: ${preview.items.size}", fontWeight = FontWeight.Bold)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Income (${preview.incomeCount}):", color = Color(0xFF75B890), fontWeight = FontWeight.SemiBold)
-                            Text(CostCalculator.formatPaiseToRupees(preview.totalIncomePaise), color = Color(0xFF75B890), fontWeight = FontWeight.Bold)
+                            Text("Income (${preview.incomeCount}):", color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold)
+                            Text(CostCalculator.formatPaiseToRupees(preview.totalIncomePaise), color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Expense (${preview.expenseCount}):", color = Color(0xFFE57373), fontWeight = FontWeight.SemiBold)
-                            Text(CostCalculator.formatPaiseToRupees(preview.totalExpensePaise), color = Color(0xFFE57373), fontWeight = FontWeight.Bold)
+                            Text("Expense (${preview.expenseCount}):", color = Color(0xFFD32F2F), fontWeight = FontWeight.SemiBold)
+                            Text(CostCalculator.formatPaiseToRupees(preview.totalExpensePaise), color = Color(0xFFD32F2F), fontWeight = FontWeight.Bold)
                         }
                         if (preview.skippedRows > 0) {
                             Text(
@@ -934,7 +1330,7 @@ fun CashTrackerScreen(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "These entries will be recorded in your Cash In & Out register.",
+                            "These entries will be recorded in your Cash In & Out register with their respective categories.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

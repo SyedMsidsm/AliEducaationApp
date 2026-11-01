@@ -107,6 +107,7 @@ class CashTrackerExcelService @Inject constructor(
         var headerRowIndex = -1
         var dateCol = -1
         var descCol = -1
+        var categoryCol = -1
         var incomeCol = -1
         var expenseCol = -1
         var modeCol = -1
@@ -115,6 +116,7 @@ class CashTrackerExcelService @Inject constructor(
 
         for (r in 0..minOf(5, sheet.lastRowNum)) {
             val row = sheet.getRow(r) ?: continue
+            var catCol = -1
             var dCol = -1
             var desCol = -1
             var inCol = -1
@@ -129,8 +131,9 @@ class CashTrackerExcelService @Inject constructor(
                 if (text.isBlank()) continue
 
                 when {
+                    text == "category" || text.contains("category") || text.contains("श्रेणी") -> catCol = c
                     text.contains("date") || text.contains("dated") || text.contains("दिनांक") || text.contains("तारीख") -> dCol = c
-                    text.contains("desc") || text.contains("particular") || text.contains("category") ||
+                    text.contains("desc") || text.contains("particular") ||
                             text.contains("item") || text.contains("name") || text.contains("details") || text.contains("विवरण") -> desCol = c
                     text.contains("cash in") || text.contains("income") || text.contains("credit") ||
                             text == "cr" || text.contains("received") || text.contains("जमा") || text == "in" -> inCol = c
@@ -145,6 +148,7 @@ class CashTrackerExcelService @Inject constructor(
             // Header matches if we found at least description or date, and an income/expense or amount column
             if ((inCol != -1 || outCol != -1 || amtCol != -1) && (desCol != -1 || dCol != -1)) {
                 headerRowIndex = r
+                categoryCol = catCol
                 dateCol = dCol
                 descCol = desCol
                 incomeCol = inCol
@@ -175,6 +179,7 @@ class CashTrackerExcelService @Inject constructor(
             if (isRowEmpty(row)) continue
 
             val dateTimestamp = if (dateCol != -1) parseCellDate(row.getCell(dateCol)) else System.currentTimeMillis()
+            val catText = if (categoryCol != -1) getCellString(row.getCell(categoryCol)).trim() else ""
             val desc = if (descCol != -1) getCellString(row.getCell(descCol)).trim() else ""
             val mode = if (modeCol != -1) getCellString(row.getCell(modeCol)).trim() else ""
 
@@ -218,18 +223,21 @@ class CashTrackerExcelService @Inject constructor(
                 continue
             }
 
-            // Use Notes as description if Category/Description is blank, as common in shop's historical files
-            val finalDesc = when {
+            val finalCat = when {
+                catText.isNotBlank() -> catText
                 desc.isNotBlank() -> desc
-                mode.isNotBlank() -> mode
-                else -> "Imported Entry"
+                else -> "General"
             }
-            val finalNotes = mode.ifBlank { "Excel Import" }
+            val finalNotes = when {
+                mode.isNotBlank() -> mode
+                desc.isNotBlank() && desc != finalCat -> desc
+                else -> "Excel Import"
+            }
 
             if (incomePaise > 0L) {
                 parsedItems.add(
                     ShopExpenseEntity(
-                        category = finalDesc,
+                        category = finalCat,
                         amountPaise = incomePaise,
                         isIncome = true,
                         notes = finalNotes,
@@ -241,7 +249,7 @@ class CashTrackerExcelService @Inject constructor(
             if (expensePaise > 0L) {
                 parsedItems.add(
                     ShopExpenseEntity(
-                        category = finalDesc,
+                        category = finalCat,
                         amountPaise = expensePaise,
                         isIncome = false,
                         notes = finalNotes,
@@ -400,8 +408,10 @@ class CashTrackerExcelService @Inject constructor(
         val headers = listOf(
             "Date",
             "Time",
+            "Category",
             "Description / Particulars",
             "Payment Mode / Notes",
+            "Attachment",
             "Cash In (Income ₹)",
             "Cash Out (Expense ₹)",
             "Running Balance (₹)"
@@ -413,8 +423,8 @@ class CashTrackerExcelService @Inject constructor(
             val cell = headerRow.createCell(i)
             cell.setCellValue(headers[i])
             cell.cellStyle = when (i) {
-                4 -> incomeHeaderStyle
-                5 -> expenseHeaderStyle
+                6 -> incomeHeaderStyle
+                7 -> expenseHeaderStyle
                 else -> headerStyle
             }
         }
@@ -443,15 +453,26 @@ class CashTrackerExcelService @Inject constructor(
             c1.setCellValue(timeFormat.format(d))
             c1.cellStyle = normalStyle
 
-            // Description
+            // Category
             val c2 = row.createCell(2)
             c2.setCellValue(item.category)
             c2.cellStyle = normalStyle
 
-            // Payment Mode / Notes
+            // Description / Particulars
             val c3 = row.createCell(3)
-            c3.setCellValue(item.notes ?: "-")
+            val descText = item.notes?.substringBefore(" - ")?.takeIf { it != item.category } ?: item.category
+            c3.setCellValue(descText)
             c3.cellStyle = normalStyle
+
+            // Payment Mode / Notes
+            val c4 = row.createCell(4)
+            c4.setCellValue(item.notes ?: "-")
+            c4.cellStyle = normalStyle
+
+            // Attachment indicator
+            val c5 = row.createCell(5)
+            c5.setCellValue(if (!item.attachmentUri.isNullOrBlank()) "Yes" else "No")
+            c5.cellStyle = normalStyle
 
             val amountRupees = item.amountPaise / 100.0
 
@@ -459,30 +480,30 @@ class CashTrackerExcelService @Inject constructor(
                 totalIncomePaise += item.amountPaise
                 runningBalancePaise += item.amountPaise
 
-                val c4 = row.createCell(4)
-                c4.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
-                c4.cellStyle = currencyIncomeStyle
+                val c6 = row.createCell(6)
+                c6.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
+                c6.cellStyle = currencyIncomeStyle
 
-                val c5 = row.createCell(5)
-                c5.setCellValue("-")
-                c5.cellStyle = normalStyle
+                val c7 = row.createCell(7)
+                c7.setCellValue("-")
+                c7.cellStyle = normalStyle
             } else {
                 totalExpensePaise += item.amountPaise
                 runningBalancePaise -= item.amountPaise
 
-                val c4 = row.createCell(4)
-                c4.setCellValue("-")
-                c4.cellStyle = normalStyle
+                val c6 = row.createCell(6)
+                c6.setCellValue("-")
+                c6.cellStyle = normalStyle
 
-                val c5 = row.createCell(5)
-                c5.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
-                c5.cellStyle = currencyExpenseStyle
+                val c7 = row.createCell(7)
+                c7.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
+                c7.cellStyle = currencyExpenseStyle
             }
 
             // Running Balance
-            val c6 = row.createCell(6)
-            c6.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
-            c6.cellStyle = normalStyle
+            val c8 = row.createCell(8)
+            c8.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
+            c8.cellStyle = normalStyle
         }
 
         // Totals Row
@@ -494,28 +515,31 @@ class CashTrackerExcelService @Inject constructor(
         t0.cellStyle = totalStyle
 
         totalRow.createCell(1).apply { setCellValue(""); cellStyle = totalStyle }
-        totalRow.createCell(2).apply { setCellValue("${sortedItems.size} entries"); cellStyle = totalStyle }
-        totalRow.createCell(3).apply { setCellValue(""); cellStyle = totalStyle }
+        totalRow.createCell(2).apply { setCellValue(""); cellStyle = totalStyle }
+        totalRow.createCell(3).apply { setCellValue("${sortedItems.size} entries"); cellStyle = totalStyle }
+        totalRow.createCell(4).apply { setCellValue(""); cellStyle = totalStyle }
+        totalRow.createCell(5).apply { setCellValue(""); cellStyle = totalStyle }
 
-        val tIncome = totalRow.createCell(4)
+        val tIncome = totalRow.createCell(6)
         tIncome.setCellValue(String.format(Locale.US, "%.2f", totalIncomePaise / 100.0))
         tIncome.cellStyle = totalStyle
 
-        val tExpense = totalRow.createCell(5)
+        val tExpense = totalRow.createCell(7)
         tExpense.setCellValue(String.format(Locale.US, "%.2f", totalExpensePaise / 100.0))
         tExpense.cellStyle = totalStyle
 
-        val tBal = totalRow.createCell(6)
+        val tBal = totalRow.createCell(8)
         tBal.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
         tBal.cellStyle = totalStyle
 
         // Explicit column widths in units of 1/256th character width
-        // (Avoids POI autoSizeColumn which crashes on Android due to missing java.awt.font.FontRenderContext)
         val columnWidths = intArrayOf(
             14 * 256, // Date (dd-MMM-yyyy)
             11 * 256, // Time (hh:mm a)
-            32 * 256, // Description / Particulars
+            18 * 256, // Category
+            28 * 256, // Description / Particulars
             22 * 256, // Payment Mode / Notes
+            12 * 256, // Attachment
             16 * 256, // Cash In (₹)
             16 * 256, // Cash Out (₹)
             18 * 256  // Running Balance (₹)

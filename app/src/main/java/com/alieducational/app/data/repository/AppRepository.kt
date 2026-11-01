@@ -7,7 +7,11 @@ import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.PigmyDepositDao
+import com.alieducational.app.data.local.dao.CashCategoryDao
 import com.alieducational.app.data.local.dao.PigmySchemeDao
+import com.alieducational.app.data.local.dao.PigmyWithdrawalDao
+import com.alieducational.app.data.local.entity.CashCategoryEntity
+import com.alieducational.app.data.local.entity.PigmyWithdrawalEntity
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.ProductGiveawayDao
@@ -87,7 +91,9 @@ class AppRepository @Inject constructor(
     private val expenseDao: ShopExpenseDao,
     private val heldBillDao: HeldBillDao,
     private val pigmyDepositDao: PigmyDepositDao,
+    private val pigmyWithdrawalDao: PigmyWithdrawalDao,
     private val pigmySchemeDao: PigmySchemeDao,
+    private val cashCategoryDao: CashCategoryDao,
     private val productGiveawayDao: ProductGiveawayDao,
     private val serviceDefinitionDao: ServiceDefinitionDao,
     private val syncEventDao: SyncEventDao
@@ -701,6 +707,54 @@ class AppRepository @Inject constructor(
         sale
     }
 
+    // ── Cash In/Out Categories ──────────────────────────────────────────
+
+    val allCashCategories: Flow<List<CashCategoryEntity>> = cashCategoryDao.getAllCategories()
+    val activeCashCategories: Flow<List<CashCategoryEntity>> = cashCategoryDao.getActiveCategories()
+
+    suspend fun ensureDefaultCashCategories() {
+        if (cashCategoryDao.getCategoryCount() == 0) {
+            val now = System.currentTimeMillis()
+            val defaults = listOf(
+                CashCategoryEntity(id = "cat_general", name = "General", isSystem = true, isArchived = false, createdAt = now, updatedAt = now),
+                CashCategoryEntity(id = "cat_pigmy", name = "Pigmy", isSystem = true, isArchived = false, createdAt = now + 1, updatedAt = now + 1),
+                CashCategoryEntity(id = "cat_rent", name = "Rent", isSystem = false, isArchived = false, createdAt = now + 2, updatedAt = now + 2),
+                CashCategoryEntity(id = "cat_electricity", name = "Electricity", isSystem = false, isArchived = false, createdAt = now + 3, updatedAt = now + 3),
+                CashCategoryEntity(id = "cat_transport", name = "Transport", isSystem = false, isArchived = false, createdAt = now + 4, updatedAt = now + 4),
+                CashCategoryEntity(id = "cat_salary", name = "Salary", isSystem = false, isArchived = false, createdAt = now + 5, updatedAt = now + 5),
+                CashCategoryEntity(id = "cat_tea_snacks", name = "Tea & Snacks", isSystem = false, isArchived = false, createdAt = now + 6, updatedAt = now + 6)
+            )
+            cashCategoryDao.insertCategories(defaults)
+        }
+    }
+
+    suspend fun createCashCategory(name: String): String {
+        val trimmed = name.trim()
+        require(trimmed.isNotBlank()) { "Category name cannot be blank" }
+        val existing = cashCategoryDao.getCategoryByName(trimmed)
+        if (existing != null) {
+            if (existing.isArchived) {
+                cashCategoryDao.setArchived(existing.id, false)
+            }
+            return existing.id
+        }
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val cat = CashCategoryEntity(id = id, name = trimmed, isSystem = false, isArchived = false, createdAt = now, updatedAt = now)
+        cashCategoryDao.insertCategory(cat)
+        return id
+    }
+
+    suspend fun renameCashCategory(id: String, newName: String) {
+        val trimmed = newName.trim()
+        require(trimmed.isNotBlank()) { "Category name cannot be blank" }
+        cashCategoryDao.renameCategory(id, trimmed)
+    }
+
+    suspend fun setCashCategoryArchived(id: String, isArchived: Boolean) {
+        cashCategoryDao.setArchived(id, isArchived)
+    }
+
     // ── Pigmy Daily Savings Tracker ─────────────────────────────────────
 
     val allPigmySchemes: Flow<List<PigmySchemeEntity>> = pigmySchemeDao.getAllSchemes()
@@ -793,11 +847,12 @@ class AppRepository @Inject constructor(
             val noteText = if (!notes.isNullOrBlank()) "Pigmy Deposit ($schemeName): $notes" else "Pigmy Deposit ($schemeName)"
             val expense = ShopExpenseEntity(
                 id = linkedExpenseId,
-                category = "SAVINGS_TRANSFER",
+                category = "Pigmy",
                 amountPaise = amountPaise,
                 isIncome = false,
                 notes = noteText,
                 isSavingsTransfer = true,
+                categoryId = "cat_pigmy",
                 timestamp = paidTimestamp
             )
             expenseDao.insertExpense(expense)
@@ -887,6 +942,142 @@ class AppRepository @Inject constructor(
         pigmyDepositDao.voidDeposit(depositId, reason)
         if (deposit.linkedExpenseId != null) {
             expenseDao.voidExpense(deposit.linkedExpenseId, "Voided with Pigmy deposit: $reason")
+        }
+    }
+
+    // ── Pigmy Withdrawals ────────────────────────────────────────────────
+
+    val allPigmyWithdrawals: Flow<List<PigmyWithdrawalEntity>> = pigmyWithdrawalDao.getAllWithdrawals()
+    val activePigmyWithdrawals: Flow<List<PigmyWithdrawalEntity>> = pigmyWithdrawalDao.getActiveWithdrawals()
+    val totalPigmyWithdrawalsPaise: Flow<Long?> = pigmyWithdrawalDao.getTotalRecordedWithdrawalsPaise()
+
+    fun getPigmyWithdrawalsForScheme(schemeId: String): Flow<List<PigmyWithdrawalEntity>> =
+        pigmyWithdrawalDao.getWithdrawalsForScheme(schemeId)
+
+    fun getTotalPigmyWithdrawalsForScheme(schemeId: String): Flow<Long?> =
+        pigmyWithdrawalDao.getTotalForScheme(schemeId)
+
+    suspend fun updatePigmySchemeOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long? = null) {
+        pigmySchemeDao.updateOpeningBalance(schemeId, maxOf(0L, openingBalancePaise), date)
+    }
+
+    suspend fun recordPigmyWithdrawal(
+        schemeId: String,
+        amountPaise: Long,
+        destination: String = "CASH", // CASH, BANK
+        notes: String? = null,
+        withdrawalTimestamp: Long = System.currentTimeMillis()
+    ): String = db.withTransaction {
+        require(amountPaise > 0) { "Withdrawal amount must be greater than zero" }
+        val scheme = pigmySchemeDao.getSchemeById(schemeId)
+        val schemeName = scheme?.name ?: "Pigmy Savings"
+
+        val withdrawalId = UUID.randomUUID().toString()
+        var linkedExpenseId: String? = null
+
+        // If received into shop cash, create a linked savings-transfer income entry atomically
+        if (destination == "CASH") {
+            linkedExpenseId = UUID.randomUUID().toString()
+            val noteText = if (!notes.isNullOrBlank()) "Pigmy withdrawal — $schemeName: $notes" else "Pigmy withdrawal — $schemeName"
+            val expense = ShopExpenseEntity(
+                id = linkedExpenseId,
+                category = "Pigmy",
+                amountPaise = amountPaise,
+                isIncome = true, // Cash In!
+                notes = noteText,
+                isSavingsTransfer = true, // Returned savings, NOT sales revenue or operating profit!
+                categoryId = "cat_pigmy",
+                timestamp = withdrawalTimestamp
+            )
+            expenseDao.insertExpense(expense)
+        }
+
+        val withdrawal = PigmyWithdrawalEntity(
+            id = withdrawalId,
+            accountSchemeId = schemeId,
+            withdrawalTimestamp = withdrawalTimestamp,
+            amountPaise = amountPaise,
+            destination = destination,
+            notes = notes,
+            linkedExpenseId = linkedExpenseId,
+            isVoided = false,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        pigmyWithdrawalDao.insertWithdrawal(withdrawal)
+        withdrawalId
+    }
+
+    suspend fun updatePigmyWithdrawal(
+        withdrawalId: String,
+        schemeId: String,
+        amountPaise: Long,
+        destination: String,
+        notes: String?,
+        withdrawalTimestamp: Long
+    ) = db.withTransaction {
+        val oldWithdrawal = pigmyWithdrawalDao.getWithdrawalById(withdrawalId) ?: return@withTransaction
+        val scheme = pigmySchemeDao.getSchemeById(schemeId)
+        val schemeName = scheme?.name ?: "Pigmy Savings"
+        val noteText = if (!notes.isNullOrBlank()) "Pigmy withdrawal — $schemeName: $notes" else "Pigmy withdrawal — $schemeName"
+
+        var linkedExpenseId = oldWithdrawal.linkedExpenseId
+
+        if (destination == "CASH") {
+            if (linkedExpenseId != null) {
+                // Update existing linked cash expense atomically
+                val existingExpense = expenseDao.getExpenseById(linkedExpenseId)
+                if (existingExpense != null) {
+                    expenseDao.insertExpense(
+                        existingExpense.copy(
+                            amountPaise = amountPaise,
+                            category = "Pigmy",
+                            notes = noteText,
+                            timestamp = withdrawalTimestamp,
+                            isVoided = false
+                        )
+                    )
+                }
+            } else {
+                // Old was bank or missing; create new linked cash expense
+                linkedExpenseId = UUID.randomUUID().toString()
+                val expense = ShopExpenseEntity(
+                    id = linkedExpenseId,
+                    category = "Pigmy",
+                    amountPaise = amountPaise,
+                    isIncome = true,
+                    notes = noteText,
+                    isSavingsTransfer = true,
+                    categoryId = "cat_pigmy",
+                    timestamp = withdrawalTimestamp
+                )
+                expenseDao.insertExpense(expense)
+            }
+        } else {
+            // Destination is BANK: reverse/void the linked cash expense if one existed
+            if (linkedExpenseId != null) {
+                expenseDao.voidExpense(linkedExpenseId, "Withdrawal destination changed to BANK")
+                linkedExpenseId = null
+            }
+        }
+
+        val updated = oldWithdrawal.copy(
+            accountSchemeId = schemeId,
+            amountPaise = amountPaise,
+            destination = destination,
+            notes = notes,
+            withdrawalTimestamp = withdrawalTimestamp,
+            linkedExpenseId = linkedExpenseId,
+            updatedAt = System.currentTimeMillis()
+        )
+        pigmyWithdrawalDao.updateWithdrawal(updated)
+    }
+
+    suspend fun voidPigmyWithdrawal(withdrawalId: String, reason: String) = db.withTransaction {
+        val withdrawal = pigmyWithdrawalDao.getWithdrawalById(withdrawalId) ?: return@withTransaction
+        pigmyWithdrawalDao.voidWithdrawal(withdrawalId, reason)
+        if (withdrawal.linkedExpenseId != null) {
+            expenseDao.voidExpense(withdrawal.linkedExpenseId, "Voided with Pigmy withdrawal: $reason")
         }
     }
 
@@ -1109,7 +1300,9 @@ class AppRepository @Inject constructor(
         amountPaise: Long,
         isIncome: Boolean,
         notes: String?,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        categoryId: String? = null,
+        attachmentUri: String? = null
     ) {
         expenseDao.insertExpense(
             ShopExpenseEntity(
@@ -1117,9 +1310,16 @@ class AppRepository @Inject constructor(
                 amountPaise = amountPaise,
                 isIncome = isIncome,
                 notes = notes,
+                categoryId = categoryId,
+                attachmentUri = attachmentUri,
                 timestamp = timestamp
             )
         )
+    }
+
+    suspend fun updateExpenseAttachment(expenseId: String, attachmentUri: String?) {
+        val existing = expenseDao.getExpenseById(expenseId) ?: return
+        expenseDao.updateExpense(existing.copy(attachmentUri = attachmentUri))
     }
 
     suspend fun recordShopExpensesBatch(expenses: List<ShopExpenseEntity>) {
