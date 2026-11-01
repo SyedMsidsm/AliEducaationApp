@@ -82,6 +82,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.ui.res.painterResource
+import com.alieducational.app.R
+import com.alieducational.app.data.local.entity.CashCategoryEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -109,6 +115,11 @@ fun CashTrackerScreen(
 ) {
     val allExpenses by viewModel.allExpenses.collectAsState()
     val activeCategories by viewModel.activeCashCategories.collectAsState()
+    val allPigmySchemes by viewModel.allPigmySchemes.collectAsState()
+    val activePigmySchemes = remember(allPigmySchemes) { allPigmySchemes.filter { !it.isArchived } }
+
+    var showManageCategoriesDialog by remember { mutableStateOf(false) }
+    var categoryToDelete by remember { mutableStateOf<CashCategoryEntity?>(null) }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -428,7 +439,7 @@ fun CashTrackerScreen(
                     label = { Text("All Categories (${allExpenses.size})", fontSize = 11.sp) }
                 )
 
-                activeCategories.forEach { cat ->
+                activeCategories.filter { it.name != "Pigmy" }.forEach { cat ->
                     val count = allExpenses.count { it.categoryId == cat.id || it.category.equals(cat.name, ignoreCase = true) }
                     FilterChip(
                         selected = selectedCategoryFilter == cat.id || selectedCategoryFilter == cat.name,
@@ -436,6 +447,37 @@ fun CashTrackerScreen(
                             selectedCategoryFilter = if (selectedCategoryFilter == cat.id || selectedCategoryFilter == cat.name) null else cat.id
                         },
                         label = { Text("${cat.name} ($count)", fontSize = 11.sp) }
+                    )
+                }
+
+                activePigmySchemes.forEach { scheme ->
+                    val count = allExpenses.count { it.categoryId == scheme.id || it.category.equals(scheme.name, ignoreCase = true) }
+                    FilterChip(
+                        selected = selectedCategoryFilter == scheme.id || selectedCategoryFilter == scheme.name,
+                        onClick = {
+                            selectedCategoryFilter = if (selectedCategoryFilter == scheme.id || selectedCategoryFilter == scheme.name) null else scheme.id
+                        },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_pigmy_coin),
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        label = { Text("${scheme.name} ($count)", fontSize = 11.sp) }
+                    )
+                }
+
+                IconButton(
+                    onClick = { showManageCategoriesDialog = true },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = "Manage Categories",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -752,8 +794,13 @@ fun CashTrackerScreen(
         var entryTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
         // Category selection
-        var selectedCatId by remember { mutableStateOf(activeCategories.firstOrNull { it.name == "General" }?.id ?: activeCategories.firstOrNull()?.id ?: "") }
-        var selectedCatName by remember { mutableStateOf(activeCategories.firstOrNull { it.id == selectedCatId }?.name ?: "General") }
+        val defaultCat = activeCategories.firstOrNull { it.name == "General" } ?: activeCategories.firstOrNull()
+        var selectedCatId by remember { mutableStateOf(defaultCat?.id ?: "") }
+        var selectedCatName by remember { mutableStateOf(defaultCat?.name ?: "General") }
+
+        val selectedPigmyScheme = remember(selectedCatId, selectedCatName, activePigmySchemes) {
+            activePigmySchemes.firstOrNull { it.id == selectedCatId || it.name.equals(selectedCatName, ignoreCase = true) }
+        }
 
         var showCreateCategoryDialog by remember { mutableStateOf(false) }
 
@@ -800,7 +847,7 @@ fun CashTrackerScreen(
                     item {
                         // Category Selector
                         Text(
-                            text = "Category *",
+                            text = "Category",
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -811,14 +858,33 @@ fun CashTrackerScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            activeCategories.forEach { cat ->
+                            activeCategories.filter { it.name != "Pigmy" }.forEach { cat ->
                                 FilterChip(
-                                    selected = selectedCatId == cat.id || selectedCatName == cat.name,
+                                    selected = selectedPigmyScheme == null && (selectedCatId == cat.id || selectedCatName == cat.name),
                                     onClick = {
                                         selectedCatId = cat.id
                                         selectedCatName = cat.name
                                     },
                                     label = { Text(cat.name, fontSize = 11.5.sp) }
+                                )
+                            }
+
+                            activePigmySchemes.forEach { scheme ->
+                                FilterChip(
+                                    selected = selectedPigmyScheme?.id == scheme.id || selectedPigmyScheme?.name == scheme.name,
+                                    onClick = {
+                                        selectedCatId = scheme.id
+                                        selectedCatName = scheme.name
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_pigmy_coin),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    label = { Text(scheme.name, fontSize = 11.5.sp) }
                                 )
                             }
 
@@ -831,6 +897,50 @@ fun CashTrackerScreen(
                                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("New Category", fontSize = 11.sp)
+                            }
+
+                            // Remove / Manage Categories Button
+                            OutlinedButton(
+                                onClick = { showManageCategoriesDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remove...", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    if (selectedPigmyScheme != null) {
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_pigmy_coin),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isIncomeMode) {
+                                            "Pigmy Withdrawal: Will withdraw from ${selectedPigmyScheme.name} into shop cash."
+                                        } else {
+                                            "Pigmy Deposit: Will deposit into ${selectedPigmyScheme.name} from shop cash."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
@@ -932,7 +1042,7 @@ fun CashTrackerScreen(
                         OutlinedTextField(
                             value = description,
                             onValueChange = { description = it },
-                            label = { Text("Description / Particulars *") },
+                            label = { Text("Description / Particulars (Optional)") },
                             placeholder = { Text(if (isIncomeMode) "e.g. Counter Sales, Customer Payment" else "e.g. Office Rent, Electricity Bill, Tea") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
@@ -1059,15 +1169,9 @@ fun CashTrackerScreen(
                 Button(
                     onClick = {
                         val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
-                        if (amountPaise <= 0 || description.isBlank()) return@Button
+                        if (amountPaise <= 0) return@Button
 
-                        val paymentNote = buildString {
-                            append(paymentMode)
-                            if (note.isNotBlank()) append(" - ${note.trim()}")
-                            if (description.isNotBlank() && description.trim() != selectedCatName) {
-                                append(" (${description.trim()})")
-                            }
-                        }
+                        val effectiveDescription = if (description.isNotBlank()) description.trim() else selectedCatName
 
                         coroutineScope.launch {
                             var persistedPath: String? = null
@@ -1075,16 +1179,65 @@ fun CashTrackerScreen(
                                 persistedPath = AttachmentManager.persistImageAttachment(context, attachedPhotoUri!!)
                             }
 
-                            viewModel.recordShopExpense(
-                                category = selectedCatName,
-                                amountPaise = amountPaise,
-                                isIncome = isIncomeMode,
-                                notes = paymentNote,
-                                timestamp = entryTimestamp,
-                                categoryId = selectedCatId.ifBlank { null },
-                                attachmentUri = persistedPath,
-                                onDone = { showAddDialog = false }
-                            )
+                            if (selectedPigmyScheme != null) {
+                                val pigmyNote = buildString {
+                                    if (description.isNotBlank() && description.trim() != selectedPigmyScheme.name) {
+                                        append(description.trim())
+                                    }
+                                    if (note.isNotBlank()) {
+                                        if (isNotEmpty()) append(" - ")
+                                        append(note.trim())
+                                    }
+                                }.ifBlank { null }
+
+                                if (isIncomeMode) {
+                                    val destination = if (paymentMode == "CASH") "CASH" else "BANK"
+                                    viewModel.recordPigmyWithdrawal(
+                                        schemeId = selectedPigmyScheme.id,
+                                        amountPaise = amountPaise,
+                                        destination = destination,
+                                        notes = pigmyNote,
+                                        withdrawalTimestamp = entryTimestamp,
+                                        attachmentUri = persistedPath,
+                                        onDone = { showAddDialog = false },
+                                        onError = { errMsg ->
+                                            Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                } else {
+                                    val paymentSource = if (paymentMode == "CASH") "CASH" else "BANK"
+                                    viewModel.recordPigmyDeposit(
+                                        schemeId = selectedPigmyScheme.id,
+                                        amountPaise = amountPaise,
+                                        paymentSource = paymentSource,
+                                        notes = pigmyNote,
+                                        paidTimestamp = entryTimestamp,
+                                        attachmentUri = persistedPath,
+                                        onDone = { showAddDialog = false }
+                                    )
+                                }
+                            } else {
+                                val paymentNote = buildString {
+                                    append(paymentMode)
+                                    if (note.isNotBlank()) append(" - ${note.trim()}")
+                                    if (description.isNotBlank() && description.trim() != selectedCatName) {
+                                        append(" (${description.trim()})")
+                                    } else if (description.isBlank()) {
+                                        append(" ($selectedCatName)")
+                                    }
+                                }
+
+                                viewModel.recordShopExpense(
+                                    category = selectedCatName,
+                                    amountPaise = amountPaise,
+                                    isIncome = isIncomeMode,
+                                    notes = paymentNote,
+                                    timestamp = entryTimestamp,
+                                    categoryId = selectedCatId.ifBlank { null },
+                                    attachmentUri = persistedPath,
+                                    onDone = { showAddDialog = false }
+                                )
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -1158,6 +1311,147 @@ fun CashTrackerScreen(
                 }
             )
         }
+    }
+
+    // Dialog: Manage / Remove Categories
+    if (showManageCategoriesDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showManageCategoriesDialog = false
+                categoryToDelete = null
+            },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Manage Categories", fontWeight = FontWeight.Bold)
+                    IconButton(onClick = {
+                        showManageCategoriesDialog = false
+                        categoryToDelete = null
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Remove categories you no longer need. Past transactions will keep their recorded category name.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    HorizontalDivider()
+
+                    val removableCategories = activeCategories.filter { it.name != "Pigmy" }
+                    if (removableCategories.isEmpty()) {
+                        Text(
+                            text = "No categories available to remove.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(removableCategories) { cat ->
+                                val count = allExpenses.count { it.categoryId == cat.id || it.category.equals(cat.name, ignoreCase = true) }
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = cat.name,
+                                                fontWeight = FontWeight.SemiBold,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                text = if (count > 0) "$count transaction(s)" else "No transactions",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        IconButton(
+                                            onClick = { categoryToDelete = cat },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.DeleteOutline,
+                                                contentDescription = "Remove ${cat.name}",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showManageCategoriesDialog = false
+                        categoryToDelete = null
+                    }
+                ) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    // Confirmation dialog for removing a specific category
+    categoryToDelete?.let { cat ->
+        val count = allExpenses.count { it.categoryId == cat.id || it.category.equals(cat.name, ignoreCase = true) }
+        AlertDialog(
+            onDismissRequest = { categoryToDelete = null },
+            title = { Text("Remove Category?") },
+            text = {
+                Text(
+                    "Are you sure you want to remove \"${cat.name}\"?\n\n" +
+                    "It will no longer appear in category options for new transactions." +
+                    if (count > 0) " Past records ($count transactions) will safely retain this name." else ""
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteCashCategory(cat.id) {
+                            categoryToDelete = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Remove", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { categoryToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // View Attachment Full Photo Dialog

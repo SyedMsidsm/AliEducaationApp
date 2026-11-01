@@ -1120,10 +1120,11 @@ class AliViewModel @Inject constructor(
         paymentSource: String = "CASH",
         notes: String? = null,
         paidTimestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null,
         onDone: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val id = repository.recordPigmyDeposit(schemeId, amountPaise, paymentSource, notes, paidTimestamp)
+            val id = repository.recordPigmyDeposit(schemeId, amountPaise, paymentSource, notes, paidTimestamp, attachmentUri)
             onDone(id)
         }
     }
@@ -1156,12 +1157,13 @@ class AliViewModel @Inject constructor(
         destination: String = "CASH",
         notes: String? = null,
         withdrawalTimestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null,
         onDone: (String) -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
             try {
-                val id = repository.recordPigmyWithdrawal(schemeId, amountPaise, destination, notes, withdrawalTimestamp)
+                val id = repository.recordPigmyWithdrawal(schemeId, amountPaise, destination, notes, withdrawalTimestamp, attachmentUri)
                 onDone(id)
             } catch (e: Exception) {
                 onError(e.message ?: "Failed to record withdrawal")
@@ -1217,6 +1219,13 @@ class AliViewModel @Inject constructor(
     fun setCashCategoryArchived(id: String, isArchived: Boolean, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             repository.setCashCategoryArchived(id, isArchived)
+            onDone()
+        }
+    }
+
+    fun deleteCashCategory(id: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deleteCashCategory(id)
             onDone()
         }
     }

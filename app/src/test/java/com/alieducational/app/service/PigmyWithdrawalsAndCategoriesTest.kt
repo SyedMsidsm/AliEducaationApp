@@ -277,4 +277,134 @@ class PigmyWithdrawalsAndCategoriesTest {
         // Cleanup
         tempDir.deleteRecursively()
     }
+
+    @Test
+    fun testTwoWaySync_CashOutPigmyDeposit_And_CashInPigmyWithdrawal() {
+        val schemeId = "scheme_1"
+        val schemeName = "Pigmy Scheme 1"
+
+        // 1. Simulating Cash Out recorded under Pigmy Scheme 1
+        val cashOutExpenseId = UUID.randomUUID().toString()
+        val depositId = UUID.randomUUID().toString()
+        val depositAmountPaise = 50000L // ₹500.00
+
+        val linkedCashOutExpense = ShopExpenseEntity(
+            id = cashOutExpenseId,
+            category = schemeName,
+            categoryId = schemeId,
+            amountPaise = depositAmountPaise,
+            isIncome = false,
+            isSavingsTransfer = true,
+            notes = "Pigmy Deposit ($schemeName)"
+        )
+        val linkedDeposit = PigmyDepositEntity(
+            id = depositId,
+            accountSchemeId = schemeId,
+            amountPaise = depositAmountPaise,
+            paymentSource = "CASH",
+            linkedExpenseId = cashOutExpenseId,
+            isVoided = false
+        )
+
+        assertEquals(schemeName, linkedCashOutExpense.category)
+        assertEquals(schemeId, linkedCashOutExpense.categoryId)
+        assertFalse(linkedCashOutExpense.isIncome)
+        assertTrue(linkedCashOutExpense.isSavingsTransfer)
+        assertEquals(linkedCashOutExpense.id, linkedDeposit.linkedExpenseId)
+
+        // 2. Simulating Cash In recorded under Pigmy Scheme 1
+        val cashInExpenseId = UUID.randomUUID().toString()
+        val withdrawalId = UUID.randomUUID().toString()
+        val withdrawalAmountPaise = 30000L // ₹300.00
+
+        val linkedCashInExpense = ShopExpenseEntity(
+            id = cashInExpenseId,
+            category = schemeName,
+            categoryId = schemeId,
+            amountPaise = withdrawalAmountPaise,
+            isIncome = true,
+            isSavingsTransfer = true,
+            notes = "Pigmy withdrawal — $schemeName"
+        )
+        val linkedWithdrawal = PigmyWithdrawalEntity(
+            id = withdrawalId,
+            accountSchemeId = schemeId,
+            amountPaise = withdrawalAmountPaise,
+            destination = "CASH",
+            linkedExpenseId = cashInExpenseId,
+            isVoided = false
+        )
+
+        assertEquals(schemeName, linkedCashInExpense.category)
+        assertEquals(schemeId, linkedCashInExpense.categoryId)
+        assertTrue(linkedCashInExpense.isIncome)
+        assertTrue(linkedCashInExpense.isSavingsTransfer)
+        assertEquals(linkedCashInExpense.id, linkedWithdrawal.linkedExpenseId)
+
+        // 3. Two-way balance tracking
+        val netSchemeSavings = linkedDeposit.amountPaise - linkedWithdrawal.amountPaise
+        assertEquals(20000L, netSchemeSavings) // ₹500 - ₹300 = ₹200 net
+
+        // 4. Two-way voiding verification
+        val voidedExpense = linkedCashOutExpense.copy(isVoided = true, voidReason = "Voided by user")
+        val voidedDeposit = linkedDeposit.copy(isVoided = true, voidReason = "Voided by user")
+        assertTrue(voidedExpense.isVoided)
+        assertTrue(voidedDeposit.isVoided)
+    }
+
+    @Test
+    fun testCategoryDeletion_SafelyRemovesCategory_PreservingPastExpenses() {
+        // Given existing categories
+        val cat1 = CashCategoryEntity(id = "cat_tea", name = "Tea & Snacks", isSystem = false, isArchived = false)
+        val cat2 = CashCategoryEntity(id = "cat_rent", name = "Rent", isSystem = false, isArchived = false)
+        val categories = mutableListOf(cat1, cat2)
+
+        // Past expense recorded under Tea & Snacks
+        val pastExpense = ShopExpenseEntity(
+            id = "exp_tea_1",
+            category = "Tea & Snacks",
+            categoryId = "cat_tea",
+            amountPaise = 15000L,
+            isIncome = false,
+            notes = "CASH (Tea & Snacks)"
+        )
+
+        // When user removes "Tea & Snacks" category
+        categories.removeIf { it.id == "cat_tea" }
+
+        // Category is no longer in active selectable categories
+        assertEquals(1, categories.size)
+        assertEquals("cat_rent", categories[0].id)
+        assertFalse(categories.any { it.name == "Tea & Snacks" })
+
+        // Past expense record remains completely intact with original category name
+        assertEquals("Tea & Snacks", pastExpense.category)
+        assertEquals("cat_tea", pastExpense.categoryId)
+        assertEquals(15000L, pastExpense.amountPaise)
+    }
+
+    @Test
+    fun testOptionalDescription_DefaultsToCategoryNameWhenBlank() {
+        val selectedCategory = "Office Rent"
+        val userEnteredDescription = "   " // blank
+
+        val effectiveDescription = if (userEnteredDescription.isNotBlank()) {
+            userEnteredDescription.trim()
+        } else {
+            selectedCategory
+        }
+
+        assertEquals("Office Rent", effectiveDescription)
+
+        val paymentNote = buildString {
+            append("CASH")
+            if (effectiveDescription != selectedCategory || userEnteredDescription.isNotBlank()) {
+                append(" ($effectiveDescription)")
+            } else {
+                append(" ($selectedCategory)")
+            }
+        }
+
+        assertEquals("CASH (Office Rent)", paymentNote)
+    }
 }

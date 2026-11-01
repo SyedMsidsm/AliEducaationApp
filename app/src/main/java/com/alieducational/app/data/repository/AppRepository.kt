@@ -834,7 +834,8 @@ class AppRepository @Inject constructor(
         amountPaise: Long,
         paymentSource: String = "CASH",
         notes: String? = null,
-        paidTimestamp: Long = System.currentTimeMillis()
+        paidTimestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null
     ): String = db.withTransaction {
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
         val schemeName = scheme?.name ?: "Pigmy Savings"
@@ -847,13 +848,14 @@ class AppRepository @Inject constructor(
             val noteText = if (!notes.isNullOrBlank()) "Pigmy Deposit ($schemeName): $notes" else "Pigmy Deposit ($schemeName)"
             val expense = ShopExpenseEntity(
                 id = linkedExpenseId,
-                category = "Pigmy",
+                category = schemeName,
                 amountPaise = amountPaise,
                 isIncome = false,
                 notes = noteText,
                 isSavingsTransfer = true,
-                categoryId = "cat_pigmy",
-                timestamp = paidTimestamp
+                categoryId = schemeId,
+                timestamp = paidTimestamp,
+                attachmentUri = attachmentUri
             )
             expenseDao.insertExpense(expense)
         }
@@ -908,11 +910,12 @@ class AppRepository @Inject constructor(
                 linkedExpenseId = UUID.randomUUID().toString()
                 val expense = ShopExpenseEntity(
                     id = linkedExpenseId,
-                    category = "SAVINGS_TRANSFER",
+                    category = schemeName,
                     amountPaise = amountPaise,
                     isIncome = false,
                     notes = noteText,
                     isSavingsTransfer = true,
+                    categoryId = schemeId,
                     timestamp = paidTimestamp
                 )
                 expenseDao.insertExpense(expense)
@@ -966,7 +969,8 @@ class AppRepository @Inject constructor(
         amountPaise: Long,
         destination: String = "CASH", // CASH, BANK
         notes: String? = null,
-        withdrawalTimestamp: Long = System.currentTimeMillis()
+        withdrawalTimestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null
     ): String = db.withTransaction {
         require(amountPaise > 0) { "Withdrawal amount must be greater than zero" }
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
@@ -981,13 +985,14 @@ class AppRepository @Inject constructor(
             val noteText = if (!notes.isNullOrBlank()) "Pigmy withdrawal — $schemeName: $notes" else "Pigmy withdrawal — $schemeName"
             val expense = ShopExpenseEntity(
                 id = linkedExpenseId,
-                category = "Pigmy",
+                category = schemeName,
                 amountPaise = amountPaise,
                 isIncome = true, // Cash In!
                 notes = noteText,
                 isSavingsTransfer = true, // Returned savings, NOT sales revenue or operating profit!
-                categoryId = "cat_pigmy",
-                timestamp = withdrawalTimestamp
+                categoryId = schemeId,
+                timestamp = withdrawalTimestamp,
+                attachmentUri = attachmentUri
             )
             expenseDao.insertExpense(expense)
         }
@@ -1031,7 +1036,8 @@ class AppRepository @Inject constructor(
                     expenseDao.insertExpense(
                         existingExpense.copy(
                             amountPaise = amountPaise,
-                            category = "Pigmy",
+                            category = schemeName,
+                            categoryId = schemeId,
                             notes = noteText,
                             timestamp = withdrawalTimestamp,
                             isVoided = false
@@ -1043,12 +1049,12 @@ class AppRepository @Inject constructor(
                 linkedExpenseId = UUID.randomUUID().toString()
                 val expense = ShopExpenseEntity(
                     id = linkedExpenseId,
-                    category = "Pigmy",
+                    category = schemeName,
                     amountPaise = amountPaise,
                     isIncome = true,
                     notes = noteText,
                     isSavingsTransfer = true,
-                    categoryId = "cat_pigmy",
+                    categoryId = schemeId,
                     timestamp = withdrawalTimestamp
                 )
                 expenseDao.insertExpense(expense)
@@ -1412,8 +1418,14 @@ class AppRepository @Inject constructor(
         )
     }
 
-    suspend fun voidExpense(expenseId: String, reason: String) {
+    suspend fun voidExpense(expenseId: String, reason: String) = db.withTransaction {
         expenseDao.voidExpense(expenseId, reason)
+        pigmyDepositDao.voidByLinkedExpenseId(expenseId, reason)
+        pigmyWithdrawalDao.voidByLinkedExpenseId(expenseId, reason)
+    }
+
+    suspend fun deleteCashCategory(id: String) {
+        cashCategoryDao.deleteCategory(id)
     }
 
     suspend fun archiveCustomer(customerId: String) {

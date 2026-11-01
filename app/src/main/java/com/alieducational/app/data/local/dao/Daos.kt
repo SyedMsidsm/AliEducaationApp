@@ -336,6 +336,12 @@ interface PigmyDepositDao {
     @Query("SELECT * FROM pigmy_deposits WHERE id = :id")
     suspend fun getDepositById(id: String): PigmyDepositEntity?
 
+    @Query("SELECT * FROM pigmy_deposits WHERE linkedExpenseId = :expenseId LIMIT 1")
+    suspend fun getDepositByLinkedExpenseId(expenseId: String): PigmyDepositEntity?
+
+    @Query("UPDATE pigmy_deposits SET isVoided = 1, voidReason = :reason, updatedAt = :updatedAt WHERE linkedExpenseId = :expenseId")
+    suspend fun voidByLinkedExpenseId(expenseId: String, reason: String, updatedAt: Long = System.currentTimeMillis())
+
     @Query("SELECT SUM(amountPaise) FROM pigmy_deposits WHERE isVoided = 0")
     fun getTotalRecordedDepositsPaise(): Flow<Long?>
 
@@ -465,6 +471,9 @@ interface CashCategoryDao {
     @Query("SELECT * FROM cash_categories WHERE isArchived = 0 ORDER BY name ASC")
     fun getActiveCategories(): Flow<List<CashCategoryEntity>>
 
+    @Query("DELETE FROM cash_categories WHERE id = :id")
+    suspend fun deleteCategory(id: String)
+
     @Query("SELECT * FROM cash_categories WHERE id = :id LIMIT 1")
     suspend fun getCategoryById(id: String): CashCategoryEntity?
 
@@ -506,6 +515,12 @@ interface PigmyWithdrawalDao {
 
     @Query("SELECT * FROM pigmy_withdrawals WHERE id = :id LIMIT 1")
     suspend fun getWithdrawalById(id: String): PigmyWithdrawalEntity?
+
+    @Query("SELECT * FROM pigmy_withdrawals WHERE linkedExpenseId = :expenseId LIMIT 1")
+    suspend fun getWithdrawalByLinkedExpenseId(expenseId: String): PigmyWithdrawalEntity?
+
+    @Query("UPDATE pigmy_withdrawals SET isVoided = 1, voidReason = :reason, updatedAt = :updatedAt WHERE linkedExpenseId = :expenseId")
+    suspend fun voidByLinkedExpenseId(expenseId: String, reason: String, updatedAt: Long = System.currentTimeMillis())
 
     @Query("SELECT SUM(amountPaise) FROM pigmy_withdrawals WHERE isVoided = 0")
     fun getTotalRecordedWithdrawalsPaise(): Flow<Long?>
