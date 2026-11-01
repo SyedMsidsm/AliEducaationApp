@@ -484,11 +484,16 @@ class ShopRecordsExcelGenerator @Inject constructor() {
             writeString(row, 3, "Active")
         }
 
-        // Auto-size all sheets first 4 columns
+        // Set standard readable column widths across all sheets (Android-safe without java.awt)
         for (i in 0 until workbook.numberOfSheets) {
             val sheet = workbook.getSheetAt(i)
-            for (col in 0..minOf(4, sheet.getRow(0)?.lastCellNum?.toInt() ?: 0)) {
-                sheet.autoSizeColumn(col)
+            val lastCol = sheet.getRow(0)?.lastCellNum?.toInt() ?: 0
+            for (col in 0 until lastCol) {
+                try {
+                    sheet.setColumnWidth(col, 20 * 256)
+                } catch (_: Throwable) {
+                    // Ignore width adjustment failures on constrained runtimes
+                }
             }
         }
 

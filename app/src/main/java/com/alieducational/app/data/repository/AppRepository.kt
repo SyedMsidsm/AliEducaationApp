@@ -1488,8 +1488,16 @@ class AppRepository @Inject constructor(
         customerDao.archiveCustomer(customerId)
     }
 
+    suspend fun deleteCustomer(customerId: String) {
+        customerDao.deleteCustomer(customerId)
+    }
+
     suspend fun archiveSupplier(supplierId: String) {
         supplierDao.archiveSupplier(supplierId)
+    }
+
+    suspend fun deleteSupplier(supplierId: String) {
+        supplierDao.deleteSupplier(supplierId)
     }
 
     fun getPurchasesForSupplier(supplierId: String): kotlinx.coroutines.flow.Flow<List<com.alieducational.app.data.local.entity.PurchaseEntity>> =

@@ -141,8 +141,11 @@ interface SupplierDao {
     @Query("UPDATE suppliers SET currentBalancePaise = currentBalancePaise + :amountChangePaise WHERE id = :supplierId")
     suspend fun adjustBalance(supplierId: String, amountChangePaise: Long)
 
-    @Query("UPDATE suppliers SET isArchived = 1 WHERE id = :supplierId")
+    @Query("UPDATE suppliers SET isArchived = 1, currentBalancePaise = 0 WHERE id = :supplierId")
     suspend fun archiveSupplier(supplierId: String)
+
+    @Query("DELETE FROM suppliers WHERE id = :supplierId")
+    suspend fun deleteSupplier(supplierId: String)
 }
 
 @Dao
@@ -168,8 +171,11 @@ interface CustomerDao {
     @Query("UPDATE customers SET currentBalancePaise = currentBalancePaise + :amountChangePaise WHERE id = :customerId")
     suspend fun adjustBalance(customerId: String, amountChangePaise: Long)
 
-    @Query("UPDATE customers SET isArchived = 1 WHERE id = :customerId")
+    @Query("UPDATE customers SET isArchived = 1, currentBalancePaise = 0 WHERE id = :customerId")
     suspend fun archiveCustomer(customerId: String)
+
+    @Query("DELETE FROM customers WHERE id = :customerId")
+    suspend fun deleteCustomer(customerId: String)
 }
 
 @Dao

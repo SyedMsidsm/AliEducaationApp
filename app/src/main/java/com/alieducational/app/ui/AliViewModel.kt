@@ -1022,9 +1022,23 @@ class AliViewModel @Inject constructor(
         }
     }
 
+    fun deleteCustomer(customerId: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deleteCustomer(customerId)
+            onDone()
+        }
+    }
+
     fun archiveSupplier(supplierId: String, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             repository.archiveSupplier(supplierId)
+            onDone()
+        }
+    }
+
+    fun deleteSupplier(supplierId: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deleteSupplier(supplierId)
             onDone()
         }
     }

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.ui.text.style.TextAlign
 
@@ -125,6 +126,8 @@ fun AccountsScreen(
 
     var paymentTargetSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
     var paymentTargetCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
+    var removeTargetSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
+    var removeTargetCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
     var completedVoucher by remember { mutableStateOf<PaymentVoucher?>(null) }
     val shopName by viewModel.shopName.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
@@ -237,7 +240,7 @@ fun AccountsScreen(
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        if (selectedTab == 0) "+ Add Supplier" else "+ Add Customer",
+                        if (selectedTab == 0) "Add Supplier" else "Add Customer",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
@@ -296,7 +299,7 @@ fun AccountsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             val emptyMsg = when {
-                                suppliers.isEmpty() -> "No suppliers added yet.\nTap '+ Add Supplier' above to create one."
+                                suppliers.isEmpty() -> "No suppliers added yet.\nTap 'Add Supplier' above to create one."
                                 showOnlyOutstanding && suppliers.none { it.currentBalancePaise > 0L } -> "No outstanding supplier balances.\nAll supplier dues are cleared."
                                 else -> "No matching suppliers found."
                             }
@@ -319,7 +322,8 @@ fun AccountsScreen(
                                 SupplierAccountCard(
                                     supplier = supplier,
                                     isDarkTheme = isDarkTheme,
-                                    onRecordPayment = { paymentTargetSupplier = supplier }
+                                    onRecordPayment = { paymentTargetSupplier = supplier },
+                                    onRemoveSupplier = { removeTargetSupplier = supplier }
                                 )
                             }
                             item { Spacer(modifier = Modifier.height(72.dp)) }
@@ -335,7 +339,7 @@ fun AccountsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             val emptyMsg = when {
-                                customers.isEmpty() -> "No customers added yet.\nTap '+ Add Customer' above to create one."
+                                customers.isEmpty() -> "No customers added yet.\nTap 'Add Customer' above to create one."
                                 showOnlyOutstanding && customers.none { it.currentBalancePaise > 0L } -> "No outstanding customer balances.\nAll customer credit dues are cleared."
                                 else -> "No matching customers found."
                             }
@@ -359,7 +363,8 @@ fun AccountsScreen(
                                     customer = customer,
                                     isDarkTheme = isDarkTheme,
                                     onRecordRepayment = { paymentTargetCustomer = customer },
-                                    onNavigateToBillHistory = onNavigateToBillHistory
+                                    onNavigateToBillHistory = onNavigateToBillHistory,
+                                    onRemoveCustomer = { removeTargetCustomer = customer }
                                 )
                             }
                             item { Spacer(modifier = Modifier.height(72.dp)) }
@@ -631,6 +636,82 @@ fun AccountsScreen(
             onDismiss = { completedVoucher = null }
         )
     }
+
+    // Remove Supplier Confirmation Dialog
+    if (removeTargetSupplier != null) {
+        val sup = removeTargetSupplier!!
+        AlertDialog(
+            onDismissRequest = { removeTargetSupplier = null },
+            title = { Text("Remove Supplier Account") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Are you sure you want to remove supplier '${sup.name}'?")
+                    if (sup.currentBalancePaise > 0) {
+                        Text(
+                            "Warning: You currently owe this supplier ${CostCalculator.formatPaiseToRupees(sup.currentBalancePaise)}. Removing this account will clear the balance from active records.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteSupplier(sup.id) {
+                            removeTargetSupplier = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Remove", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { removeTargetSupplier = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Remove Customer Confirmation Dialog
+    if (removeTargetCustomer != null) {
+        val cust = removeTargetCustomer!!
+        AlertDialog(
+            onDismissRequest = { removeTargetCustomer = null },
+            title = { Text("Remove Customer Account") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Are you sure you want to remove customer '${cust.name}'?")
+                    if (cust.currentBalancePaise > 0) {
+                        Text(
+                            "Warning: This customer currently owes you ${CostCalculator.formatPaiseToRupees(cust.currentBalancePaise)}. Removing this account will clear the balance from active records.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteCustomer(cust.id) {
+                            removeTargetCustomer = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Remove", color = Color.White)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { removeTargetCustomer = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 data class PaymentVoucher(
@@ -793,7 +874,8 @@ fun PaymentVoucherDialog(
 fun SupplierAccountCard(
     supplier: SupplierEntity,
     isDarkTheme: Boolean = true,
-    onRecordPayment: () -> Unit
+    onRecordPayment: () -> Unit,
+    onRemoveSupplier: () -> Unit = {}
 ) {
     val negColor = if (isDarkTheme) NegativeRedDark else NegativeRedLight
     Card(
@@ -835,18 +917,31 @@ fun SupplierAccountCard(
                     color = if (supplier.currentBalancePaise > 0) negColor else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Button(
-                    onClick = onRecordPayment,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = ButtonDefaults.TextButtonContentPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                ) {
-                    Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Pay Bill", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onRemoveSupplier,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "Remove Supplier",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Button(
+                        onClick = onRecordPayment,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Pay Bill", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -858,7 +953,8 @@ fun CustomerAccountCard(
     customer: CustomerEntity,
     isDarkTheme: Boolean = true,
     onRecordRepayment: () -> Unit,
-    onNavigateToBillHistory: () -> Unit = {}
+    onNavigateToBillHistory: () -> Unit = {},
+    onRemoveCustomer: () -> Unit = {}
 ) {
     val posColor = if (isDarkTheme) PositiveGreenDark else PositiveGreenLight
     Card(
@@ -900,7 +996,18 @@ fun CustomerAccountCard(
                     color = if (customer.currentBalancePaise > 0) posColor else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onRemoveCustomer,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "Remove Customer",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     OutlinedButton(
                         onClick = onNavigateToBillHistory,
                         shape = RoundedCornerShape(8.dp),
