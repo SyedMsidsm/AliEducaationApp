@@ -310,8 +310,9 @@ fun BillReceiptScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
+                                        val lineGross = if (line.lineGrossPaise > 0L) line.lineGrossPaise else line.quantityBase * line.unitSellingPricePaise
                                         Text(
-                                            text = CostCalculator.formatPaiseToRupees(line.lineNetPaise),
+                                            text = CostCalculator.formatPaiseToRupees(lineGross),
                                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
@@ -363,7 +364,7 @@ fun BillReceiptScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = stringResource(R.string.receipt_gross_total),
+                                text = "Subtotal",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -375,12 +376,17 @@ fun BillReceiptScreen(
                         }
 
                         if (discountPaise > 0L) {
+                            val discountPct = currentSale?.discountPercent ?: billingState.discountPercent
+                            val discountLabel = if (discountPct > 0.0) {
+                                val formatted = if (discountPct % 1.0 == 0.0) String.format(Locale.ROOT, "%.0f", discountPct) else String.format(Locale.ROOT, "%.1f", discountPct)
+                                "Discount ($formatted%)"
+                            } else "Discount"
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = stringResource(R.string.receipt_discount_given),
+                                    text = discountLabel,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -392,33 +398,77 @@ fun BillReceiptScreen(
                             }
                         }
 
+                        // Shaded TOTAL PAYABLE banner matching receipt PDF
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "TOTAL PAYABLE",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = CostCalculator.formatPaiseToRupees(totalPaise),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 20.sp
+                                    ),
+                                    color = if (isVoided) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        // Amount Paid
+                        val amountPaidPaise = currentSale?.amountReceivedPaise ?: totalPaise
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = stringResource(R.string.receipt_net_paid),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "Amount paid",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = CostCalculator.formatPaiseToRupees(totalPaise),
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 22.sp
-                                ),
-                                color = if (isVoided) Color(0xFFE57373) else MaterialTheme.colorScheme.primary
+                                text = CostCalculator.formatPaiseToRupees(amountPaidPaise),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        if (changeGivenPaise > 0L) {
+                        // Balance due or Change
+                        val remainingCredit = currentSale?.remainingCreditPaise ?: 0L
+                        if (remainingCredit > 0L) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = stringResource(R.string.receipt_change_given),
+                                    text = "Balance due",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Color(0xFFFFA000)
+                                )
+                                Text(
+                                    text = CostCalculator.formatPaiseToRupees(remainingCredit),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFFFFA000)
+                                )
+                            }
+                        } else if (changeGivenPaise > 0L) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Change",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -426,6 +476,70 @@ fun BillReceiptScreen(
                                     text = CostCalculator.formatPaiseToRupees(changeGivenPaise),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Balance due",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "₹0.00",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Balance due",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "₹0.00",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        // Centered Status Badge
+                        val badgeStr = when {
+                            isVoided -> "V O I D E D"
+                            remainingCredit > 0L && amountPaidPaise > 0L -> "P A R T I A L"
+                            remainingCredit > 0L -> "D U E"
+                            else -> "P A I D"
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isVoided) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = badgeStr,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp
+                                    ),
+                                    color = if (isVoided) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }

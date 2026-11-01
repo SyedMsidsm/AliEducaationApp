@@ -223,7 +223,7 @@ class PigmySchemesAndReceiptComprehensiveTest {
         assertTrue("Must contain 'Stationery & Educational Supplies'", summaryText.contains("Stationery & Educational Supplies"))
         assertTrue("Must contain receipt number", summaryText.contains("AE-M-20261101-1036"))
         assertTrue("Must preserve Urdu product name", summaryText.contains("قلم رصاص"))
-        assertTrue("Must contain 'Thank you for your visit!'", summaryText.contains("Thank you for your visit!"))
+        assertTrue("Must contain 'Thank you for visiting Ali Educational!'", summaryText.contains("Thank you for visiting Ali Educational!"))
     }
 
     @Test
