@@ -1,5 +1,7 @@
 package com.alieducational.app.data.service
 
+import com.alieducational.app.domain.calculation.CostCalculator
+
 import android.content.Context
 import android.net.Uri
 import com.alieducational.app.data.local.dao.ImportBatchDao
@@ -540,8 +542,7 @@ class ImportExportService @Inject constructor(
     }
 
     private fun parseCurrencyToPaise(str: String): Long {
-        val clean = str.replace("₹", "").replace("Rs", "", ignoreCase = true).replace(",", "").trim()
-        val valueDouble = clean.toDoubleOrNull() ?: return 0L
-        return (valueDouble * 100).toLong()
+        val clean = str.replace("₹", "").replace("Rs.", "", ignoreCase = true).replace("Rs", "", ignoreCase = true).replace(",", "").trim()
+        return CostCalculator.parseRupeesToPaise(clean) ?: 0L
     }
 }

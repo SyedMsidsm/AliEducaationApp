@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Payment
@@ -272,7 +274,7 @@ fun PaymentScreen(
                 }
             }
 
-            // Payment Method Selector Chips
+            // Payment Method Selector Chips (Responsive 2-row layout avoiding crowding)
             item {
                 Text(
                     text = stringResource(R.string.payment_method),
@@ -282,6 +284,7 @@ fun PaymentScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Row 1: Cash & UPI
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -289,7 +292,7 @@ fun PaymentScreen(
                     FilterChip(
                         selected = billingState.paymentMethod == "CASH",
                         onClick = { viewModel.setBillingPaymentMethod("CASH") },
-                        label = { Text(stringResource(R.string.payment_cash)) },
+                        label = { Text(stringResource(R.string.payment_cash), fontWeight = FontWeight.SemiBold) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Filled.CurrencyRupee,
@@ -303,7 +306,7 @@ fun PaymentScreen(
                     FilterChip(
                         selected = billingState.paymentMethod == "UPI",
                         onClick = { viewModel.setBillingPaymentMethod("UPI") },
-                        label = { Text(stringResource(R.string.payment_upi)) },
+                        label = { Text(stringResource(R.string.payment_upi), fontWeight = FontWeight.SemiBold) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Filled.QrCode,
@@ -313,31 +316,44 @@ fun PaymentScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
-
-                    FilterChip(
-                        selected = billingState.paymentMethod == "CREDIT",
-                        onClick = {
-                            viewModel.setBillingPaymentMethod("CREDIT")
-                            if (billingState.customer == null) {
-                                showCustomerDialog = true
-                            }
-                        },
-                        label = { Text(stringResource(R.string.payment_credit)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Filled.AccountBalanceWallet,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Row 2: Customer Credit (Full width to avoid text crowding)
+                val customerName = billingState.customer?.name
+                val creditLabel = if (customerName.isNullOrBlank()) {
+                    stringResource(R.string.payment_credit)
+                } else {
+                    "Customer Credit ($customerName)"
+                }
+                FilterChip(
+                    selected = billingState.paymentMethod == "CREDIT",
+                    onClick = {
+                        viewModel.setBillingPaymentMethod("CREDIT")
+                        if (billingState.customer == null) {
+                            showCustomerDialog = true
+                        }
+                    },
+                    label = { Text(creditLabel, fontWeight = FontWeight.SemiBold, maxLines = 1) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.AccountBalanceWallet,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             // Cash Tender Details (when Cash selected)
             if (isCash) {
                 item {
+                    val isAmountValid = remember(billingState.cashReceivedStr) {
+                        billingState.cashReceivedStr.isBlank() || CostCalculator.parseRupeesToPaise(billingState.cashReceivedStr) != null
+                    }
+
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
@@ -351,15 +367,28 @@ fun PaymentScreen(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = stringResource(R.string.payment_cash_received),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.payment_cash_received),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (billingState.cashReceivedStr.isNotBlank()) {
+                                    TextButton(onClick = { viewModel.setCashReceived("") }) {
+                                        Text("Clear", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
 
                             OutlinedTextField(
                                 value = billingState.cashReceivedStr,
-                                onValueChange = { viewModel.setCashReceived(it) },
+                                onValueChange = { input ->
+                                    viewModel.setCashReceived(input)
+                                },
                                 placeholder = { Text(netTotalRupeesStr) },
                                 leadingIcon = {
                                     Icon(
@@ -368,7 +397,18 @@ fun PaymentScreen(
                                         tint = MaterialTheme.colorScheme.primary
                                     )
                                 },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                trailingIcon = {
+                                    if (billingState.cashReceivedStr.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setCashReceived("") }) {
+                                            Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                        }
+                                    }
+                                },
+                                isError = !isAmountValid,
+                                supportingText = if (!isAmountValid) {
+                                    { Text("Enter valid amount (e.g. 123.45, max 2 decimals)", color = MaterialTheme.colorScheme.error) }
+                                } else null,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -377,37 +417,61 @@ fun PaymentScreen(
                                 )
                             )
 
-                            // Quick Tender Buttons: Exact, +10, +50, +100, 500
+                            // Quick Tender Buttons: 2 rows with adequate minimum touch target and no vertical character wrapping
+                            // Row 1: Exact (payable) and Set ₹500
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedButton(
                                     onClick = {
-                                        viewModel.setCashReceived(netTotalRupeesStr)
+                                        viewModel.setCashReceived(netTotalRupeesStr.replace("₹", "").trim())
                                     },
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).height(44.dp)
                                 ) {
                                     Text(
-                                        text = stringResource(R.string.payment_exact),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                        text = "Exact ($netTotalRupeesStr)",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        maxLines = 1
                                     )
                                 }
 
-                                listOf(10, 50, 100, 500).forEach { inc ->
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.setCashReceived("500.00")
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).height(44.dp)
+                                ) {
+                                    Text(
+                                        text = "₹500",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            // Row 2: Additive Increments (+₹10, +₹50, +₹100)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(10, 50, 100).forEach { inc ->
                                     OutlinedButton(
                                         onClick = {
-                                            val current = billingState.cashReceivedStr.toDoubleOrNull() ?: (netTotalPaise / 100.0)
-                                            val newVal = if (inc == 500 && current < 500) 500.0 else current + inc
-                                            viewModel.setCashReceived("%.0f".format(newVal))
+                                            val currentPaise = CostCalculator.parseRupeesToPaise(billingState.cashReceivedStr) ?: netTotalPaise
+                                            val newPaise = currentPaise + (inc * 100L)
+                                            val rupeesStr = CostCalculator.formatPaiseToRupees(newPaise).replace("₹", "")
+                                            viewModel.setCashReceived(rupeesStr)
                                         },
                                         shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1f).height(44.dp)
                                     ) {
                                         Text(
-                                            text = if (inc == 500 && (billingState.cashReceivedStr.toDoubleOrNull() ?: 0.0) < 500) "₹500" else "+$inc",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                            text = "+₹$inc",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1
                                         )
                                     }
                                 }

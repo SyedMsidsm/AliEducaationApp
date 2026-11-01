@@ -120,12 +120,12 @@ class ReceiptService @Inject constructor(
 
         // Page dimensions: 380 pt width (standard POS receipt/mobile width)
         val pageWidth = 380
-        val baseHeaderHeight = 160
-        val itemRowHeight = 28
-        val summaryHeight = 180
-        val footerHeight = 60
-        val totalEstimatedHeight = baseHeaderHeight + (lines.size * itemRowHeight) + summaryHeight + footerHeight
-        val pageHeight = maxOf(550, totalEstimatedHeight)
+        val baseHeaderHeight = 165
+        val itemRowHeight = 22
+        val summaryHeight = 150
+        val footerHeight = 65
+        val estimatedTotal = baseHeaderHeight + (lines.size * itemRowHeight) + summaryHeight + footerHeight
+        val pageHeight = maxOf(380, estimatedTotal)
 
         val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
         val page = document.startPage(pageInfo)
@@ -142,14 +142,14 @@ class ReceiptService @Inject constructor(
 
         val boldPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 11f
+            textSize = 10.5f
             isFakeBoldText = true
             isAntiAlias = true
         }
 
         val titlePaint = Paint().apply {
             color = Color.BLACK
-            textSize = 16f
+            textSize = 15f
             isFakeBoldText = true
             isAntiAlias = true
         }
@@ -166,14 +166,13 @@ class ReceiptService @Inject constructor(
             isAntiAlias = true
         }
 
-        var y = 20f
+        var y = 18f
 
         // 1. Draw approved monochrome Ali logo
         try {
             val logoBitmap = context?.let { BitmapFactory.decodeResource(it.resources, R.drawable.ali_logo_receipt_mono) }
             if (logoBitmap != null) {
-                // Scale logo to ~90 pt centered
-                val targetW = 90
+                val targetW = 80
                 val targetH = (targetW * logoBitmap.height) / logoBitmap.width
                 val logoX = (pageWidth - targetW) / 2f
                 val srcRect = Rect(0, 0, logoBitmap.width, logoBitmap.height)
@@ -182,37 +181,40 @@ class ReceiptService @Inject constructor(
                 y += targetH + 8f
             }
         } catch (_: Exception) {
-            y += 10f
+            y += 8f
         }
 
         // 2. Header Shop Name & Subtitle
         val titleText = "ALI EDUCATIONAL"
         val titleWidth = titlePaint.measureText(titleText)
         canvas.drawText(titleText, (pageWidth - titleWidth) / 2f, y, titlePaint)
-        y += 16f
+        y += 15f
 
         val subtitle = "Stationery & Educational Supplies"
         val subtitleW = smallPaint.measureText(subtitle)
         canvas.drawText(subtitle, (pageWidth - subtitleW) / 2f, y, smallPaint)
-        y += 14f
+        y += 13f
 
         val addressText = "Ordinary Retail Receipt • Not GST Registered"
         val addressW = smallPaint.measureText(addressText)
         canvas.drawText(addressText, (pageWidth - addressW) / 2f, y, smallPaint)
-        y += 16f
+        y += 15f
 
         // Separator
-        canvas.drawLine(16f, y, (pageWidth - 16).toFloat(), y, linePaint)
-        y += 16f
+        canvas.drawLine(16f, y, pageWidth - 16f, y, linePaint)
+        y += 15f
 
-        // 3. Receipt Details
+        // 3. Receipt Details (Line 1: Receipt No on left, Date right-aligned on right)
         val dateFormat = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
         val dateStr = dateFormat.format(Date(sale.timestamp))
+        val dateLabel = "Date: $dateStr"
+        val dateW = textPaint.measureText(dateLabel)
 
         canvas.drawText("Receipt No: ${sale.receiptNumber}", 16f, y, boldPaint)
-        canvas.drawText("Date: $dateStr", 200f, y, textPaint)
-        y += 16f
+        canvas.drawText(dateLabel, pageWidth - 16f - dateW, y, textPaint)
+        y += 15f
 
+        // Line 2: Customer Name on left, Sale Tag right-aligned on right
         val customerName = if (!sale.customerName.isNullOrBlank()) sale.customerName else "Walk-in Customer"
         canvas.drawText("Customer: $customerName", 16f, y, textPaint)
 
@@ -223,8 +225,8 @@ class ReceiptService @Inject constructor(
             else -> "CASH SALE"
         }
         val tagW = boldPaint.measureText(memoTag)
-        canvas.drawText(memoTag, (pageWidth - 16 - tagW), y, boldPaint)
-        y += 18f
+        canvas.drawText(memoTag, pageWidth - 16f - tagW, y, boldPaint)
+        y += 16f
 
         // Voided Alert Banner
         if (sale.isVoided) {
@@ -242,51 +244,87 @@ class ReceiptService @Inject constructor(
             }
         }
 
-        // 4. Item Table Headers
-        canvas.drawLine(16f, y, (pageWidth - 16).toFloat(), y, linePaint)
-        y += 14f
+        // 4. Item Table Headers (Properly aligned with columns)
+        canvas.drawLine(16f, y, pageWidth - 16f, y, linePaint)
+        y += 13f
 
         canvas.drawText("Item / Particulars", 16f, y, boldPaint)
-        canvas.drawText("Qty", 210f, y, boldPaint)
-        canvas.drawText("Rate", 270f, y, boldPaint)
+        val qtyHdr = "Qty"
+        canvas.drawText(qtyHdr, 215f - boldPaint.measureText(qtyHdr) / 2f, y, boldPaint)
+        val rateHdr = "Rate"
+        canvas.drawText(rateHdr, 290f - boldPaint.measureText(rateHdr), y, boldPaint)
         val amtHdr = "Amount"
         canvas.drawText(amtHdr, pageWidth - 16f - boldPaint.measureText(amtHdr), y, boldPaint)
-        y += 8f
+        y += 7f
 
-        canvas.drawLine(16f, y, (pageWidth - 16).toFloat(), y, linePaint)
-        y += 16f
+        canvas.drawLine(16f, y, pageWidth - 16f, y, linePaint)
+        y += 15f
 
-        // 5. Item Rows (Preserving Urdu product names with Android BiDi rendering)
+        // 5. Item Rows: Description, Qty, Rate, and Amount rendered on the EXACT SAME line/baseline!
         lines.forEach { line ->
-            // Item description
             val displayName = line.productName.ifBlank { "Item" }
-            canvas.drawText(displayName, 16f, y, textPaint)
-            y += 14f
-
-            // Qty, unit rate, and line net amount
-            val unitStr = if (line.isPack) "pk" else "pc"
+            val unitStr = line.unitLabel ?: if (line.isPack) "pk" else "pc"
             val qtyStr = "${line.quantityBase} $unitStr"
             val rateStr = CostCalculator.formatPaiseToRupees(line.unitSellingPricePaise)
             val lineTotal = CostCalculator.formatPaiseToRupees(line.lineNetPaise)
 
-            canvas.drawText(qtyStr, 210f, y, smallPaint)
-            canvas.drawText(rateStr, 270f, y, smallPaint)
             val lineTotalW = textPaint.measureText(lineTotal)
-            canvas.drawText(lineTotal, pageWidth - 16f - lineTotalW, y, textPaint)
-            y += 16f
+            val rateW = smallPaint.measureText(rateStr)
+            val qtyW = smallPaint.measureText(qtyStr)
+
+            // Right-aligned amounts & quantities aligned on this row
+            val maxDescW = 160f
+            if (textPaint.measureText(displayName) > maxDescW) {
+                val words = displayName.split(" ")
+                var currentLine = ""
+                var isFirst = true
+                words.forEach { word ->
+                    val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
+                    if (textPaint.measureText(testLine) <= maxDescW) {
+                        currentLine = testLine
+                    } else {
+                        canvas.drawText(currentLine, 16f, y, textPaint)
+                        if (isFirst) {
+                            canvas.drawText(qtyStr, 215f - qtyW / 2f, y, smallPaint)
+                            canvas.drawText(rateStr, 290f - rateW, y, smallPaint)
+                            canvas.drawText(lineTotal, pageWidth - 16f - lineTotalW, y, textPaint)
+                            isFirst = false
+                        }
+                        y += 13f
+                        currentLine = word
+                    }
+                }
+                if (currentLine.isNotEmpty()) {
+                    canvas.drawText(currentLine, 16f, y, textPaint)
+                    if (isFirst) {
+                        canvas.drawText(qtyStr, 215f - qtyW / 2f, y, smallPaint)
+                        canvas.drawText(rateStr, 290f - rateW, y, smallPaint)
+                        canvas.drawText(lineTotal, pageWidth - 16f - lineTotalW, y, textPaint)
+                    }
+                    y += 15f
+                } else {
+                    y += 4f
+                }
+            } else {
+                canvas.drawText(displayName, 16f, y, textPaint)
+                canvas.drawText(qtyStr, 215f - qtyW / 2f, y, smallPaint)
+                canvas.drawText(rateStr, 290f - rateW, y, smallPaint)
+                canvas.drawText(lineTotal, pageWidth - 16f - lineTotalW, y, textPaint)
+                y += 17f
+            }
         }
 
-        canvas.drawLine(16f, y, (pageWidth - 16).toFloat(), y, linePaint)
-        y += 18f
+        canvas.drawLine(16f, y, pageWidth - 16f, y, linePaint)
+        y += 16f
 
-        // 6. Totals & Payment Summary
+        // 6. Totals & Payment Summary (Clean right-aligned block)
         fun drawSummaryRow(label: String, value: String, isBold: Boolean = false, isLarge: Boolean = false) {
             val p = if (isBold) boldPaint else textPaint
-            if (isLarge) p.textSize = 13f else p.textSize = 10f
-            canvas.drawText(label, 160f, y, p)
+            if (isLarge) p.textSize = 12f else p.textSize = 10f
+            canvas.drawText(label, 175f, y, p)
             val valW = p.measureText(value)
             canvas.drawText(value, pageWidth - 16f - valW, y, p)
-            y += if (isLarge) 18f else 15f
+            y += if (isLarge) 17f else 14f
         }
 
         drawSummaryRow("Subtotal:", CostCalculator.formatPaiseToRupees(sale.grossTotalPaise))
@@ -297,7 +335,7 @@ class ReceiptService @Inject constructor(
             drawSummaryRow(pctLabel, discountText)
         }
 
-        canvas.drawLine(160f, y - 4f, pageWidth - 16f, y - 4f, linePaint)
+        canvas.drawLine(175f, y - 4f, pageWidth - 16f, y - 4f, linePaint)
         y += 4f
 
         drawSummaryRow("Total Payable:", CostCalculator.formatPaiseToRupees(sale.netTotalPaise), isBold = true, isLarge = true)
@@ -315,14 +353,14 @@ class ReceiptService @Inject constructor(
         drawSummaryRow("Payment Mode:", sale.paymentMethod)
 
         // 7. Footer
-        y += 10f
-        canvas.drawLine(16f, y, (pageWidth - 16).toFloat(), y, linePaint)
-        y += 20f
+        y += 8f
+        canvas.drawLine(16f, y, pageWidth - 16f, y, linePaint)
+        y += 18f
 
         val thanksText = "Thank you for visiting Ali Educational!"
         val thanksW = boldPaint.measureText(thanksText)
         canvas.drawText(thanksText, (pageWidth - thanksW) / 2f, y, boldPaint)
-        y += 14f
+        y += 13f
 
         val footerNote = "Please retain this receipt for warranty and returns."
         val footerW = smallPaint.measureText(footerNote)

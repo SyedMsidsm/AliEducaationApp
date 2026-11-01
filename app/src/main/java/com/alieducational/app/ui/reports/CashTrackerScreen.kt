@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.widget.Toast
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -323,8 +327,9 @@ fun CashTrackerScreen(
                                 text = title,
                                 fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
                                 color = if (selectedTab == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp,
-                                maxLines = 1
+                                fontSize = 11.5.sp,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     )
@@ -645,12 +650,19 @@ fun CashTrackerScreen(
         }
     }
 
-    // Add Income / Expense Dialog
+    // Add Income / Expense Dialog with Editable Date & Time (F3)
     if (showAddDialog) {
         var amountStr by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
         var paymentMode by remember { mutableStateOf("CASH") }
         var note by remember { mutableStateOf("") }
+        var entryTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
+        val dialogContext = LocalContext.current
+
+        val cal = Calendar.getInstance().apply { timeInMillis = entryTimestamp }
+        val entryDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(entryTimestamp))
+        val entryTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(entryTimestamp))
+        val isFuture = entryTimestamp > System.currentTimeMillis() + 60_000L
 
         AlertDialog(
             onDismissRequest = { showAddDialog = false },
@@ -663,6 +675,83 @@ fun CashTrackerScreen(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Date & Time pickers
+                    Text(
+                        text = "Transaction Date & Time",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                DatePickerDialog(
+                                    dialogContext,
+                                    { _, y, m, d ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = entryTimestamp
+                                            set(Calendar.YEAR, y)
+                                            set(Calendar.MONTH, m)
+                                            set(Calendar.DAY_OF_MONTH, d)
+                                        }
+                                        entryTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.YEAR),
+                                    cal.get(Calendar.MONTH),
+                                    cal.get(Calendar.DAY_OF_MONTH)
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.1f)
+                        ) {
+                            Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(entryDateStr, fontSize = 12.sp, maxLines = 1)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                TimePickerDialog(
+                                    dialogContext,
+                                    { _, hour, minute ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = entryTimestamp
+                                            set(Calendar.HOUR_OF_DAY, hour)
+                                            set(Calendar.MINUTE, minute)
+                                        }
+                                        entryTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.HOUR_OF_DAY),
+                                    cal.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(0.9f)
+                        ) {
+                            Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(entryTimeStr, fontSize = 12.sp, maxLines = 1)
+                        }
+                    }
+
+                    if (isFuture) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "⚠️ Notice: This entry has a future date/time. It will be recorded with this timestamp.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
                     OutlinedTextField(
                         value = amountStr,
                         onValueChange = { amountStr = it },
@@ -715,7 +804,7 @@ fun CashTrackerScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amountPaise = ((amountStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                        val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
                         if (amountPaise <= 0 || description.isBlank()) return@Button
 
                         val paymentNote = buildString {
@@ -728,6 +817,7 @@ fun CashTrackerScreen(
                             amountPaise = amountPaise,
                             isIncome = isIncomeMode,
                             notes = paymentNote,
+                            timestamp = entryTimestamp,
                             onDone = { showAddDialog = false }
                         )
                     },

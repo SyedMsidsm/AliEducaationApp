@@ -1,5 +1,8 @@
 package com.alieducational.app.ui.more
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,7 +38,16 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material3.Text
+import com.alieducational.app.domain.calculation.CostCalculator
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -51,11 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
-import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,6 +186,8 @@ fun ExpensesScreen(
         var amountStr by remember { mutableStateOf("") }
         var notes by remember { mutableStateOf("") }
         var categoryExpanded by remember { mutableStateOf(false) }
+        var entryTimestamp by remember { mutableStateOf(System.currentTimeMillis()) }
+        val dialogContext = LocalContext.current
 
         val expenseCategories = listOf("Rent", "Electricity", "Staff Salary", "Tea & Refreshments", "Maintenance", "Packaging Supplies", "Other Expense")
         val incomeCategories = listOf("Capital Deposit", "Owner Cash Injection", "Old Loan Recovery", "Scrap Sale", "Other Income")
@@ -195,6 +205,67 @@ fun ExpensesScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { isIncome = true; category = "Capital Deposit" }) {
                             RadioButton(selected = isIncome, onClick = { isIncome = true; category = "Capital Deposit" })
                             Text("Other Income")
+                        }
+                    }
+
+                    // Date & Time pickers
+                    val cal = Calendar.getInstance().apply { timeInMillis = entryTimestamp }
+                    val entryDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(entryTimestamp))
+                    val entryTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(entryTimestamp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                DatePickerDialog(
+                                    dialogContext,
+                                    { _, y, m, d ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = entryTimestamp
+                                            set(Calendar.YEAR, y)
+                                            set(Calendar.MONTH, m)
+                                            set(Calendar.DAY_OF_MONTH, d)
+                                        }
+                                        entryTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.YEAR),
+                                    cal.get(Calendar.MONTH),
+                                    cal.get(Calendar.DAY_OF_MONTH)
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.1f)
+                        ) {
+                            Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(entryDateStr, fontSize = 12.sp, maxLines = 1)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                TimePickerDialog(
+                                    dialogContext,
+                                    { _, hour, minute ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = entryTimestamp
+                                            set(Calendar.HOUR_OF_DAY, hour)
+                                            set(Calendar.MINUTE, minute)
+                                        }
+                                        entryTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.HOUR_OF_DAY),
+                                    cal.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(0.9f)
+                        ) {
+                            Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(entryTimeStr, fontSize = 12.sp, maxLines = 1)
                         }
                     }
 
@@ -252,7 +323,7 @@ fun ExpensesScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amountPaise = ((amountStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                        val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
                         if (amountPaise <= 0) return@Button
 
                         viewModel.recordShopExpense(
@@ -260,6 +331,7 @@ fun ExpensesScreen(
                             amountPaise = amountPaise,
                             isIncome = isIncome,
                             notes = notes.trim().ifBlank { null },
+                            timestamp = entryTimestamp,
                             onDone = { showAddDialog = false }
                         )
                     }

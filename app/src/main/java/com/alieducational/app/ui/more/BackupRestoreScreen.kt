@@ -83,6 +83,16 @@ fun BackupRestoreScreen(
         viewModel.loadBackups()
     }
 
+    var pendingFileToSave by remember { mutableStateOf<File?>(null) }
+    val saveToDriveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null && pendingFileToSave != null) {
+            viewModel.exportBackupToUri(pendingFileToSave!!, uri)
+        }
+        pendingFileToSave = null
+    }
+
     val restoreFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -190,6 +200,31 @@ fun BackupRestoreScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Restore from File")
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    val latest = availableBackups.firstOrNull()
+                                    if (latest != null) {
+                                        pendingFileToSave = File(latest.filePath)
+                                        saveToDriveLauncher.launch(latest.fileName)
+                                    } else {
+                                        viewModel.createBackup {
+                                            viewModel.availableBackups.value.firstOrNull()?.let { b ->
+                                                pendingFileToSave = File(b.filePath)
+                                                saveToDriveLauncher.launch(b.fileName)
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Save Copy to Google Drive / Files")
                             }
                         }
                     }
@@ -380,11 +415,25 @@ fun BackupRestoreScreen(
 
                                 Spacer(modifier = Modifier.height(10.dp))
 
-                                // Action Buttons: Share / Export and Restore
+                                // Action Buttons: Share / Export, Save to Drive, and Restore
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            pendingFileToSave = File(backup.filePath)
+                                            saveToDriveLauncher.launch(backup.fileName)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = ButtonDefaults.TextButtonContentPadding
+                                    ) {
+                                        Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("To Drive", fontSize = 11.sp, maxLines = 1)
+                                    }
+
                                     OutlinedButton(
                                         onClick = {
                                             val shareIntent = viewModel.getBackupShareIntent(backup.filePath)
@@ -394,9 +443,9 @@ fun BackupRestoreScreen(
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = ButtonDefaults.TextButtonContentPadding
                                     ) {
-                                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Export / Share", fontSize = 12.sp)
+                                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Share", fontSize = 11.sp, maxLines = 1)
                                     }
 
                                     Button(
@@ -409,9 +458,9 @@ fun BackupRestoreScreen(
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = ButtonDefaults.TextButtonContentPadding
                                     ) {
-                                        Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Restore", fontSize = 12.sp)
+                                        Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Restore", fontSize = 11.sp, maxLines = 1)
                                     }
                                 }
                             }

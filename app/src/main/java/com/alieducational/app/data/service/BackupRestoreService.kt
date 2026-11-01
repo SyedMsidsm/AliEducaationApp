@@ -265,4 +265,17 @@ class BackupRestoreService @Inject constructor(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
+
+    suspend fun exportBackupToUri(backupFile: File, targetUri: Uri): Boolean = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                FileInputStream(backupFile).use { input ->
+                    input.copyTo(out)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 }

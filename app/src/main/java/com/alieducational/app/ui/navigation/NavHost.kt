@@ -78,6 +78,7 @@ fun AppNavigation(
                 onNavigateToProfit = { navController.navigate(Screen.ProfitAnalysis.route) },
                 onNavigateToExpenses = { navController.navigate(Screen.Expenses.route) },
                 onNavigateToCashTracker = { navController.navigate(Screen.CashTracker.route) },
+                onNavigateToPigmy = { navController.navigate(Screen.PigmySavings.route) },
                 onNavigateToBackup = { navController.navigate(Screen.BackupRestore.route) },
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
             )

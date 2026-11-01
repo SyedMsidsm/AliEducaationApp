@@ -14,6 +14,7 @@ import com.alieducational.app.data.local.entity.StockMovementEntity
 import com.alieducational.app.data.local.entity.ShopExpenseEntity
 import com.alieducational.app.data.local.entity.SupplierEntity
 import com.alieducational.app.data.preferences.AppPreferences
+import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.data.repository.AppRepository
 import com.alieducational.app.data.repository.BarcodeLookupResult
 import com.alieducational.app.data.repository.PurchaseItemParam
@@ -98,7 +99,7 @@ data class BillingState(
         get() = items.sumOf { it.quantity }
 
     val cashReceivedPaise: Long
-        get() = ((cashReceivedStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+        get() = CostCalculator.parseRupeesToPaise(cashReceivedStr) ?: 0L
 
     val changeToGivePaise: Long
         get() = if (paymentMethod == "CASH" && cashReceivedPaise > netTotalPaise) cashReceivedPaise - netTotalPaise else 0L
@@ -835,10 +836,11 @@ class AliViewModel @Inject constructor(
         amountPaise: Long,
         isIncome: Boolean,
         notes: String?,
+        timestamp: Long = System.currentTimeMillis(),
         onDone: () -> Unit = {}
     ) {
         viewModelScope.launch {
-            repository.recordShopExpense(category, amountPaise, isIncome, notes)
+            repository.recordShopExpense(category, amountPaise, isIncome, notes, timestamp)
             onDone()
         }
     }
@@ -967,6 +969,14 @@ class AliViewModel @Inject constructor(
             val success = backupService.restoreFromUri(uri)
             _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
             onDone()
+        }
+    }
+
+    fun exportBackupToUri(backupFile: File, targetUri: Uri, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val success = backupService.exportBackupToUri(backupFile, targetUri)
+            _backupStatus.value = if (success) "Saved to Google Drive / Files successfully" else "Failed to save backup to destination"
+            onDone(success)
         }
     }
 

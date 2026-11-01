@@ -199,6 +199,32 @@ object CostCalculator {
     /**
      * Formats paise to Indian Rupees string e.g. 10050 -> "₹100.50"
      */
+    /**
+     * Parses a string representation of Rupees (e.g. "123.45", "48", "47.50", "0") into exact paise.
+     * Rejects malformed strings, negative amounts, and excess decimal precision (> 2 decimals).
+     */
+    fun parseRupeesToPaise(input: String?): Long? {
+        if (input == null) return null
+        val trimmed = input.replace("₹", "").replace(",", "").trim()
+        if (trimmed.isEmpty()) return null
+        val parts = trimmed.split(".")
+        if (parts.size > 2) return null
+        val rupees = parts[0].toLongOrNull() ?: return null
+        if (rupees < 0) return null
+        val paise = if (parts.size == 2) {
+            val decimal = parts[1]
+            when (decimal.length) {
+                0 -> 0L
+                1 -> (decimal + "0").toLongOrNull() ?: return null
+                2 -> decimal.toLongOrNull() ?: return null
+                else -> return null // Reject excess precision (> 2 decimal places)
+            }
+        } else {
+            0L
+        }
+        return rupees * 100L + paise
+    }
+
     fun formatPaiseToRupees(paise: Long): String {
         val isNegative = paise < 0
         val absPaise = if (isNegative) -paise else paise

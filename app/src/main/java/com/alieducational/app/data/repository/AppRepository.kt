@@ -973,14 +973,16 @@ class AppRepository @Inject constructor(
         category: String,
         amountPaise: Long,
         isIncome: Boolean,
-        notes: String?
+        notes: String?,
+        timestamp: Long = System.currentTimeMillis()
     ) {
         expenseDao.insertExpense(
             ShopExpenseEntity(
                 category = category,
                 amountPaise = amountPaise,
                 isIncome = isIncome,
-                notes = notes
+                notes = notes,
+                timestamp = timestamp
             )
         )
     }
