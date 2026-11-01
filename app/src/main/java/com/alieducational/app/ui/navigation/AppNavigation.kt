@@ -28,6 +28,7 @@ sealed class Screen(val route: String) {
     data object BillReceipt : Screen("bill_receipt/{receiptNumber}") {
         fun createRoute(num: String) = "bill_receipt/$num"
     }
+    data object BillHistory : Screen("bill_history")
 
     // Secondary Management & Reports (Accessible from Home)
     data object More : Screen("more")

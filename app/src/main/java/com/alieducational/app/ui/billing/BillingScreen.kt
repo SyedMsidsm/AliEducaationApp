@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -81,6 +82,7 @@ fun BillingScreen(
     onNavigateToScanner: () -> Unit,
     onNavigateToReview: () -> Unit,
     onNavigateBack: () -> Unit = {},
+    onNavigateToBillHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     androidx.activity.compose.BackHandler {
@@ -173,8 +175,20 @@ fun BillingScreen(
                             }
                         }
 
-                        // Held Bills Action Button
+                        // History & Held Bills Action Buttons
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = onNavigateToBillHistory,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.ReceiptLong,
+                                    contentDescription = "Bill History",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
                             if (allHeldBills.isNotEmpty()) {
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

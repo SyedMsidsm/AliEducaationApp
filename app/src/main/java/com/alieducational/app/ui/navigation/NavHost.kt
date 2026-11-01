@@ -12,6 +12,7 @@ import com.alieducational.app.ui.accounts.AccountsScreen
 import com.alieducational.app.ui.auth.UnlockScreen
 import com.alieducational.app.ui.billing.BarcodeScannerScreen
 import com.alieducational.app.ui.billing.BillReceiptScreen
+import com.alieducational.app.ui.billing.BillHistoryScreen
 import com.alieducational.app.ui.billing.BillingScreen
 import com.alieducational.app.ui.billing.PaymentScreen
 import com.alieducational.app.ui.billing.ReviewBillScreen
@@ -80,7 +81,7 @@ fun AppNavigation(
                 onNavigateToCashTracker = { navController.navigate(Screen.CashTracker.route) },
                 onNavigateToPigmy = { navController.navigate(Screen.PigmySavings.route) },
                 onNavigateToBackup = { navController.navigate(Screen.BackupRestore.route) },
-                onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
             )
         }
 
@@ -105,11 +106,27 @@ fun AppNavigation(
                 viewModel = viewModel,
                 onNavigateToScanner = { navController.navigate(Screen.BarcodeScanner.route) },
                 onNavigateToReview = { navController.navigate(Screen.ReviewBill.route) },
+                onNavigateToBillHistory = { navController.navigate(Screen.BillHistory.route) },
                 onNavigateBack = {
                     if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
                         navController.navigate(Screen.Home.route) {
                             launchSingleTop = true
                         }
+                    }
+                }
+            )
+        }
+
+        composable(Screen.BillHistory.route) {
+            BillHistoryScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReceipt = { receiptNumber ->
+                    navController.navigate(Screen.BillReceipt.createRoute(receiptNumber))
+                },
+                onNavigateToCustomerAccount = { customerId ->
+                    navController.navigate(Screen.Accounts.route) {
+                        launchSingleTop = true
                     }
                 }
             )
@@ -188,7 +205,7 @@ fun AppNavigation(
                 onNavigateToExpenses = { navController.navigate(Screen.Expenses.route) },
                 onNavigateToImport = { navController.navigate(Screen.ImportCatalog.route) },
                 onNavigateToBackup = { navController.navigate(Screen.BackupRestore.route) },
-                onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
             )
         }
 

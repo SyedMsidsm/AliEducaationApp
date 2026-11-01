@@ -123,6 +123,9 @@ interface SupplierDao {
     @Query("SELECT SUM(currentBalancePaise) FROM suppliers WHERE isArchived = 0 AND currentBalancePaise > 0")
     fun getTotalWeOweSuppliersPaise(): Flow<Long?>
 
+    @Query("SELECT COUNT(*) FROM suppliers WHERE isArchived = 0 AND currentBalancePaise > 0")
+    fun getDistinctCreditorsCount(): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSupplier(supplier: SupplierEntity)
 
@@ -146,6 +149,9 @@ interface CustomerDao {
 
     @Query("SELECT SUM(currentBalancePaise) FROM customers WHERE isArchived = 0 AND currentBalancePaise > 0")
     fun getTotalCustomersOweUsPaise(): Flow<Long?>
+
+    @Query("SELECT COUNT(*) FROM customers WHERE isArchived = 0 AND currentBalancePaise > 0")
+    fun getDistinctDebtorsCount(): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomer(customer: CustomerEntity)
@@ -191,6 +197,9 @@ interface SaleDao {
 
     @Query("SELECT * FROM sales WHERE id = :id")
     suspend fun getSaleById(id: String): SaleEntity?
+
+    @Query("SELECT * FROM sales WHERE customerId = :customerId ORDER BY timestamp DESC")
+    fun getSalesForCustomer(customerId: String): Flow<List<SaleEntity>>
 
     @Query("SELECT * FROM sale_lines WHERE saleId = :saleId")
     suspend fun getLinesForSale(saleId: String): List<SaleLineEntity>
@@ -251,6 +260,12 @@ interface AccountPaymentDao {
 interface ShopExpenseDao {
     @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 ORDER BY timestamp DESC")
     fun getAllExpenses(): Flow<List<ShopExpenseEntity>>
+
+    @Query("SELECT * FROM shop_expenses WHERE linkedExpenseId = :expenseId AND isVoided = 0")
+    suspend fun getActiveRefundsForExpense(expenseId: String): List<ShopExpenseEntity>
+
+    @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 AND isIncome = 0 AND isSavingsTransfer = 0 ORDER BY timestamp DESC")
+    fun getRefundableExpenses(): Flow<List<ShopExpenseEntity>>
 
     @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 AND timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
     fun getExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>>

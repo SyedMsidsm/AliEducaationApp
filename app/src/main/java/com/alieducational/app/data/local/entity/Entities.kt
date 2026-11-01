@@ -197,6 +197,10 @@ data class ShopExpenseEntity(
     val attachmentUri: String? = null,
     val isSavingsTransfer: Boolean = false,
     val categoryId: String? = null,
+    val isExpenseRefund: Boolean = false,
+    val linkedExpenseId: String? = null,
+    val classification: String = "SHARED", // PRODUCTS, SERVICES, SHARED
+    val paymentMethod: String = "CASH", // CASH, BANK, UPI
     val timestamp: Long = System.currentTimeMillis()
 )
 

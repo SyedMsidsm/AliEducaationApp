@@ -225,12 +225,49 @@ object CostCalculator {
         return rupees * 100L + paise
     }
 
+    /**
+     * Formats an integer value according to Indian number grouping system:
+     * - Last 3 digits grouped together
+     * - Preceding digits grouped in sets of 2
+     * e.g. 999 -> "999", 1000 -> "1,000", 12235 -> "12,235", 100000 -> "1,00,000", 1234567 -> "12,34,567"
+     */
+    fun formatIndianGrouping(value: Long): String {
+        val s = kotlin.math.abs(value).toString()
+        if (s.length <= 3) return s
+        val lastThree = s.takeLast(3)
+        val remaining = s.dropLast(3)
+        val sb = StringBuilder()
+        var i = remaining.length
+        while (i > 0) {
+            val start = kotlin.math.max(0, i - 2)
+            val part = remaining.substring(start, i)
+            if (sb.isNotEmpty()) {
+                sb.insert(0, ",")
+            }
+            sb.insert(0, part)
+            i -= 2
+        }
+        return "$sb,$lastThree"
+    }
+
+    /**
+     * Formats integer quantity with Indian grouping and optional unit (e.g. 1,23,456 pcs).
+     */
+    fun formatQuantityWithGrouping(qty: Int, unit: String? = null): String {
+        val isNegative = qty < 0
+        val absQty = if (isNegative) -qty else qty
+        val grouped = formatIndianGrouping(absQty.toLong())
+        val sign = if (isNegative) "-" else ""
+        return if (unit.isNullOrBlank()) "$sign$grouped" else "$sign$grouped $unit"
+    }
+
     fun formatPaiseToRupees(paise: Long): String {
         val isNegative = paise < 0
         val absPaise = if (isNegative) -paise else paise
         val rupees = absPaise / 100
         val remainder = absPaise % 100
         val prefix = if (isNegative) "-₹" else "₹"
-        return String.format("%s%d.%02d", prefix, rupees, remainder)
+        val groupedRupees = formatIndianGrouping(rupees)
+        return String.format(java.util.Locale.US, "%s%s.%02d", prefix, groupedRupees, remainder)
     }
 }

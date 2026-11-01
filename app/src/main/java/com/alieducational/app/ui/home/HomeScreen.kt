@@ -76,6 +76,7 @@ fun HomeScreen(
     onNavigateToBackup: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToPigmy: () -> Unit = {},
+    onNavigateToBillHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val shopName by viewModel.shopName.collectAsState()
@@ -344,10 +345,10 @@ fun HomeScreen(
                             onClick = onNavigateToPigmy
                         )
                         ToolQuickCard(
-                            title = "Settings",
-                            icon = Icons.Filled.Settings,
+                            title = "Bill History",
+                            icon = Icons.Filled.ReceiptLong,
                             modifier = Modifier.weight(1f),
-                            onClick = onNavigateToSettings
+                            onClick = onNavigateToBillHistory
                         )
                     }
                 }

@@ -138,4 +138,23 @@ class CostCalculatorTest {
         assertEquals("₹0.00", CostCalculator.formatPaiseToRupees(0L))
         assertEquals("-₹540.74", CostCalculator.formatPaiseToRupees(-54074L))
     }
+
+    @Test
+    fun testIndianDigitGrouping_Section23() {
+        // Section 23 table:
+        // 999 rupees -> ₹999.00
+        assertEquals("₹999.00", CostCalculator.formatPaiseToRupees(99900L))
+        // 1000 rupees -> ₹1,000.00
+        assertEquals("₹1,000.00", CostCalculator.formatPaiseToRupees(100000L))
+        // 12235 rupees -> ₹12,235.00
+        assertEquals("₹12,235.00", CostCalculator.formatPaiseToRupees(1223500L))
+        // 100000 rupees -> ₹1,00,000.00
+        assertEquals("₹1,00,000.00", CostCalculator.formatPaiseToRupees(10000000L))
+        // 1234567.50 rupees -> ₹12,34,567.50
+        assertEquals("₹12,34,567.50", CostCalculator.formatPaiseToRupees(123456750L))
+        // Negative 12197.72 rupees -> -₹12,197.72
+        assertEquals("-₹12,197.72", CostCalculator.formatPaiseToRupees(-1219772L))
+        // 123456 pieces -> 1,23,456 pcs
+        assertEquals("1,23,456 pcs", CostCalculator.formatQuantityWithGrouping(123456, "pcs"))
+    }
 }

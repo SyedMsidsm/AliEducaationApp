@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Remove
@@ -39,6 +40,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -622,6 +626,7 @@ fun PigmySchemeCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var historyFilterTab by remember { mutableIntStateOf(0) } // 0: All, 1: Deposits, 2: Withdrawals
+    var showOverflowMenu by remember { mutableStateOf(false) }
 
     val activeDepositsTotal = remember(deposits) {
         deposits.filter { !it.isVoided }.sumOf { it.amountPaise }
@@ -654,13 +659,16 @@ fun PigmySchemeCard(
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header Row: Scheme Name + Status + Actions
+            // Header Row: Scheme Name + Status + Overflow Menu Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = scheme.name,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -682,21 +690,54 @@ fun PigmySchemeCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onSetOpeningBalance, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.AccountBalance, contentDescription = "Opening Balance", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
-                    IconButton(onClick = onEditScheme, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Edit Scheme", modifier = Modifier.size(18.dp))
-                    }
+                Box {
                     IconButton(
-                        onClick = { onArchiveToggle(!scheme.isArchived) },
-                        modifier = Modifier.size(32.dp)
+                        onClick = { showOverflowMenu = true },
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            if (scheme.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive,
-                            contentDescription = if (scheme.isArchived) "Reactivate" else "Archive",
-                            modifier = Modifier.size(18.dp)
+                            Icons.Filled.MoreVert,
+                            contentDescription = "Scheme Options",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Opening Balance") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.AccountBalance, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onSetOpeningBalance()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit Scheme") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onEditScheme()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (scheme.isArchived) "Reactivate Scheme" else "Archive Scheme") },
+                            leadingIcon = {
+                                Icon(
+                                    if (scheme.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onArchiveToggle(!scheme.isArchived)
+                            }
                         )
                     }
                 }
@@ -751,45 +792,74 @@ fun PigmySchemeCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Two Action Buttons: Record Deposit & Record Withdrawal
+            // Two Action Buttons: Record Deposit & Record Withdrawal (equal weight, min height 48dp, single line)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Button(
                     onClick = onAddDeposit,
                     enabled = !scheme.isArchived,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Deposit", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Deposit",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
                 }
 
                 Button(
                     onClick = onAddWithdrawal,
                     enabled = !scheme.isArchived && trackedBalancePaise > 0,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
                 ) {
-                    Icon(Icons.Filled.Remove, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Withdraw", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Icon(Icons.Filled.Remove, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Withdraw",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
                 }
+            }
 
-                OutlinedButton(
-                    onClick = { expanded = !expanded },
-                    shape = RoundedCornerShape(10.dp)
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Dedicated History Row
+            OutlinedButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${allActivities.size}")
+                    Text(
+                        text = if (expanded) "Hide history (${allActivities.size} entries)" else "View history (${allActivities.size} entries)",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
                     Icon(
                         if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

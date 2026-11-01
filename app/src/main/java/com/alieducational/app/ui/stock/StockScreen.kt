@@ -45,6 +45,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -263,6 +264,11 @@ fun StockScreen(
         IntegratedAddStockProductDialog(
             existingProduct = selectedProductForEdit,
             suppliers = allSuppliers,
+            onAddSupplier = { newSup, onCreated ->
+                viewModel.addSupplier(newSup) {
+                    onCreated(newSup)
+                }
+            },
             onDismiss = {
                 showAddDialog = false
                 selectedProductForEdit = null
@@ -418,6 +424,7 @@ fun ProductItemCard(
 fun IntegratedAddStockProductDialog(
     existingProduct: ProductEntity?,
     suppliers: List<SupplierEntity>,
+    onAddSupplier: (SupplierEntity, (SupplierEntity) -> Unit) -> Unit = { _, _ -> },
     onDismiss: () -> Unit,
     onSave: (
         existingId: String?,
@@ -443,6 +450,9 @@ fun IntegratedAddStockProductDialog(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var supplierName by remember { mutableStateOf("") }
+    var selectedSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
+    var supplierMenuExpanded by remember { mutableStateOf(false) }
+    var showAddSupplierInlineDialog by remember { mutableStateOf(false) }
     var billNo by remember { mutableStateOf("") }
     var transportChargesStr by remember { mutableStateOf("0") }
 
@@ -670,26 +680,86 @@ fun IntegratedAddStockProductDialog(
                     )
                 }
 
-                // 7. Supplier Name & Bill No.
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = supplierName,
-                        onValueChange = { supplierName = it },
-                        label = { Text("Supplier Name") },
-                        placeholder = { Text("Optional") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                // 7. Supplier Selector (Full Width)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Supplier",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    OutlinedTextField(
-                        value = billNo,
-                        onValueChange = { billNo = it },
-                        label = { Text("Bill No.") },
-                        placeholder = { Text("Optional") },
-                        leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    ExposedDropdownMenuBox(
+                        expanded = supplierMenuExpanded,
+                        onExpandedChange = { supplierMenuExpanded = !supplierMenuExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = supplierName,
+                            onValueChange = {
+                                supplierName = it
+                                supplierMenuExpanded = true
+                            },
+                            label = { Text("Search or select supplier") },
+                            placeholder = { Text("Select supplier from directory") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = supplierMenuExpanded) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        val matchingSuppliers = remember(suppliers, supplierName) {
+                            if (supplierName.isBlank()) suppliers
+                            else suppliers.filter { it.name.contains(supplierName, ignoreCase = true) }
+                        }
+                        ExposedDropdownMenu(
+                            expanded = supplierMenuExpanded,
+                            onDismissRequest = { supplierMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("+ Add new supplier", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                },
+                                onClick = {
+                                    supplierMenuExpanded = false
+                                    showAddSupplierInlineDialog = true
+                                }
+                            )
+                            HorizontalDivider()
+                            matchingSuppliers.forEach { sup ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(sup.name, fontWeight = FontWeight.SemiBold)
+                                            if (!sup.phone.isNullOrBlank()) {
+                                                Text(sup.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedSupplier = sup
+                                        supplierName = sup.name
+                                        supplierMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
+
+                // Bill No. (Dedicated Row)
+                OutlinedTextField(
+                    value = billNo,
+                    onValueChange = { billNo = it },
+                    label = { Text("Bill / Invoice No.") },
+                    placeholder = { Text("Optional invoice number") },
+                    leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // 8. Transport Charges
                 OutlinedTextField(

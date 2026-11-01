@@ -285,37 +285,31 @@ class CashTrackerExcelService @Inject constructor(
     }
 
     /**
-     * Export Cash Tracker items to an Excel file and return an ACTION_SEND Intent to share directly.
+     * Export Cash Tracker items to a real multi-sheet Excel workbook (.xlsx):
+     * - Summary sheet: metadata, filters, transaction count, inflow, outflow, net movement, category subtotals.
+     * - Transactions sheet: frozen header, stable ID, date, time, direction, purpose, category, classification, sanitized notes, source, inflow/outflow numeric cells.
      */
     suspend fun exportCashTrackerExcel(
         items: List<ShopExpenseEntity>,
-        periodTitle: String = "All Transactions"
+        periodTitle: String = "All Transactions",
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        activeFiltersSummary: String = "All Categories, Active Transactions"
     ): Intent = withContext(Dispatchers.IO) {
         val workbook = XSSFWorkbook()
-        val sheet = workbook.createSheet("Cash Book")
+        val dataFormat = workbook.createDataFormat()
+        val currencyFormatIndex = dataFormat.getFormat("#,##,##0.00")
 
-        // Setup Fonts and Styles
-        val titleFont = workbook.createFont().apply {
-            bold = true
-            fontHeightInPoints = 14.toShort()
-            color = IndexedColors.WHITE.index
-        }
-        val titleStyle = workbook.createCellStyle().apply {
-            setFont(titleFont)
-            fillForegroundColor = IndexedColors.DARK_BLUE.index
-            fillPattern = FillPatternType.SOLID_FOREGROUND
-            alignment = HorizontalAlignment.CENTER
-            verticalAlignment = VerticalAlignment.CENTER
-        }
-
+        // ── STYLES ───────────────────────────────────────────
         val headerFont = workbook.createFont().apply {
             bold = true
             fontHeightInPoints = 11.toShort()
             color = IndexedColors.WHITE.index
         }
+
         val headerStyle = workbook.createCellStyle().apply {
             setFont(headerFont)
-            fillForegroundColor = IndexedColors.GREY_80_PERCENT.index
+            fillForegroundColor = IndexedColors.DARK_BLUE.index
             fillPattern = FillPatternType.SOLID_FOREGROUND
             alignment = HorizontalAlignment.CENTER
             verticalAlignment = VerticalAlignment.CENTER
@@ -323,26 +317,6 @@ class CashTrackerExcelService @Inject constructor(
             borderTop = BorderStyle.THIN
             borderLeft = BorderStyle.THIN
             borderRight = BorderStyle.THIN
-        }
-
-        val incomeHeaderStyle = workbook.createCellStyle().apply {
-            setFont(headerFont)
-            fillForegroundColor = IndexedColors.DARK_GREEN.index
-            fillPattern = FillPatternType.SOLID_FOREGROUND
-            alignment = HorizontalAlignment.CENTER
-            verticalAlignment = VerticalAlignment.CENTER
-            borderBottom = BorderStyle.THIN
-            borderTop = BorderStyle.THIN
-        }
-
-        val expenseHeaderStyle = workbook.createCellStyle().apply {
-            setFont(headerFont)
-            fillForegroundColor = IndexedColors.DARK_RED.index
-            fillPattern = FillPatternType.SOLID_FOREGROUND
-            alignment = HorizontalAlignment.CENTER
-            verticalAlignment = VerticalAlignment.CENTER
-            borderBottom = BorderStyle.THIN
-            borderTop = BorderStyle.THIN
         }
 
         val normalStyle = workbook.createCellStyle().apply {
@@ -352,26 +326,37 @@ class CashTrackerExcelService @Inject constructor(
             borderRight = BorderStyle.THIN
         }
 
-        val currencyIncomeStyle = workbook.createCellStyle().apply {
+        val normalNumberStyle = workbook.createCellStyle().apply {
+            setDataFormat(currencyFormatIndex)
             alignment = HorizontalAlignment.RIGHT
-            val font = workbook.createFont().apply {
-                color = IndexedColors.DARK_GREEN.index
-                bold = true
-            }
-            setFont(font)
             borderBottom = BorderStyle.THIN
             borderTop = BorderStyle.THIN
             borderLeft = BorderStyle.THIN
             borderRight = BorderStyle.THIN
         }
 
-        val currencyExpenseStyle = workbook.createCellStyle().apply {
+        val incomeNumberStyle = workbook.createCellStyle().apply {
+            setDataFormat(currencyFormatIndex)
             alignment = HorizontalAlignment.RIGHT
-            val font = workbook.createFont().apply {
+            val f = workbook.createFont().apply {
+                color = IndexedColors.DARK_GREEN.index
+                bold = true
+            }
+            setFont(f)
+            borderBottom = BorderStyle.THIN
+            borderTop = BorderStyle.THIN
+            borderLeft = BorderStyle.THIN
+            borderRight = BorderStyle.THIN
+        }
+
+        val expenseNumberStyle = workbook.createCellStyle().apply {
+            setDataFormat(currencyFormatIndex)
+            alignment = HorizontalAlignment.RIGHT
+            val f = workbook.createFont().apply {
                 color = IndexedColors.DARK_RED.index
                 bold = true
             }
-            setFont(font)
+            setFont(f)
             borderBottom = BorderStyle.THIN
             borderTop = BorderStyle.THIN
             borderLeft = BorderStyle.THIN
@@ -379,11 +364,12 @@ class CashTrackerExcelService @Inject constructor(
         }
 
         val totalStyle = workbook.createCellStyle().apply {
-            val font = workbook.createFont().apply {
+            val f = workbook.createFont().apply {
                 bold = true
                 fontHeightInPoints = 11.toShort()
             }
-            setFont(font)
+            setFont(f)
+            setDataFormat(currencyFormatIndex)
             fillForegroundColor = IndexedColors.GREY_25_PERCENT.index
             fillPattern = FillPatternType.SOLID_FOREGROUND
             borderBottom = BorderStyle.MEDIUM
@@ -392,164 +378,192 @@ class CashTrackerExcelService @Inject constructor(
             borderRight = BorderStyle.THIN
         }
 
-        // Title row
-        val titleRow = sheet.createRow(0)
-        titleRow.heightInPoints = 28f
-        val titleCell = titleRow.createCell(0)
-        titleCell.setCellValue("Ali Educational - Cash In & Out Report")
-        titleCell.cellStyle = titleStyle
-
-        // Subtitle row (period info)
-        val subRow = sheet.createRow(1)
-        val exportDateStr = SimpleDateFormat("dd-MMM-yyyy hh:mm a", Locale.US).format(Date())
-        subRow.createCell(0).setCellValue("Period: $periodTitle  |  Exported: $exportDateStr")
-
-        // Table Header Row
-        val headers = listOf(
-            "Date",
-            "Time",
-            "Category",
-            "Description / Particulars",
-            "Payment Mode / Notes",
-            "Attachment",
-            "Cash In (Income ₹)",
-            "Cash Out (Expense ₹)",
-            "Running Balance (₹)"
-        )
-
-        val headerRow = sheet.createRow(3)
-        headerRow.heightInPoints = 24f
-        for (i in headers.indices) {
-            val cell = headerRow.createCell(i)
-            cell.setCellValue(headers[i])
-            cell.cellStyle = when (i) {
-                6 -> incomeHeaderStyle
-                7 -> expenseHeaderStyle
-                else -> headerStyle
-            }
-        }
-
-        // Sort items chronologically for logical running balance
         val sortedItems = items.sortedBy { it.timestamp }
+        val activeItems = sortedItems.filter { !it.isVoided }
+        val totalInflowPaise = activeItems.filter { it.isIncome }.sumOf { it.amountPaise }
+        val totalOutflowPaise = activeItems.filter { !it.isIncome }.sumOf { it.amountPaise }
+        val netMovementPaise = totalInflowPaise - totalOutflowPaise
+
         val dateFormat = SimpleDateFormat("dd-MMM-yyyy", Locale.US)
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.US)
 
-        var runningBalancePaise = 0L
-        var totalIncomePaise = 0L
-        var totalExpensePaise = 0L
-        var currentRowIdx = 4
+        // ── SHEET 1: SUMMARY ──────────────────────────────────
+        val summarySheet = workbook.createSheet("Summary")
 
+        // Title
+        val sRow0 = summarySheet.createRow(0)
+        sRow0.createCell(0).setCellValue("Ali Educational - Cash In & Out Ledger Report")
+        sRow0.getCell(0).cellStyle = workbook.createCellStyle().apply {
+            val f = workbook.createFont().apply { bold = true; fontHeightInPoints = 14.toShort() }
+            setFont(f)
+        }
+
+        val sRow1 = summarySheet.createRow(1)
+        sRow1.createCell(0).setCellValue("Notice: Filtered ledger export (not a complete backup or profit statement)")
+
+        var sRowIdx = 3
+        fun addSummaryPair(label: String, value: String) {
+            val r = summarySheet.createRow(sRowIdx++)
+            r.createCell(0).setCellValue(label)
+            r.createCell(1).setCellValue(value)
+        }
+        fun addSummaryNumber(label: String, rupees: Double) {
+            val r = summarySheet.createRow(sRowIdx++)
+            r.createCell(0).setCellValue(label)
+            val c = r.createCell(1)
+            c.setCellValue(rupees)
+            c.cellStyle = normalNumberStyle
+        }
+
+        val nowStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date())
+        addSummaryPair("Export Generation Time:", nowStr)
+        addSummaryPair("Selected Period:", periodTitle)
+        addSummaryPair("Active Filters:", activeFiltersSummary)
+        addSummaryPair("Matching Active Transactions:", "${activeItems.size}")
+        addSummaryNumber("Selected Inflow Total (₹):", totalInflowPaise / 100.0)
+        addSummaryNumber("Selected Outflow Total (₹):", totalOutflowPaise / 100.0)
+        addSummaryNumber("Selected Net Movement (₹):", netMovementPaise / 100.0)
+
+        // Category Subtotals
+        sRowIdx++
+        val catHeaderRow = summarySheet.createRow(sRowIdx++)
+        catHeaderRow.createCell(0).apply { setCellValue("Category"); cellStyle = headerStyle }
+        catHeaderRow.createCell(1).apply { setCellValue("Inflow (₹)"); cellStyle = headerStyle }
+        catHeaderRow.createCell(2).apply { setCellValue("Outflow (₹)"); cellStyle = headerStyle }
+        catHeaderRow.createCell(3).apply { setCellValue("Net Movement (₹)"); cellStyle = headerStyle }
+
+        val catGroups = activeItems.groupBy { it.category }
+        catGroups.forEach { (cat, catList) ->
+            val r = summarySheet.createRow(sRowIdx++)
+            val catIn = catList.filter { it.isIncome }.sumOf { it.amountPaise } / 100.0
+            val catOut = catList.filter { !it.isIncome }.sumOf { it.amountPaise } / 100.0
+            val catNet = catIn - catOut
+            r.createCell(0).apply { setCellValue(cat); cellStyle = normalStyle }
+            r.createCell(1).apply { setCellValue(catIn); cellStyle = normalNumberStyle }
+            r.createCell(2).apply { setCellValue(catOut); cellStyle = normalNumberStyle }
+            r.createCell(3).apply { setCellValue(catNet); cellStyle = normalNumberStyle }
+        }
+
+        summarySheet.setColumnWidth(0, 26 * 256)
+        summarySheet.setColumnWidth(1, 18 * 256)
+        summarySheet.setColumnWidth(2, 18 * 256)
+        summarySheet.setColumnWidth(3, 20 * 256)
+
+        // ── SHEET 2: TRANSACTIONS ─────────────────────────────
+        val txSheet = workbook.createSheet("Transactions")
+        txSheet.createFreezePane(0, 1)
+
+        val txHeaders = listOf(
+            "Tx ID",
+            "Date",
+            "Time",
+            "Direction",
+            "Purpose",
+            "Category",
+            "Classification",
+            "Description / Notes",
+            "Source / Destination",
+            "Inflow (₹)",
+            "Outflow (₹)",
+            "Attachment",
+            "Status"
+        )
+
+        val thRow = txSheet.createRow(0)
+        thRow.heightInPoints = 24f
+        txHeaders.forEachIndexed { i, h ->
+            thRow.createCell(i).apply {
+                setCellValue(h)
+                cellStyle = headerStyle
+            }
+        }
+
+        var tRowIdx = 1
         for (item in sortedItems) {
-            val row = sheet.createRow(currentRowIdx++)
+            val r = txSheet.createRow(tRowIdx++)
             val d = Date(item.timestamp)
 
-            // Date
-            val c0 = row.createCell(0)
-            c0.setCellValue(dateFormat.format(d))
-            c0.cellStyle = normalStyle
+            // 0. Tx ID
+            r.createCell(0).apply { setCellValue(item.id.take(8)); cellStyle = normalStyle }
+            // 1. Date
+            r.createCell(1).apply { setCellValue(dateFormat.format(d)); cellStyle = normalStyle }
+            // 2. Time
+            r.createCell(2).apply { setCellValue(timeFormat.format(d)); cellStyle = normalStyle }
+            // 3. Direction
+            r.createCell(3).apply { setCellValue(if (item.isIncome) "Cash In" else "Cash Out"); cellStyle = normalStyle }
+            // 4. Purpose
+            val purpose = when {
+                item.isSavingsTransfer -> "Savings Transfer (Pigmy)"
+                item.isExpenseRefund -> "Expense Refund"
+                item.isIncome -> "Income"
+                else -> "Shop Expense"
+            }
+            r.createCell(4).apply { setCellValue(purpose); cellStyle = normalStyle }
+            // 5. Category
+            r.createCell(5).apply { setCellValue(item.category); cellStyle = normalStyle }
+            // 6. Classification
+            r.createCell(6).apply { setCellValue(item.classification); cellStyle = normalStyle }
 
-            // Time
-            val c1 = row.createCell(1)
-            c1.setCellValue(timeFormat.format(d))
-            c1.cellStyle = normalStyle
+            // 7. Notes (sanitized against formula injection)
+            var rawNotes = item.notes ?: "-"
+            if (rawNotes.startsWith("=") || rawNotes.startsWith("+") || rawNotes.startsWith("-") || rawNotes.startsWith("@")) {
+                rawNotes = "'$rawNotes"
+            }
+            r.createCell(7).apply { setCellValue(rawNotes); cellStyle = normalStyle }
 
-            // Category
-            val c2 = row.createCell(2)
-            c2.setCellValue(item.category)
-            c2.cellStyle = normalStyle
+            // 8. Payment Source
+            r.createCell(8).apply { setCellValue(item.paymentMethod); cellStyle = normalStyle }
 
-            // Description / Particulars
-            val c3 = row.createCell(3)
-            val descText = item.notes?.substringBefore(" - ")?.takeIf { it != item.category } ?: item.category
-            c3.setCellValue(descText)
-            c3.cellStyle = normalStyle
-
-            // Payment Mode / Notes
-            val c4 = row.createCell(4)
-            c4.setCellValue(item.notes ?: "-")
-            c4.cellStyle = normalStyle
-
-            // Attachment indicator
-            val c5 = row.createCell(5)
-            c5.setCellValue(if (!item.attachmentUri.isNullOrBlank()) "Yes" else "No")
-            c5.cellStyle = normalStyle
-
-            val amountRupees = item.amountPaise / 100.0
-
+            // 9 & 10. Inflow & Outflow (Numeric cells!)
+            val amtRupees = item.amountPaise / 100.0
             if (item.isIncome) {
-                totalIncomePaise += item.amountPaise
-                runningBalancePaise += item.amountPaise
-
-                val c6 = row.createCell(6)
-                c6.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
-                c6.cellStyle = currencyIncomeStyle
-
-                val c7 = row.createCell(7)
-                c7.setCellValue("-")
-                c7.cellStyle = normalStyle
+                r.createCell(9).apply { setCellValue(amtRupees); cellStyle = incomeNumberStyle }
+                r.createCell(10).apply { setCellValue(0.0); cellStyle = normalNumberStyle }
             } else {
-                totalExpensePaise += item.amountPaise
-                runningBalancePaise -= item.amountPaise
-
-                val c6 = row.createCell(6)
-                c6.setCellValue("-")
-                c6.cellStyle = normalStyle
-
-                val c7 = row.createCell(7)
-                c7.setCellValue(String.format(Locale.US, "%.2f", amountRupees))
-                c7.cellStyle = currencyExpenseStyle
+                r.createCell(9).apply { setCellValue(0.0); cellStyle = normalNumberStyle }
+                r.createCell(10).apply { setCellValue(amtRupees); cellStyle = expenseNumberStyle }
             }
 
-            // Running Balance
-            val c8 = row.createCell(8)
-            c8.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
-            c8.cellStyle = normalStyle
+            // 11. Attachment
+            r.createCell(11).apply { setCellValue(if (!item.attachmentUri.isNullOrBlank()) "Yes" else "No"); cellStyle = normalStyle }
+            // 12. Status
+            r.createCell(12).apply { setCellValue(if (item.isVoided) "VOIDED" else "Active"); cellStyle = normalStyle }
         }
 
-        // Totals Row
-        val totalRow = sheet.createRow(currentRowIdx)
+        // Transactions Totals Row
+        val totalRow = txSheet.createRow(tRowIdx)
         totalRow.heightInPoints = 22f
-
-        val t0 = totalRow.createCell(0)
-        t0.setCellValue("TOTAL")
-        t0.cellStyle = totalStyle
-
-        totalRow.createCell(1).apply { setCellValue(""); cellStyle = totalStyle }
-        totalRow.createCell(2).apply { setCellValue(""); cellStyle = totalStyle }
-        totalRow.createCell(3).apply { setCellValue("${sortedItems.size} entries"); cellStyle = totalStyle }
-        totalRow.createCell(4).apply { setCellValue(""); cellStyle = totalStyle }
-        totalRow.createCell(5).apply { setCellValue(""); cellStyle = totalStyle }
-
-        val tIncome = totalRow.createCell(6)
-        tIncome.setCellValue(String.format(Locale.US, "%.2f", totalIncomePaise / 100.0))
-        tIncome.cellStyle = totalStyle
-
-        val tExpense = totalRow.createCell(7)
-        tExpense.setCellValue(String.format(Locale.US, "%.2f", totalExpensePaise / 100.0))
-        tExpense.cellStyle = totalStyle
-
-        val tBal = totalRow.createCell(8)
-        tBal.setCellValue(String.format(Locale.US, "%.2f", runningBalancePaise / 100.0))
-        tBal.cellStyle = totalStyle
-
-        // Explicit column widths in units of 1/256th character width
-        val columnWidths = intArrayOf(
-            14 * 256, // Date (dd-MMM-yyyy)
-            11 * 256, // Time (hh:mm a)
-            18 * 256, // Category
-            28 * 256, // Description / Particulars
-            22 * 256, // Payment Mode / Notes
-            12 * 256, // Attachment
-            16 * 256, // Cash In (₹)
-            16 * 256, // Cash Out (₹)
-            18 * 256  // Running Balance (₹)
-        )
-        for (i in columnWidths.indices) {
-            sheet.setColumnWidth(i, columnWidths[i])
+        totalRow.createCell(0).apply { setCellValue("TOTAL ACTIVE"); cellStyle = totalStyle }
+        for (col in 1..8) {
+            totalRow.createCell(col).apply { setCellValue(""); cellStyle = totalStyle }
         }
+        totalRow.createCell(9).apply { setCellValue(totalInflowPaise / 100.0); cellStyle = totalStyle }
+        totalRow.createCell(10).apply { setCellValue(totalOutflowPaise / 100.0); cellStyle = totalStyle }
+        totalRow.createCell(11).apply { setCellValue(""); cellStyle = totalStyle }
+        totalRow.createCell(12).apply { setCellValue("${activeItems.size} active"); cellStyle = totalStyle }
 
-        val timeStampStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val fileName = "CashBook_AliEducational_$timeStampStr.xlsx"
+        val txWidths = intArrayOf(
+            12 * 256, // ID
+            14 * 256, // Date
+            11 * 256, // Time
+            12 * 256, // Direction
+            20 * 256, // Purpose
+            18 * 256, // Category
+            16 * 256, // Classification
+            28 * 256, // Notes
+            16 * 256, // Source
+            16 * 256, // Inflow
+            16 * 256, // Outflow
+            12 * 256, // Attachment
+            12 * 256  // Status
+        )
+        txWidths.forEachIndexed { i, w -> txSheet.setColumnWidth(i, w) }
+
+        // Meaningful dated filename: Ali_Educational_Cash_YYYY-MM-DD_to_YYYY-MM-DD.xlsx
+        val dfFile = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val fromStr = if (fromDate != null && fromDate > 0L) dfFile.format(Date(fromDate)) else "start"
+        val toStr = if (toDate != null && toDate < Long.MAX_VALUE) dfFile.format(Date(toDate)) else dfFile.format(Date())
+        val fileName = "Ali_Educational_Cash_${fromStr}_to_${toStr}.xlsx"
 
         // 1. Save to public Documents/AliEducational/Exports (visible in My Files)
         val exportFile = File(exportFolder, fileName)
@@ -558,7 +572,6 @@ class CashTrackerExcelService @Inject constructor(
         }
 
         val ctx = context ?: throw IllegalStateException("Context required for export")
-        // 2. Also save to cache for guaranteed FileProvider sharing
         val cacheFile = File(ctx.cacheDir, fileName)
         exportFile.copyTo(cacheFile, overwrite = true)
         workbook.close()
@@ -569,21 +582,20 @@ class CashTrackerExcelService @Inject constructor(
             cacheFile
         )
 
-        val netBalanceRupees = (totalIncomePaise - totalExpensePaise) / 100.0
         val shareMessage = buildString {
-            appendLine("📚 *Ali Educational - Cash Book Report*")
+            appendLine("📚 *Ali Educational - Cash In & Out Ledger*")
             appendLine("📅 Period: $periodTitle")
-            appendLine("🟢 Total Income: ₹${String.format(Locale.US, "%,.2f", totalIncomePaise / 100.0)}")
-            appendLine("🔴 Total Expense: ₹${String.format(Locale.US, "%,.2f", totalExpensePaise / 100.0)}")
-            appendLine("⚖️ Net Balance: ₹${String.format(Locale.US, "%,.2f", netBalanceRupees)}")
-            appendLine("📊 Total Transactions: ${sortedItems.size}")
-            appendLine("\nComplete spreadsheet (.xlsx) attached.")
+            appendLine("🟢 Total Inflow: ${CostCalculator.formatPaiseToRupees(totalInflowPaise)}")
+            appendLine("🔴 Total Outflow: ${CostCalculator.formatPaiseToRupees(totalOutflowPaise)}")
+            appendLine("⚖️ Selected Net Movement: ${CostCalculator.formatPaiseToRupees(netMovementPaise)}")
+            appendLine("📊 Matching Active Transactions: ${activeItems.size}")
+            appendLine("Complete spreadsheet (.xlsx) attached.")
         }
 
         Intent(Intent.ACTION_SEND).apply {
             type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             putExtra(Intent.EXTRA_STREAM, shareUri)
-            putExtra(Intent.EXTRA_SUBJECT, "Ali Educational Cash Book - $periodTitle")
+            putExtra(Intent.EXTRA_SUBJECT, "Ali Educational Cash Ledger - $periodTitle")
             putExtra(Intent.EXTRA_TEXT, shareMessage)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }

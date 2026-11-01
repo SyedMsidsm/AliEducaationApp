@@ -423,6 +423,7 @@ class AppRepository @Inject constructor(
 
     val allSuppliers: Flow<List<SupplierEntity>> = supplierDao.getAllSuppliers()
     val totalWeOweSuppliersPaise: Flow<Long?> = supplierDao.getTotalWeOweSuppliersPaise()
+    val distinctCreditorsCount: Flow<Int> = supplierDao.getDistinctCreditorsCount()
     val allPurchases: Flow<List<PurchaseEntity>> = purchaseDao.getAllPurchases()
 
     suspend fun addSupplier(supplier: SupplierEntity) {
@@ -536,6 +537,7 @@ class AppRepository @Inject constructor(
 
     val allCustomers: Flow<List<CustomerEntity>> = customerDao.getAllCustomers()
     val totalCustomersOweUsPaise: Flow<Long?> = customerDao.getTotalCustomersOweUsPaise()
+    val distinctDebtorsCount: Flow<Int> = customerDao.getDistinctDebtorsCount()
 
     suspend fun addCustomer(customer: CustomerEntity) {
         customerDao.insertCustomer(customer)
@@ -1301,6 +1303,11 @@ class AppRepository @Inject constructor(
 
     val allExpenses: Flow<List<ShopExpenseEntity>> = expenseDao.getAllExpenses()
 
+    val refundableExpenses: Flow<List<ShopExpenseEntity>> = expenseDao.getRefundableExpenses()
+
+    fun getSalesForCustomer(customerId: String): Flow<List<SaleEntity>> =
+        saleDao.getSalesForCustomer(customerId)
+
     suspend fun recordShopExpense(
         category: String,
         amountPaise: Long,
@@ -1308,7 +1315,11 @@ class AppRepository @Inject constructor(
         notes: String?,
         timestamp: Long = System.currentTimeMillis(),
         categoryId: String? = null,
-        attachmentUri: String? = null
+        attachmentUri: String? = null,
+        classification: String = "SHARED",
+        paymentMethod: String = "CASH",
+        isExpenseRefund: Boolean = false,
+        linkedExpenseId: String? = null
     ) {
         expenseDao.insertExpense(
             ShopExpenseEntity(
@@ -1318,9 +1329,50 @@ class AppRepository @Inject constructor(
                 notes = notes,
                 categoryId = categoryId,
                 attachmentUri = attachmentUri,
+                classification = classification,
+                paymentMethod = paymentMethod,
+                isExpenseRefund = isExpenseRefund,
+                linkedExpenseId = linkedExpenseId,
                 timestamp = timestamp
             )
         )
+    }
+
+    suspend fun recordExpenseRefund(
+        originalExpenseId: String,
+        amountPaise: Long,
+        paymentMethod: String = "CASH",
+        notes: String? = null,
+        timestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null
+    ) = db.withTransaction {
+        val original = expenseDao.getExpenseById(originalExpenseId)
+            ?: throw IllegalArgumentException("Original expense $originalExpenseId not found")
+        if (amountPaise <= 0L) {
+            throw IllegalArgumentException("Refund amount must be positive")
+        }
+        val activeRefunds = expenseDao.getActiveRefundsForExpense(originalExpenseId)
+        val priorTotal = activeRefunds.sumOf { it.amountPaise }
+        val remainingRefundable = original.amountPaise - priorTotal
+        if (amountPaise > remainingRefundable) {
+            throw IllegalArgumentException("Refund amount of ₹${amountPaise/100.0} exceeds remaining refundable amount of ₹${remainingRefundable/100.0}")
+        }
+
+        val refundExpense = ShopExpenseEntity(
+            category = original.category,
+            amountPaise = amountPaise,
+            isIncome = true,
+            isExpenseRefund = true,
+            linkedExpenseId = original.id,
+            classification = original.classification,
+            expenseCategory = original.expenseCategory,
+            serviceTarget = original.serviceTarget,
+            notes = notes ?: "Refund of ${original.category}",
+            paymentMethod = paymentMethod,
+            attachmentUri = attachmentUri,
+            timestamp = timestamp
+        )
+        expenseDao.insertExpense(refundExpense)
     }
 
     suspend fun updateExpenseAttachment(expenseId: String, attachmentUri: String?) {
@@ -1419,6 +1471,10 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun voidExpense(expenseId: String, reason: String) = db.withTransaction {
+        val refunds = expenseDao.getActiveRefundsForExpense(expenseId)
+        if (refunds.isNotEmpty()) {
+            throw IllegalStateException("Cannot cancel an expense with active linked refunds. Please cancel linked refunds first.")
+        }
         expenseDao.voidExpense(expenseId, reason)
         pigmyDepositDao.voidByLinkedExpenseId(expenseId, reason)
         pigmyWithdrawalDao.voidByLinkedExpenseId(expenseId, reason)

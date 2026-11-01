@@ -247,9 +247,16 @@ class AliViewModel @Inject constructor(
 
     val totalWeOweSuppliersPaise = repository.totalWeOweSuppliersPaise
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+    val distinctCreditorsCount = repository.distinctCreditorsCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val totalCustomersOweUsPaise = repository.totalCustomersOweUsPaise
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+    val distinctDebtorsCount = repository.distinctDebtorsCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val refundableExpenses = repository.refundableExpenses
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentMovements = repository.recentStockMovements
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -873,11 +880,54 @@ class AliViewModel @Inject constructor(
         timestamp: Long = System.currentTimeMillis(),
         categoryId: String? = null,
         attachmentUri: String? = null,
+        classification: String = "SHARED",
+        paymentMethod: String = "CASH",
+        isExpenseRefund: Boolean = false,
+        linkedExpenseId: String? = null,
         onDone: () -> Unit = {}
     ) {
         viewModelScope.launch {
-            repository.recordShopExpense(category, amountPaise, isIncome, notes, timestamp, categoryId, attachmentUri)
+            repository.recordShopExpense(
+                category = category,
+                amountPaise = amountPaise,
+                isIncome = isIncome,
+                notes = notes,
+                timestamp = timestamp,
+                categoryId = categoryId,
+                attachmentUri = attachmentUri,
+                classification = classification,
+                paymentMethod = paymentMethod,
+                isExpenseRefund = isExpenseRefund,
+                linkedExpenseId = linkedExpenseId
+            )
             onDone()
+        }
+    }
+
+    fun recordExpenseRefund(
+        originalExpenseId: String,
+        amountPaise: Long,
+        paymentMethod: String = "CASH",
+        notes: String? = null,
+        timestamp: Long = System.currentTimeMillis(),
+        attachmentUri: String? = null,
+        onDone: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                repository.recordExpenseRefund(
+                    originalExpenseId = originalExpenseId,
+                    amountPaise = amountPaise,
+                    paymentMethod = paymentMethod,
+                    notes = notes,
+                    timestamp = timestamp,
+                    attachmentUri = attachmentUri
+                )
+                onDone()
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Failed to record expense refund")
+            }
         }
     }
 
@@ -936,10 +986,19 @@ class AliViewModel @Inject constructor(
     fun exportCashTrackerExcel(
         items: List<ShopExpenseEntity>,
         periodTitle: String,
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        activeFiltersSummary: String = "All Categories, Active Transactions",
         onIntentReady: (Intent) -> Unit
     ) {
         viewModelScope.launch {
-            val intent = cashTrackerExcelService.exportCashTrackerExcel(items, periodTitle)
+            val intent = cashTrackerExcelService.exportCashTrackerExcel(
+                items = items,
+                periodTitle = periodTitle,
+                fromDate = fromDate,
+                toDate = toDate,
+                activeFiltersSummary = activeFiltersSummary
+            )
             onIntentReady(intent)
         }
     }

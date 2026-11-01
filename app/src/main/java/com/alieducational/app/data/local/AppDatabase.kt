@@ -66,7 +66,7 @@ import com.alieducational.app.data.local.entity.SyncEventEntity
         ServiceDefinitionEntity::class,
         SyncEventEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -306,6 +306,16 @@ abstract class AppDatabase : RoomDatabase() {
                 // 5. Alter pigmy_schemes to add openingBalancePaise and openingBalanceDate
                 db.execSQL("ALTER TABLE pigmy_schemes ADD COLUMN openingBalancePaise INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE pigmy_schemes ADD COLUMN openingBalanceDate INTEGER DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shop_expenses ADD COLUMN isExpenseRefund INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE shop_expenses ADD COLUMN linkedExpenseId TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE shop_expenses ADD COLUMN classification TEXT NOT NULL DEFAULT 'SHARED'")
+                db.execSQL("ALTER TABLE shop_expenses ADD COLUMN paymentMethod TEXT NOT NULL DEFAULT 'CASH'")
+                db.execSQL("UPDATE shop_expenses SET classification = 'SERVICES' WHERE category = 'SERVICE_EXPENSE' OR serviceTarget IS NOT NULL")
             }
         }
 

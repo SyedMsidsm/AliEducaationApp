@@ -62,6 +62,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -1672,4 +1676,301 @@ private fun queryFileName(context: Context, uri: Uri): String {
         name = java.io.File(uri.path!!).name
     }
     return name
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CashTrackerExportPreviewDialog(
+    allExpenses: List<ShopExpenseEntity>,
+    activeCategories: List<CashCategoryEntity>,
+    onDismiss: () -> Unit,
+    onExportAndShare: (
+        items: List<ShopExpenseEntity>,
+        periodTitle: String,
+        fromDate: Long?,
+        toDate: Long?,
+        summary: String,
+        isShare: Boolean
+    ) -> Unit
+) {
+    val context = LocalContext.current
+    var selectedPeriod by remember { mutableStateOf("MONTH") } // TODAY, WEEK, MONTH, ALL, CUSTOM
+    var selectedDirection by remember { mutableStateOf("ALL") } // ALL, IN, OUT
+    var selectedCategories by remember { mutableStateOf<Set<String>>(emptySet()) } // empty = All
+
+    val now = System.currentTimeMillis()
+    var fromTimestamp by remember {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        mutableLongStateOf(cal.timeInMillis)
+    }
+    var toTimestamp by remember {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
+        mutableLongStateOf(cal.timeInMillis)
+    }
+
+    val (effectiveStart, effectiveEnd, rangeTitle) = remember(selectedPeriod, fromTimestamp, toTimestamp) {
+        val cal = Calendar.getInstance()
+        val fmt = SimpleDateFormat("dd MMM yyyy", Locale.US)
+        when (selectedPeriod) {
+            "TODAY" -> {
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+                val s = cal.timeInMillis
+                cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+                val e = cal.timeInMillis
+                Triple(s, e, "Today (${fmt.format(Date(s))})")
+            }
+            "WEEK" -> {
+                cal.firstDayOfWeek = Calendar.MONDAY
+                cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+                val s = cal.timeInMillis
+                cal.add(Calendar.DAY_OF_WEEK, 6)
+                cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+                val e = cal.timeInMillis
+                Triple(s, e, "This Week (${fmt.format(Date(s))} to ${fmt.format(Date(e))})")
+            }
+            "MONTH" -> {
+                cal.set(Calendar.DAY_OF_MONTH, 1)
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+                val s = cal.timeInMillis
+                cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+                val e = cal.timeInMillis
+                Triple(s, e, "This Month (${fmt.format(Date(s))} to ${fmt.format(Date(e))})")
+            }
+            "ALL" -> {
+                Triple(0L, Long.MAX_VALUE, "All Time")
+            }
+            else -> { // CUSTOM
+                Triple(fromTimestamp, toTimestamp, "${fmt.format(Date(fromTimestamp))} to ${fmt.format(Date(toTimestamp))}")
+            }
+        }
+    }
+
+    val matchingItems = remember(allExpenses, effectiveStart, effectiveEnd, selectedDirection, selectedCategories) {
+        allExpenses.filter { item ->
+            val inDate = item.timestamp in effectiveStart..effectiveEnd
+            val matchesDir = when (selectedDirection) {
+                "IN" -> item.isIncome
+                "OUT" -> !item.isIncome
+                else -> true
+            }
+            val matchesCat = if (selectedCategories.isEmpty()) true else {
+                selectedCategories.contains(item.category)
+            }
+            inDate && matchesDir && matchesCat
+        }
+    }
+
+    val inflowPaise = remember(matchingItems) { matchingItems.filter { it.isIncome }.sumOf { it.amountPaise } }
+    val outflowPaise = remember(matchingItems) { matchingItems.filter { !it.isIncome }.sumOf { it.amountPaise } }
+    val netMovementPaise = inflowPaise - outflowPaise
+
+    val filtersSummary = buildString {
+        append("Period: $rangeTitle | Direction: $selectedDirection")
+        if (selectedCategories.isEmpty()) append(" | Categories: All")
+        else append(" | Categories: ${selectedCategories.joinToString(", ")}")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Export & Share Cash Book", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    Text("Quick Periods", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("TODAY" to "Today", "WEEK" to "This Week", "MONTH" to "This Month", "ALL" to "All Time", "CUSTOM" to "Custom").forEach { (code, label) ->
+                            FilterChip(
+                                selected = selectedPeriod == code,
+                                onClick = { selectedPeriod = code },
+                                label = { Text(label, fontSize = 11.5.sp) }
+                            )
+                        }
+                    }
+                }
+
+                if (selectedPeriod == "CUSTOM") {
+                    item {
+                        val fmt = SimpleDateFormat("dd MMM yyyy", Locale.US)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val c = Calendar.getInstance().apply { timeInMillis = fromTimestamp }
+                                    DatePickerDialog(context, { _, y, m, d ->
+                                        val cal = Calendar.getInstance().apply {
+                                            set(y, m, d, 0, 0, 0)
+                                            set(Calendar.MILLISECOND, 0)
+                                        }
+                                        fromTimestamp = cal.timeInMillis
+                                    }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("From: ${fmt.format(Date(fromTimestamp))}", fontSize = 11.sp, maxLines = 1)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val c = Calendar.getInstance().apply { timeInMillis = toTimestamp }
+                                    DatePickerDialog(context, { _, y, m, d ->
+                                        val cal = Calendar.getInstance().apply {
+                                            set(y, m, d, 23, 59, 59)
+                                            set(Calendar.MILLISECOND, 999)
+                                        }
+                                        toTimestamp = cal.timeInMillis
+                                    }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("To: ${fmt.format(Date(toTimestamp))}", fontSize = 11.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text("Direction", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = selectedDirection == "ALL",
+                            onClick = { selectedDirection = "ALL" },
+                            label = { Text("All") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedDirection == "IN",
+                            onClick = { selectedDirection = "IN" },
+                            label = { Text("Cash In") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedDirection == "OUT",
+                            onClick = { selectedDirection = "OUT" },
+                            label = { Text("Cash Out") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                item {
+                    Text("Categories Filter", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedCategories.isEmpty(),
+                            onClick = { selectedCategories = emptySet() },
+                            label = { Text("All Categories", fontSize = 11.5.sp) }
+                        )
+                        activeCategories.forEach { cat ->
+                            val isSel = selectedCategories.contains(cat.name)
+                            FilterChip(
+                                selected = isSel,
+                                onClick = {
+                                    selectedCategories = if (isSel) selectedCategories - cat.name else selectedCategories + cat.name
+                                },
+                                label = { Text(cat.name, fontSize = 11.5.sp) }
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    // Preview Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Export Preview", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text("Range: $rangeTitle", style = MaterialTheme.typography.bodySmall)
+                            Text("Matching Active Records: ${matchingItems.size}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Inflow Total:", style = MaterialTheme.typography.bodySmall)
+                                Text(CostCalculator.formatPaiseToRupees(inflowPaise), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF2E7D32))
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Outflow Total:", style = MaterialTheme.typography.bodySmall)
+                                Text(CostCalculator.formatPaiseToRupees(outflowPaise), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFFD32F2F))
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Selected Net Movement:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    CostCalculator.formatPaiseToRupees(netMovementPaise),
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (netMovementPaise >= 0) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        val fmt = SimpleDateFormat("dd MMM yyyy", Locale.US)
+                        val periodTitle = when (selectedPeriod) {
+                            "TODAY" -> "Today"
+                            "WEEK" -> "This Week"
+                            "MONTH" -> "This Month"
+                            "ALL" -> "All Time"
+                            else -> "${fmt.format(Date(effectiveStart))} to ${fmt.format(Date(effectiveEnd))}"
+                        }
+                        onExportAndShare(
+                            matchingItems,
+                            periodTitle,
+                            if (selectedPeriod == "ALL") null else effectiveStart,
+                            if (selectedPeriod == "ALL") null else effectiveEnd,
+                            filtersSummary,
+                            true
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Share Excel", fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

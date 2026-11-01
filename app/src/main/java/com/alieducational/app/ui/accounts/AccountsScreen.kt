@@ -27,6 +27,11 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.ui.text.style.TextAlign
+
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -75,6 +81,7 @@ fun AccountsScreen(
     viewModel: AliViewModel,
     initialTab: Int = 0,
     onNavigateBack: () -> Unit = {},
+    onNavigateToBillHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     androidx.activity.compose.BackHandler {
@@ -85,6 +92,31 @@ fun AccountsScreen(
     val customers by viewModel.allCustomers.collectAsState()
     val totalWeOwe by viewModel.totalWeOweSuppliersPaise.collectAsState()
     val totalCustomersOwe by viewModel.totalCustomersOweUsPaise.collectAsState()
+    val distinctCreditors by viewModel.distinctCreditorsCount.collectAsState(initial = 0)
+    val distinctDebtors by viewModel.distinctDebtorsCount.collectAsState(initial = 0)
+
+    var showOnlyOutstanding by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredSuppliers = remember(suppliers, showOnlyOutstanding, searchQuery) {
+        suppliers.filter { sup ->
+            val matchesOutstanding = if (showOnlyOutstanding) sup.currentBalancePaise > 0L else true
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                sup.name.contains(searchQuery, ignoreCase = true) || (sup.phone?.contains(searchQuery) == true)
+            }
+            matchesOutstanding && matchesSearch
+        }
+    }
+
+    val filteredCustomers = remember(customers, showOnlyOutstanding, searchQuery) {
+        customers.filter { cust ->
+            val matchesOutstanding = if (showOnlyOutstanding) cust.currentBalancePaise > 0L else true
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                cust.name.contains(searchQuery, ignoreCase = true) || (cust.phone?.contains(searchQuery) == true)
+            }
+            matchesOutstanding && matchesSearch
+        }
+    }
 
     var showAddSupplierDialog by remember { mutableStateOf(false) }
     var showAddCustomerDialog by remember { mutableStateOf(false) }
@@ -149,7 +181,7 @@ fun AccountsScreen(
                     ) {
                         Column {
                             Text(
-                                text = if (selectedTab == 0) "Total We Owe Suppliers" else "Total Customers Owe Us",
+                                text = if (selectedTab == 0) "Amount We Owe Suppliers" else "Amount Customers Owe Us",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -159,6 +191,15 @@ fun AccountsScreen(
                                 ),
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                                 color = if (selectedTab == 0) Color(0xFFE57373) else Color(0xFF75B890)
+                            )
+                            Text(
+                                text = if (selectedTab == 0) {
+                                    if (distinctCreditors > 0) "$distinctCreditors suppliers with outstanding dues" else "No outstanding supplier balances"
+                                } else {
+                                    if (distinctDebtors > 0) "$distinctDebtors customers with outstanding dues" else "No outstanding customer balances"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -180,17 +221,60 @@ fun AccountsScreen(
                     }
                 }
 
+                // Search & Filter Chips (All vs Outstanding)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text(if (selectedTab == 0) "Search suppliers..." else "Search customers...", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        } else null,
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    FilterChip(
+                        selected = !showOnlyOutstanding,
+                        onClick = { showOnlyOutstanding = false },
+                        label = { Text("All", fontSize = 12.sp) }
+                    )
+                    FilterChip(
+                        selected = showOnlyOutstanding,
+                        onClick = { showOnlyOutstanding = true },
+                        label = { Text("Outstanding", fontSize = 12.sp) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Accounts List
                 if (selectedTab == 0) {
                     // Suppliers List
-                    if (suppliers.isEmpty()) {
+                    if (filteredSuppliers.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(1f)
+                                .padding(24.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("No suppliers added yet. Tap + to add a supplier.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val emptyMsg = when {
+                                suppliers.isEmpty() -> "No suppliers added yet. Tap 'Add Supplier' to create one."
+                                showOnlyOutstanding && suppliers.none { it.currentBalancePaise > 0L } -> "No outstanding supplier balances. All supplier dues are cleared."
+                                else -> "No matching suppliers found."
+                            }
+                            Text(emptyMsg, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                         }
                     } else {
                         LazyColumn(
@@ -200,7 +284,7 @@ fun AccountsScreen(
                                 .padding(horizontal = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(suppliers) { supplier ->
+                            items(filteredSuppliers) { supplier ->
                                 SupplierAccountCard(
                                     supplier = supplier,
                                     onRecordPayment = { paymentTargetSupplier = supplier }
@@ -211,14 +295,20 @@ fun AccountsScreen(
                     }
                 } else {
                     // Customers List
-                    if (customers.isEmpty()) {
+                    if (filteredCustomers.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(1f)
+                                .padding(24.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("No customer credit accounts. Tap + to add a customer.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val emptyMsg = when {
+                                customers.isEmpty() -> "No customer credit accounts. Tap 'Add Customer' to create one."
+                                showOnlyOutstanding && customers.none { it.currentBalancePaise > 0L } -> "No outstanding customer balances. All customer credit dues are cleared."
+                                else -> "No matching customers found."
+                            }
+                            Text(emptyMsg, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                         }
                     } else {
                         LazyColumn(
@@ -228,10 +318,11 @@ fun AccountsScreen(
                                 .padding(horizontal = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(customers) { customer ->
+                            items(filteredCustomers) { customer ->
                                 CustomerAccountCard(
                                     customer = customer,
-                                    onRecordRepayment = { paymentTargetCustomer = customer }
+                                    onRecordRepayment = { paymentTargetCustomer = customer },
+                                    onNavigateToBillHistory = onNavigateToBillHistory
                                 )
                             }
                             item { Spacer(modifier = Modifier.height(72.dp)) }
@@ -725,7 +816,8 @@ fun SupplierAccountCard(
 @Composable
 fun CustomerAccountCard(
     customer: CustomerEntity,
-    onRecordRepayment: () -> Unit
+    onRecordRepayment: () -> Unit,
+    onNavigateToBillHistory: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -765,18 +857,29 @@ fun CustomerAccountCard(
                     color = if (customer.currentBalancePaise > 0) Color(0xFF75B890) else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Button(
-                    onClick = onRecordRepayment,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = ButtonDefaults.TextButtonContentPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                ) {
-                    Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Receive", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = onNavigateToBillHistory,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding
+                    ) {
+                        Icon(Icons.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Bills", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        onClick = onRecordRepayment,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Receive", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
