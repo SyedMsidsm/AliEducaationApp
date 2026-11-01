@@ -8,6 +8,7 @@ import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.PigmyDepositDao
+import com.alieducational.app.data.local.dao.PigmySchemeDao
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.ProductGiveawayDao
@@ -41,7 +42,8 @@ object DatabaseModule {
             AppDatabase.MIGRATION_1_2,
             AppDatabase.MIGRATION_2_3,
             AppDatabase.MIGRATION_3_4,
-            AppDatabase.MIGRATION_4_5
+            AppDatabase.MIGRATION_4_5,
+            AppDatabase.MIGRATION_5_6
         )
         .build()
     }
@@ -81,6 +83,9 @@ object DatabaseModule {
 
     @Provides
     fun providePigmyDepositDao(db: AppDatabase): PigmyDepositDao = db.pigmyDepositDao()
+
+    @Provides
+    fun providePigmySchemeDao(db: AppDatabase): PigmySchemeDao = db.pigmySchemeDao()
 
     @Provides
     fun provideProductGiveawayDao(db: AppDatabase): ProductGiveawayDao = db.productGiveawayDao()

@@ -7,6 +7,7 @@ import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.PigmyDepositDao
+import com.alieducational.app.data.local.dao.PigmySchemeDao
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.ProductGiveawayDao
@@ -21,6 +22,7 @@ import com.alieducational.app.data.local.entity.AccountPaymentEntity
 import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.PigmyDepositEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import com.alieducational.app.data.local.entity.ProductBarcodeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
 import com.alieducational.app.data.local.entity.ProductGiveawayEntity
@@ -85,6 +87,7 @@ class AppRepository @Inject constructor(
     private val expenseDao: ShopExpenseDao,
     private val heldBillDao: HeldBillDao,
     private val pigmyDepositDao: PigmyDepositDao,
+    private val pigmySchemeDao: PigmySchemeDao,
     private val productGiveawayDao: ProductGiveawayDao,
     private val serviceDefinitionDao: ServiceDefinitionDao,
     private val syncEventDao: SyncEventDao
@@ -700,6 +703,9 @@ class AppRepository @Inject constructor(
 
     // ── Pigmy Daily Savings Tracker ─────────────────────────────────────
 
+    val allPigmySchemes: Flow<List<PigmySchemeEntity>> = pigmySchemeDao.getAllSchemes()
+    val activePigmySchemes: Flow<List<PigmySchemeEntity>> = pigmySchemeDao.getActiveSchemes()
+
     val allPigmyDeposits: Flow<List<PigmyDepositEntity>> = pigmyDepositDao.getAllDeposits()
     val activePigmyDeposits: Flow<List<PigmyDepositEntity>> = pigmyDepositDao.getActiveDeposits()
     val totalPigmyDepositsPaise: Flow<Long?> = pigmyDepositDao.getTotalRecordedDepositsPaise()
@@ -707,24 +713,90 @@ class AppRepository @Inject constructor(
     fun getPigmyDepositsInRange(startTime: Long, endTime: Long): Flow<List<PigmyDepositEntity>> =
         pigmyDepositDao.getDepositsInRange(startTime, endTime)
 
+    fun getPigmyDepositsForScheme(schemeId: String): Flow<List<PigmyDepositEntity>> =
+        pigmyDepositDao.getDepositsForScheme(schemeId)
+
+    fun getTotalPigmyDepositsForScheme(schemeId: String): Flow<Long?> =
+        pigmyDepositDao.getTotalForScheme(schemeId)
+
+    suspend fun ensureDefaultPigmySchemes() {
+        if (pigmySchemeDao.getSchemeCount() == 0) {
+            val now = System.currentTimeMillis()
+            val defaults = listOf(
+                PigmySchemeEntity(
+                    id = "DEFAULT_PIGMY",
+                    name = "Pigmy Scheme 1",
+                    usualDailyAmountPaise = 10000L,
+                    isArchived = false,
+                    createdAt = now,
+                    updatedAt = now
+                ),
+                PigmySchemeEntity(
+                    id = "scheme_2",
+                    name = "Pigmy Scheme 2",
+                    usualDailyAmountPaise = 20000L,
+                    isArchived = false,
+                    createdAt = now + 1,
+                    updatedAt = now + 1
+                ),
+                PigmySchemeEntity(
+                    id = "scheme_3",
+                    name = "Pigmy Scheme 3",
+                    usualDailyAmountPaise = 30000L,
+                    isArchived = false,
+                    createdAt = now + 2,
+                    updatedAt = now + 2
+                )
+            )
+            pigmySchemeDao.insertSchemes(defaults)
+        }
+    }
+
+    suspend fun createPigmyScheme(name: String, usualDailyAmountPaise: Long): String {
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val scheme = PigmySchemeEntity(
+            id = id,
+            name = name.trim(),
+            usualDailyAmountPaise = maxOf(100L, usualDailyAmountPaise),
+            isArchived = false,
+            createdAt = now,
+            updatedAt = now
+        )
+        pigmySchemeDao.insertScheme(scheme)
+        return id
+    }
+
+    suspend fun updatePigmyScheme(id: String, name: String, usualDailyAmountPaise: Long) {
+        pigmySchemeDao.updateSchemeDetails(id, name.trim(), maxOf(100L, usualDailyAmountPaise))
+    }
+
+    suspend fun setPigmySchemeArchived(id: String, isArchived: Boolean) {
+        pigmySchemeDao.setArchived(id, isArchived)
+    }
+
     suspend fun recordPigmyDeposit(
+        schemeId: String = "DEFAULT_PIGMY",
         amountPaise: Long,
         paymentSource: String = "CASH",
         notes: String? = null,
         paidTimestamp: Long = System.currentTimeMillis()
     ): String = db.withTransaction {
+        val scheme = pigmySchemeDao.getSchemeById(schemeId)
+        val schemeName = scheme?.name ?: "Pigmy Savings"
         val depositId = UUID.randomUUID().toString()
         var linkedExpenseId: String? = null
 
         // If paid from shop cash, create a linked savings-transfer expense entry atomically
         if (paymentSource == "CASH") {
             linkedExpenseId = UUID.randomUUID().toString()
+            val noteText = if (!notes.isNullOrBlank()) "Pigmy Deposit ($schemeName): $notes" else "Pigmy Deposit ($schemeName)"
             val expense = ShopExpenseEntity(
                 id = linkedExpenseId,
                 category = "SAVINGS_TRANSFER",
                 amountPaise = amountPaise,
                 isIncome = false,
-                notes = "Pigmy Deposit: ${notes ?: ""}".trim(),
+                notes = noteText,
                 isSavingsTransfer = true,
                 timestamp = paidTimestamp
             )
@@ -733,7 +805,7 @@ class AppRepository @Inject constructor(
 
         val deposit = PigmyDepositEntity(
             id = depositId,
-            accountSchemeId = "DEFAULT_PIGMY",
+            accountSchemeId = schemeId,
             paidTimestamp = paidTimestamp,
             amountPaise = amountPaise,
             paymentSource = paymentSource,
@@ -745,6 +817,69 @@ class AppRepository @Inject constructor(
         )
         pigmyDepositDao.insertDeposit(deposit)
         depositId
+    }
+
+    suspend fun updatePigmyDeposit(
+        depositId: String,
+        schemeId: String,
+        amountPaise: Long,
+        paymentSource: String,
+        notes: String?,
+        paidTimestamp: Long
+    ) = db.withTransaction {
+        val oldDeposit = pigmyDepositDao.getDepositById(depositId) ?: return@withTransaction
+        val scheme = pigmySchemeDao.getSchemeById(schemeId)
+        val schemeName = scheme?.name ?: "Pigmy Savings"
+        val noteText = if (!notes.isNullOrBlank()) "Pigmy Deposit ($schemeName): $notes" else "Pigmy Deposit ($schemeName)"
+
+        var linkedExpenseId = oldDeposit.linkedExpenseId
+
+        if (paymentSource == "CASH") {
+            if (linkedExpenseId != null) {
+                // Update existing linked cash expense atomically
+                val existingExpense = expenseDao.getExpenseById(linkedExpenseId)
+                if (existingExpense != null) {
+                    expenseDao.insertExpense(
+                        existingExpense.copy(
+                            amountPaise = amountPaise,
+                            notes = noteText,
+                            timestamp = paidTimestamp,
+                            isVoided = false
+                        )
+                    )
+                }
+            } else {
+                // Old was bank or missing; create new linked cash expense
+                linkedExpenseId = UUID.randomUUID().toString()
+                val expense = ShopExpenseEntity(
+                    id = linkedExpenseId,
+                    category = "SAVINGS_TRANSFER",
+                    amountPaise = amountPaise,
+                    isIncome = false,
+                    notes = noteText,
+                    isSavingsTransfer = true,
+                    timestamp = paidTimestamp
+                )
+                expenseDao.insertExpense(expense)
+            }
+        } else {
+            // Source is BANK: reverse/void the linked cash expense if one existed
+            if (linkedExpenseId != null) {
+                expenseDao.voidExpense(linkedExpenseId, "Payment source changed to BANK")
+                linkedExpenseId = null
+            }
+        }
+
+        val updated = oldDeposit.copy(
+            accountSchemeId = schemeId,
+            amountPaise = amountPaise,
+            paymentSource = paymentSource,
+            notes = notes,
+            paidTimestamp = paidTimestamp,
+            linkedExpenseId = linkedExpenseId,
+            updatedAt = System.currentTimeMillis()
+        )
+        pigmyDepositDao.updateDeposit(updated)
     }
 
     suspend fun voidPigmyDeposit(depositId: String, reason: String) = db.withTransaction {

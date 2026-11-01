@@ -9,6 +9,7 @@ import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.HeldBillDao
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.PigmyDepositDao
+import com.alieducational.app.data.local.dao.PigmySchemeDao
 import com.alieducational.app.data.local.dao.ProductBarcodeDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.ProductGiveawayDao
@@ -24,6 +25,7 @@ import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.ImportBatchEntity
 import com.alieducational.app.data.local.entity.PigmyDepositEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import com.alieducational.app.data.local.entity.ProductBarcodeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
 import com.alieducational.app.data.local.entity.ProductGiveawayEntity
@@ -53,11 +55,12 @@ import com.alieducational.app.data.local.entity.SyncEventEntity
         ImportBatchEntity::class,
         HeldBillEntity::class,
         PigmyDepositEntity::class,
+        PigmySchemeEntity::class,
         ProductGiveawayEntity::class,
         ServiceDefinitionEntity::class,
         SyncEventEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -73,6 +76,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun importBatchDao(): ImportBatchDao
     abstract fun heldBillDao(): HeldBillDao
     abstract fun pigmyDepositDao(): PigmyDepositDao
+    abstract fun pigmySchemeDao(): PigmySchemeDao
     abstract fun productGiveawayDao(): ProductGiveawayDao
     abstract fun serviceDefinitionDao(): ServiceDefinitionDao
     abstract fun syncEventDao(): SyncEventDao
@@ -215,5 +219,31 @@ abstract class AppDatabase : RoomDatabase() {
                 """.trimIndent())
             }
         }
+    
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `pigmy_schemes` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `usualDailyAmountPaise` INTEGER NOT NULL,
+                        `isArchived` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                """.trimIndent())
+
+                val now = System.currentTimeMillis()
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `pigmy_schemes` (`id`, `name`, `usualDailyAmountPaise`, `isArchived`, `createdAt`, `updatedAt`)
+                    VALUES 
+                        ('DEFAULT_PIGMY', 'Pigmy Scheme 1', 10000, 0, $now, $now),
+                        ('scheme_2', 'Pigmy Scheme 2', 20000, 0, $now + 1, $now + 1),
+                        ('scheme_3', 'Pigmy Scheme 3', 30000, 0, $now + 2, $now + 2)
+                """.trimIndent())
+            }
+        }
+
     }
 }

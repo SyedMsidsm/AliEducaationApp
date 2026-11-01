@@ -76,6 +76,8 @@ fun BackupRestoreScreen(
     val availableBackups by viewModel.availableBackups.collectAsState()
     val lastBackupTime by viewModel.lastBackupTime.collectAsState()
     val isCreatingBackup by viewModel.isCreatingBackup.collectAsState()
+    val lastExternalSaveTime by viewModel.lastExternalSaveTime.collectAsState()
+    val lastExternalSaveDestination by viewModel.lastExternalSaveDestination.collectAsState()
 
     var selectedBackupForRestore by remember { mutableStateOf<BackupMetadata?>(null) }
 
@@ -129,6 +131,40 @@ fun BackupRestoreScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Daily Closing Routine Reminder Card
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Daily Routine Reminder",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Save an external copy to Google Drive / Files after shop closing each evening, and always before app updates.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Info Card
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -151,13 +187,21 @@ fun BackupRestoreScreen(
                                         "Local Phone Backup",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                     )
-                                    val dateStr = if (lastBackupTime > 0) {
+                                    val localDateStr = if (lastBackupTime > 0) {
                                         SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastBackupTime))
                                     } else "Never"
+                                    val externalDateStr = if (lastExternalSaveTime > 0) {
+                                        SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastExternalSaveTime))
+                                    } else "None recorded"
                                     Text(
-                                        "Last successful backup: $dateStr",
+                                        "Last local backup: $localDateStr",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        "Last external copy: $externalDateStr",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (lastExternalSaveTime > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }

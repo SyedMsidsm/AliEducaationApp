@@ -339,7 +339,7 @@ fun HomeScreen(
                     ) {
                         ToolQuickCard(
                             title = "Pigmy Daily Savings",
-                            icon = Icons.Filled.AccountBalanceWallet,
+                            iconRes = R.drawable.ic_pigmy_coin,
                             modifier = Modifier.weight(1f),
                             onClick = onNavigateToPigmy
                         )
@@ -446,7 +446,8 @@ fun MetricCard(
 @Composable
 fun ToolQuickCard(
     title: String,
-    icon: ImageVector,
+    icon: ImageVector? = null,
+    iconRes: Int? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
@@ -468,12 +469,21 @@ fun ToolQuickCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (iconRes != null) {
+                    Icon(
+                        painter = painterResource(id = iconRes),
+                        contentDescription = "Pigmy savings",
+                        tint = Color(0xFFD97706),
+                        modifier = Modifier.size(20.dp)
+                    )
+                } else if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = title,

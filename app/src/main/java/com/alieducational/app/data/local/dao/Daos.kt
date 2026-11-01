@@ -11,6 +11,7 @@ import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.HeldBillEntity
 import com.alieducational.app.data.local.entity.ImportBatchEntity
 import com.alieducational.app.data.local.entity.PigmyDepositEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import com.alieducational.app.data.local.entity.ProductBarcodeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
 import com.alieducational.app.data.local.entity.ProductGiveawayEntity
@@ -315,6 +316,12 @@ interface HeldBillDao {
 
 @Dao
 interface PigmyDepositDao {
+    @Query("SELECT * FROM pigmy_deposits WHERE accountSchemeId = :schemeId ORDER BY paidTimestamp DESC")
+    fun getDepositsForScheme(schemeId: String): Flow<List<PigmyDepositEntity>>
+
+    @Query("SELECT SUM(amountPaise) FROM pigmy_deposits WHERE accountSchemeId = :schemeId AND isVoided = 0")
+    fun getTotalForScheme(schemeId: String): Flow<Long?>
+
     @Query("SELECT * FROM pigmy_deposits ORDER BY paidTimestamp DESC")
     fun getAllDeposits(): Flow<List<PigmyDepositEntity>>
 
@@ -413,4 +420,34 @@ interface SyncEventDao {
 
     @Query("SELECT * FROM sync_events WHERE entityId = :entityId LIMIT 1")
     suspend fun getEventByEntityId(entityId: String): SyncEventEntity?
+}
+
+@Dao
+interface PigmySchemeDao {
+    @Query("SELECT * FROM pigmy_schemes ORDER BY createdAt ASC")
+    fun getAllSchemes(): Flow<List<PigmySchemeEntity>>
+
+    @Query("SELECT * FROM pigmy_schemes WHERE isArchived = 0 ORDER BY createdAt ASC")
+    fun getActiveSchemes(): Flow<List<PigmySchemeEntity>>
+
+    @Query("SELECT * FROM pigmy_schemes WHERE id = :id LIMIT 1")
+    suspend fun getSchemeById(id: String): PigmySchemeEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertScheme(scheme: PigmySchemeEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSchemes(schemes: List<PigmySchemeEntity>)
+
+    @Update
+    suspend fun updateScheme(scheme: PigmySchemeEntity)
+
+    @Query("UPDATE pigmy_schemes SET isArchived = :isArchived, updatedAt = :updatedAt WHERE id = :schemeId")
+    suspend fun setArchived(schemeId: String, isArchived: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pigmy_schemes SET name = :name, usualDailyAmountPaise = :usualPaise, updatedAt = :updatedAt WHERE id = :schemeId")
+    suspend fun updateSchemeDetails(schemeId: String, name: String, usualPaise: Long, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("SELECT COUNT(*) FROM pigmy_schemes")
+    suspend fun getSchemeCount(): Int
 }

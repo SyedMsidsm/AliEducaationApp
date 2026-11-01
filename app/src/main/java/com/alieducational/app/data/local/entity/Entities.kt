@@ -226,6 +226,17 @@ data class HeldBillEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "pigmy_schemes")
+data class PigmySchemeEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val usualDailyAmountPaise: Long = 10000L, // in paise (e.g. ₹100.00)
+    val isArchived: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "pigmy_deposits")
 data class PigmyDepositEntity(
     @PrimaryKey

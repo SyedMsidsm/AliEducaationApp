@@ -1,5 +1,6 @@
 package com.alieducational.app.ui.pigmy
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,12 +20,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,12 +57,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.alieducational.app.R
 import com.alieducational.app.data.local.entity.PigmyDepositEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import java.text.SimpleDateFormat
@@ -73,51 +80,63 @@ fun PigmySavingsScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val allSchemes by viewModel.allPigmySchemes.collectAsState()
     val allDeposits by viewModel.allPigmyDeposits.collectAsState()
-    val totalRecordedPaise by viewModel.totalPigmyDepositsPaise.collectAsState()
-    val usualAmountPaise by viewModel.pigmyUsualAmountPaise.collectAsState()
 
-    var showAddDialog by remember { mutableStateOf(false) }
-    var showEditUsualDialog by remember { mutableStateOf(false) }
+    var showAddSchemeDialog by remember { mutableStateOf(false) }
+    var schemeToEdit by remember { mutableStateOf<PigmySchemeEntity?>(null) }
+    var schemeForDeposit by remember { mutableStateOf<PigmySchemeEntity?>(null) }
+    var depositToEdit by remember { mutableStateOf<PigmyDepositEntity?>(null) }
     var depositToVoid by remember { mutableStateOf<PigmyDepositEntity?>(null) }
     var voidReason by remember { mutableStateOf("") }
 
-    // Date filters: ALL, THIS_MONTH, TODAY
-    var selectedFilter by remember { mutableStateOf("ALL") }
+    // Scheme filter: ACTIVE or ALL (including archived)
+    var showArchivedSchemes by remember { mutableStateOf(false) }
 
-    val filteredDeposits = remember(allDeposits, selectedFilter) {
-        val now = Calendar.getInstance()
-        when (selectedFilter) {
-            "TODAY" -> {
-                val startOfDay = now.apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-                allDeposits.filter { it.paidTimestamp >= startOfDay }
-            }
-            "THIS_MONTH" -> {
-                val startOfMonth = now.apply {
-                    set(Calendar.DAY_OF_MONTH, 1)
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-                allDeposits.filter { it.paidTimestamp >= startOfMonth }
-            }
-            else -> allDeposits
-        }
+    val displayedSchemes = remember(allSchemes, showArchivedSchemes) {
+        if (showArchivedSchemes) allSchemes else allSchemes.filter { !it.isArchived }
+    }
+
+    // Combined summary totals across all schemes
+    val combinedRecordedTotalPaise = remember(allDeposits) {
+        allDeposits.filter { !it.isVoided }.sumOf { it.amountPaise }
+    }
+
+    val todayCombinedTotalPaise = remember(allDeposits) {
+        val startOfDay = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        allDeposits.filter { !it.isVoided && it.paidTimestamp >= startOfDay }.sumOf { it.amountPaise }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Pigmy Daily Savings", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_pigmy_coin),
+                            contentDescription = "Pigmy savings",
+                            tint = Color(0xFFD97706),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Pigmy Savings", fontWeight = FontWeight.Bold)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { showAddSchemeDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Scheme", fontWeight = FontWeight.Bold)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -139,7 +158,7 @@ fun PigmySavingsScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Total Recorded Deposits Card
+                // Combined Summary Card at Top
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -149,121 +168,91 @@ fun PigmySavingsScreen(
                         Column(modifier = Modifier.padding(18.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    Icons.Filled.Savings,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
+                                    painter = painterResource(id = R.drawable.ic_pigmy_coin),
+                                    contentDescription = "Pigmy savings",
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(28.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Total Recorded Deposits",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Total Recorded Deposits",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Combined across all schemes • Not a verified bank balance",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = CostCalculator.formatPaiseToRupees(totalRecordedPaise ?: 0L),
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Recorded deposits total • Not a verified bank balance",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                // Configured Daily Amount Row
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                    text = "Usual Daily Amount",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = CostCalculator.formatPaiseToRupees(usualAmountPaise),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            OutlinedButton(
-                                onClick = { showEditUsualDialog = true },
-                                shape = RoundedCornerShape(8.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
                             ) {
-                                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Change")
+                                Column {
+                                    Text(
+                                        text = CostCalculator.formatPaiseToRupees(combinedRecordedTotalPaise),
+                                        fontSize = 28.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "${displayedSchemes.size} scheme(s)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (todayCombinedTotalPaise > 0) {
+                                    Card(
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                    ) {
+                                        Text(
+                                            text = "Today: ${CostCalculator.formatPaiseToRupees(todayCombinedTotalPaise)}",
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                // Primary Action Button: Add Deposit
-                item {
-                    Button(
-                        onClick = { showAddDialog = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Record Today's Deposit",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
-                }
-
-                // Filter Chips
+                // Scheme Filter Toggle Row
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilterChip(
-                            selected = selectedFilter == "ALL",
-                            onClick = { selectedFilter = "ALL" },
-                            label = { Text("All (${allDeposits.size})") }
+                        Text(
+                            text = "Pigmy Schemes",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        FilterChip(
-                            selected = selectedFilter == "THIS_MONTH",
-                            onClick = { selectedFilter = "THIS_MONTH" },
-                            label = { Text("This Month") }
-                        )
-                        FilterChip(
-                            selected = selectedFilter == "TODAY",
-                            onClick = { selectedFilter = "TODAY" },
-                            label = { Text("Today") }
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !showArchivedSchemes,
+                                onClick = { showArchivedSchemes = false },
+                                label = { Text("Active") }
+                            )
+                            FilterChip(
+                                selected = showArchivedSchemes,
+                                onClick = { showArchivedSchemes = true },
+                                label = { Text("All (${allSchemes.size})") }
+                            )
+                        }
                     }
                 }
 
-                // Deposit Records List
-                if (filteredDeposits.isEmpty()) {
+                // Data-driven list of Scheme Cards
+                if (displayedSchemes.isEmpty()) {
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -277,7 +266,7 @@ fun PigmySavingsScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "No deposits recorded in this period",
+                                    text = "No schemes found. Tap 'Add Scheme' above to create one.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -285,10 +274,25 @@ fun PigmySavingsScreen(
                         }
                     }
                 } else {
-                    items(filteredDeposits, key = { it.id }) { deposit ->
-                        DepositItemCard(
-                            deposit = deposit,
-                            onVoid = { depositToVoid = deposit }
+                    items(displayedSchemes, key = { it.id }) { scheme ->
+                        val schemeDeposits = remember(allDeposits, scheme.id) {
+                            allDeposits.filter { it.accountSchemeId == scheme.id }
+                        }
+                        val schemeTotalPaise = remember(schemeDeposits) {
+                            schemeDeposits.filter { !it.isVoided }.sumOf { it.amountPaise }
+                        }
+
+                        PigmySchemeCard(
+                            scheme = scheme,
+                            totalRecordedPaise = schemeTotalPaise,
+                            deposits = schemeDeposits,
+                            onAddDeposit = { schemeForDeposit = scheme },
+                            onEditScheme = { schemeToEdit = scheme },
+                            onArchiveToggle = { isArchived ->
+                                viewModel.setPigmySchemeArchived(scheme.id, isArchived)
+                            },
+                            onEditDeposit = { deposit -> depositToEdit = deposit },
+                            onVoidDeposit = { deposit -> depositToVoid = deposit }
                         )
                     }
                 }
@@ -300,42 +304,98 @@ fun PigmySavingsScreen(
         }
     }
 
-    // Add Deposit Dialog
-    if (showAddDialog) {
-        AddPigmyDepositDialog(
-            defaultAmountPaise = usualAmountPaise,
-            existingDeposits = allDeposits,
-            onDismiss = { showAddDialog = false },
-            onConfirm = { amountPaise, source, notes ->
+    // Dialog: Add Scheme
+    if (showAddSchemeDialog) {
+        AddOrEditSchemeDialog(
+            existingSchemes = allSchemes,
+            initialScheme = null,
+            onDismiss = { showAddSchemeDialog = false },
+            onConfirm = { name, usualAmountPaise ->
+                viewModel.createPigmyScheme(name, usualAmountPaise) {
+                    showAddSchemeDialog = false
+                }
+            }
+        )
+    }
+
+    // Dialog: Edit Scheme
+    schemeToEdit?.let { scheme ->
+        AddOrEditSchemeDialog(
+            existingSchemes = allSchemes,
+            initialScheme = scheme,
+            onDismiss = { schemeToEdit = null },
+            onConfirm = { name, usualAmountPaise ->
+                viewModel.updatePigmyScheme(scheme.id, name, usualAmountPaise) {
+                    schemeToEdit = null
+                }
+            }
+        )
+    }
+
+    // Dialog: Record Deposit for Scheme
+    schemeForDeposit?.let { scheme ->
+        RecordPigmyDepositDialog(
+            scheme = scheme,
+            existingDeposits = allDeposits.filter { it.accountSchemeId == scheme.id },
+            onDismiss = { schemeForDeposit = null },
+            onConfirm = { amountPaise, source, notes, timestamp ->
                 viewModel.recordPigmyDeposit(
+                    schemeId = scheme.id,
                     amountPaise = amountPaise,
                     paymentSource = source,
                     notes = notes,
-                    onDone = { showAddDialog = false }
+                    paidTimestamp = timestamp,
+                    onDone = { schemeForDeposit = null }
                 )
             }
         )
     }
 
-    // Edit Usual Amount Dialog
-    if (showEditUsualDialog) {
-        var newAmountStr by remember { mutableStateOf((usualAmountPaise / 100).toString()) }
+    // Dialog: Edit Existing Deposit
+    depositToEdit?.let { deposit ->
+        val currentScheme = allSchemes.find { it.id == deposit.accountSchemeId }
+        EditPigmyDepositDialog(
+            deposit = deposit,
+            allSchemes = allSchemes,
+            currentScheme = currentScheme,
+            onDismiss = { depositToEdit = null },
+            onConfirm = { schemeId, amountPaise, source, notes, timestamp ->
+                viewModel.updatePigmyDeposit(
+                    depositId = deposit.id,
+                    schemeId = schemeId,
+                    amountPaise = amountPaise,
+                    paymentSource = source,
+                    notes = notes,
+                    paidTimestamp = timestamp,
+                    onDone = { depositToEdit = null }
+                )
+            }
+        )
+    }
+
+    // Dialog: Void / Cancel Deposit
+    depositToVoid?.let { deposit ->
         AlertDialog(
-            onDismissRequest = { showEditUsualDialog = false },
-            title = { Text("Configure Usual Daily Amount") },
+            onDismissRequest = { depositToVoid = null },
+            title = { Text("Cancel Pigmy Deposit") },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "This amount will be prefilled each time you record a deposit.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Are you sure you want to cancel this deposit of ${CostCalculator.formatPaiseToRupees(deposit.amountPaise)}?",
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    if (deposit.paymentSource == "CASH" && deposit.linkedExpenseId != null) {
+                        Text(
+                            text = "• The linked Shop Cash Outflow (Savings Transfer) in Cash In/Out Tracker will be automatically reversed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     OutlinedTextField(
-                        value = newAmountStr,
-                        onValueChange = { newAmountStr = it },
-                        label = { Text("Amount (₹)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        value = voidReason,
+                        onValueChange = { voidReason = it },
+                        label = { Text("Reason for cancellation *") },
+                        placeholder = { Text("e.g. Accidental entry, Agent returned money") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -344,65 +404,22 @@ fun PigmySavingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val rupees = newAmountStr.toDoubleOrNull() ?: 0.0
-                        if (rupees > 0) {
-                            viewModel.setPigmyUsualAmount((rupees * 100).toLong())
-                            showEditUsualDialog = false
-                        }
-                    }
-                ) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditUsualDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Void Deposit Dialog
-    if (depositToVoid != null) {
-        val target = depositToVoid!!
-        AlertDialog(
-            onDismissRequest = { depositToVoid = null },
-            title = { Text("Void Pigmy Deposit?") },
-            text = {
-                Column {
-                    Text(
-                        text = "Voiding this deposit will reverse the ${CostCalculator.formatPaiseToRupees(target.amountPaise)} entry and any linked shop cash outflow.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = voidReason,
-                        onValueChange = { voidReason = it },
-                        label = { Text("Reason for voiding *") },
-                        placeholder = { Text("e.g. Entry mistake, cancelled deposit") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
                         if (voidReason.isNotBlank()) {
-                            viewModel.voidPigmyDeposit(target.id, voidReason.trim()) {
+                            viewModel.voidPigmyDeposit(deposit.id, voidReason.trim()) {
                                 depositToVoid = null
                                 voidReason = ""
                             }
                         }
                     },
-                    enabled = voidReason.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    enabled = voidReason.isNotBlank()
                 ) {
-                    Text("Void Deposit")
+                    Text("Confirm Cancellation")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { depositToVoid = null }) {
-                    Text("Cancel")
+                TextButton(onClick = { depositToVoid = null; voidReason = "" }) {
+                    Text("Go Back")
                 }
             }
         )
@@ -410,22 +427,75 @@ fun PigmySavingsScreen(
 }
 
 @Composable
-fun DepositItemCard(
-    deposit: PigmyDepositEntity,
-    onVoid: () -> Unit
+fun PigmySchemeCard(
+    scheme: PigmySchemeEntity,
+    totalRecordedPaise: Long,
+    deposits: List<PigmyDepositEntity>,
+    onAddDeposit: () -> Unit,
+    onEditScheme: () -> Unit,
+    onArchiveToggle: (Boolean) -> Unit,
+    onEditDeposit: (PigmyDepositEntity) -> Unit,
+    onVoidDeposit: (PigmyDepositEntity) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
-    val dateStr = remember(deposit.paidTimestamp) { dateFormat.format(Date(deposit.paidTimestamp)) }
+    var expanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (deposit.isVoided) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            else MaterialTheme.colorScheme.surface
+            containerColor = if (scheme.isArchived) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface
         )
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header Row: Scheme Name + Status + Overflow Edit
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = scheme.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (scheme.isArchived) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Card(
+                            shape = RoundedCornerShape(4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        ) {
+                            Text(
+                                text = "Archived",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onEditScheme, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit Scheme", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(
+                        onClick = { onArchiveToggle(!scheme.isArchived) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (scheme.isArchived) Icons.Filled.Unarchive else Icons.Filled.Archive,
+                            contentDescription = if (scheme.isArchived) "Reactivate" else "Archive",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Usual Daily Amount & Total Recorded Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -433,130 +503,382 @@ fun DepositItemCard(
             ) {
                 Column {
                     Text(
-                        text = dateStr,
+                        text = "Usual Daily Amount",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = CostCalculator.formatPaiseToRupees(deposit.amountPaise),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            textDecoration = if (deposit.isVoided) TextDecoration.LineThrough else TextDecoration.None
-                        ),
-                        color = if (deposit.isVoided) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        text = CostCalculator.formatPaiseToRupees(scheme.usualDailyAmountPaise),
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val isCash = deposit.paymentSource == "CASH"
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                color = if (deposit.isVoided) MaterialTheme.colorScheme.errorContainer
-                                else if (isCash) Color(0xFFE4B765).copy(alpha = 0.2f)
-                                else Color(0xFF75B890).copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(6.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = if (deposit.isVoided) "VOIDED"
-                            else if (isCash) "Shop Cash Outflow"
-                            else "Bank / Direct",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (deposit.isVoided) MaterialTheme.colorScheme.error
-                            else if (isCash) Color(0xFFE4B765)
-                            else Color(0xFF75B890)
-                        )
-                    }
-
-                    if (!deposit.isVoided) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = onVoid,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.Block,
-                                contentDescription = "Void",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Total Recorded",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = CostCalculator.formatPaiseToRupees(totalRecordedPaise),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
-            if (!deposit.notes.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Note: ${deposit.notes}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Primary Action: Add Deposit (disabled if archived)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onAddDeposit,
+                    enabled = !scheme.isArchived,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Record Deposit", fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { expanded = !expanded },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("${deposits.size} Deposits")
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
-            if (deposit.isVoided && !deposit.voidReason.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Void reason: ${deposit.voidReason}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
+            // Expandable Deposit History
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    if (deposits.isEmpty()) {
+                        Text(
+                            text = "No deposits recorded for this scheme yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        deposits.forEach { deposit ->
+                            DepositRow(
+                                deposit = deposit,
+                                onEdit = { onEditDeposit(deposit) },
+                                onVoid = { onVoidDeposit(deposit) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun AddPigmyDepositDialog(
-    defaultAmountPaise: Long,
-    existingDeposits: List<PigmyDepositEntity>,
-    onDismiss: () -> Unit,
-    onConfirm: (amountPaise: Long, source: String, notes: String?) -> Unit
+fun DepositRow(
+    deposit: PigmyDepositEntity,
+    onEdit: () -> Unit,
+    onVoid: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    var amountStr by remember { mutableStateOf((defaultAmountPaise / 100).toString()) }
-    var paymentSource by remember { mutableStateOf("CASH") } // CASH or BANK
-    var notes by remember { mutableStateOf("") }
+    val dateFormat = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+    val dateStr = dateFormat.format(Date(deposit.paidTimestamp))
 
-    // Check if there is already an active deposit today
-    val hasDepositToday = remember(existingDeposits) {
-        val now = Calendar.getInstance()
-        val startOfDay = now.apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        existingDeposits.any { !it.isVoided && it.paidTimestamp >= startOfDay }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (deposit.isVoided) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = CostCalculator.formatPaiseToRupees(deposit.amountPaise),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = if (deposit.isVoided) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        textDecoration = if (deposit.isVoided) TextDecoration.LineThrough else TextDecoration.None
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Card(
+                        shape = RoundedCornerShape(4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (deposit.paymentSource == "CASH") Color(0xFFE8F5E9) else Color(0xFFE3F2FD)
+                        )
+                    ) {
+                        Text(
+                            text = if (deposit.paymentSource == "CASH") "Cash Outflow" else "Direct / Bank",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (deposit.paymentSource == "CASH") Color(0xFF2E7D32) else Color(0xFF1565C0),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Text(
+                    text = dateStr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (!deposit.notes.isNullOrBlank()) {
+                    Text(
+                        text = "Note: ${deposit.notes}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (deposit.isVoided) {
+                    Text(
+                        text = "CANCELLED: ${deposit.voidReason ?: ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            if (!deposit.isVoided) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onVoid, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Block, contentDescription = "Cancel", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddOrEditSchemeDialog(
+    existingSchemes: List<PigmySchemeEntity>,
+    initialScheme: PigmySchemeEntity?,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, usualAmountPaise: Long) -> Unit
+) {
+    var name by remember { mutableStateOf(initialScheme?.name ?: "") }
+    var amountStr by remember { mutableStateOf(if (initialScheme != null) (initialScheme.usualDailyAmountPaise / 100).toString() else "100") }
+
+    val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
+    val isDuplicateName = remember(name, initialScheme) {
+        existingSchemes.any { it.name.equals(name.trim(), ignoreCase = true) && it.id != initialScheme?.id }
     }
 
-    val amountPaise = ((amountStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+    val isValid = name.isNotBlank() && amountPaise > 0L
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Record Pigmy Savings Deposit") },
+        title = { Text(if (initialScheme == null) "Add Pigmy Scheme" else "Edit Pigmy Scheme") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (hasDepositToday) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Scheme Name *") },
+                    placeholder = { Text("e.g. Bank Scheme A, Daily Deposit 1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (isDuplicateName) {
+                    Text(
+                        text = "Warning: A scheme with this name already exists.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                OutlinedTextField(
+                    value = amountStr,
+                    onValueChange = { amountStr = it },
+                    label = { Text("Usual Daily Deposit (₹) *") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid) {
+                        onConfirm(name.trim(), amountPaise)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text(if (initialScheme == null) "Create Scheme" else "Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun RecordPigmyDepositDialog(
+    scheme: PigmySchemeEntity,
+    existingDeposits: List<PigmyDepositEntity>,
+    onDismiss: () -> Unit,
+    onConfirm: (amountPaise: Long, source: String, notes: String?, timestamp: Long) -> Unit
+) {
+    var amountStr by remember { mutableStateOf((scheme.usualDailyAmountPaise / 100).toString()) }
+    var paymentSource by remember { mutableStateOf("CASH") }
+    var notes by remember { mutableStateOf("") }
+
+    val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_pigmy_coin),
+                    contentDescription = null,
+                    tint = Color(0xFFD97706),
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Deposit: ${scheme.name}")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = amountStr,
+                    onValueChange = { amountStr = it },
+                    label = { Text("Deposit Amount (₹) *") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Payment Funding Source:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = paymentSource == "CASH",
+                        onClick = { paymentSource = "CASH" },
+                        label = { Text("Shop Cash (Outflow)") }
+                    )
+                    FilterChip(
+                        selected = paymentSource == "BANK",
+                        onClick = { paymentSource = "BANK" },
+                        label = { Text("Direct / Bank") }
+                    )
+                }
+
+                if (paymentSource == "CASH") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Row(
+                        Text(
+                            text = "• Shop cash outflow will be automatically linked in Cash In/Out Tracker as a Savings Transfer (does not reduce shop profit).",
                             modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "A deposit was already recorded today. You can still proceed if this is an intentional second deposit.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                } else {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "• Direct/Bank payment does not reduce physical shop cash.",
+                            modifier = Modifier.padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Reference / Note (Optional)") },
+                    placeholder = { Text("e.g. Receipt #, Agent name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (amountPaise > 0) {
+                        onConfirm(amountPaise, paymentSource, notes.trim().ifBlank { null }, System.currentTimeMillis())
+                    }
+                },
+                enabled = amountPaise > 0
+            ) {
+                Text("Confirm Deposit")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditPigmyDepositDialog(
+    deposit: PigmyDepositEntity,
+    allSchemes: List<PigmySchemeEntity>,
+    currentScheme: PigmySchemeEntity?,
+    onDismiss: () -> Unit,
+    onConfirm: (schemeId: String, amountPaise: Long, source: String, notes: String?, timestamp: Long) -> Unit
+) {
+    var selectedSchemeId by remember { mutableStateOf(deposit.accountSchemeId) }
+    var amountStr by remember { mutableStateOf(CostCalculator.formatPaiseToRupees(deposit.amountPaise).replace("₹", "").trim()) }
+    var paymentSource by remember { mutableStateOf(deposit.paymentSource) }
+    var notes by remember { mutableStateOf(deposit.notes ?: "") }
+
+    val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Pigmy Deposit") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Select Scheme:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    allSchemes.forEach { sc ->
+                        FilterChip(
+                            selected = selectedSchemeId == sc.id,
+                            onClick = { selectedSchemeId = sc.id },
+                            label = { Text(sc.name) }
+                        )
                     }
                 }
 
@@ -564,7 +886,7 @@ fun AddPigmyDepositDialog(
                     value = amountStr,
                     onValueChange = { amountStr = it },
                     label = { Text("Deposit Amount (₹) *") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -583,19 +905,16 @@ fun AddPigmyDepositDialog(
                     )
                 }
 
-                if (paymentSource == "CASH") {
-                    Text(
-                        text = "• Shop cash outflow will be automatically recorded in Cash In/Out Tracker under Savings Transfer.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "• Updating will synchronize the linked Cash Out savings transfer atomically.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
 
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("Reference / Note (Optional)") },
-                    placeholder = { Text("e.g. Receipt #123, Agent name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -605,12 +924,12 @@ fun AddPigmyDepositDialog(
             Button(
                 onClick = {
                     if (amountPaise > 0) {
-                        onConfirm(amountPaise, paymentSource, notes.trim().ifBlank { null })
+                        onConfirm(selectedSchemeId, amountPaise, paymentSource, notes.trim().ifBlank { null }, deposit.paidTimestamp)
                     }
                 },
                 enabled = amountPaise > 0
             ) {
-                Text("Confirm Deposit")
+                Text("Save Changes")
             }
         },
         dismissButton = {

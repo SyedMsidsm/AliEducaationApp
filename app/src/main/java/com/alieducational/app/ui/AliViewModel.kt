@@ -173,6 +173,18 @@ class AliViewModel @Inject constructor(
     val pairedOwnerHost: StateFlow<String> = preferences.pairedOwnerHost
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
+        val allPigmySchemes = repository.allPigmySchemes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activePigmySchemes = repository.activePigmySchemes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val lastExternalSaveTime = preferences.lastExternalSaveTime
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val lastExternalSaveDestination = preferences.lastExternalSaveDestination
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     val allPigmyDeposits = repository.allPigmyDeposits
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -195,6 +207,7 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     init {
+        viewModelScope.launch { repository.ensureDefaultPigmySchemes() }
         viewModelScope.launch {
             preferences.setAppLanguage("en")
             repository.ensurePredefinedServices()
@@ -1050,7 +1063,29 @@ class AliViewModel @Inject constructor(
         }
     }
 
+    fun createPigmyScheme(name: String, usualDailyAmountPaise: Long, onDone: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            val id = repository.createPigmyScheme(name, usualDailyAmountPaise)
+            onDone(id)
+        }
+    }
+
+    fun updatePigmyScheme(id: String, name: String, usualDailyAmountPaise: Long, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.updatePigmyScheme(id, name, usualDailyAmountPaise)
+            onDone()
+        }
+    }
+
+    fun setPigmySchemeArchived(id: String, isArchived: Boolean, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.setPigmySchemeArchived(id, isArchived)
+            onDone()
+        }
+    }
+
     fun recordPigmyDeposit(
+        schemeId: String = "DEFAULT_PIGMY",
         amountPaise: Long,
         paymentSource: String = "CASH",
         notes: String? = null,
@@ -1058,8 +1093,23 @@ class AliViewModel @Inject constructor(
         onDone: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val id = repository.recordPigmyDeposit(amountPaise, paymentSource, notes, paidTimestamp)
+            val id = repository.recordPigmyDeposit(schemeId, amountPaise, paymentSource, notes, paidTimestamp)
             onDone(id)
+        }
+    }
+
+    fun updatePigmyDeposit(
+        depositId: String,
+        schemeId: String,
+        amountPaise: Long,
+        paymentSource: String,
+        notes: String?,
+        paidTimestamp: Long,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.updatePigmyDeposit(depositId, schemeId, amountPaise, paymentSource, notes, paidTimestamp)
+            onDone()
         }
     }
 

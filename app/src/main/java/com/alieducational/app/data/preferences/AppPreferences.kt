@@ -29,6 +29,8 @@ class AppPreferences @Inject constructor(
         val APP_LANGUAGE = stringPreferencesKey("app_language")
         val SHOP_NAME = stringPreferencesKey("shop_name")
         val LAST_BACKUP_TIME = longPreferencesKey("last_backup_time")
+        val LAST_EXTERNAL_SAVE_TIME = longPreferencesKey("last_external_save_time")
+        val LAST_EXTERNAL_SAVE_DESTINATION = stringPreferencesKey("last_external_save_destination")
         val RECEIPT_ACTION = stringPreferencesKey("receipt_action")
         val RECEIPT_LANGUAGE = stringPreferencesKey("receipt_language")
         val PIGMY_USUAL_AMOUNT_PAISE = longPreferencesKey("pigmy_usual_amount_paise")
@@ -172,7 +174,22 @@ class AppPreferences @Inject constructor(
         }
     }
 
-    suspend fun setLastBackupTime(timestamp: Long) {
+        val lastExternalSaveTime: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LAST_EXTERNAL_SAVE_TIME] ?: 0L
+    }
+
+    val lastExternalSaveDestination: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LAST_EXTERNAL_SAVE_DESTINATION] ?: ""
+    }
+
+    suspend fun setLastExternalSave(timestamp: Long, destination: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.LAST_EXTERNAL_SAVE_TIME] = timestamp
+            preferences[Keys.LAST_EXTERNAL_SAVE_DESTINATION] = destination
+        }
+    }
+
+suspend fun setLastBackupTime(timestamp: Long) {
         context.dataStore.edit { preferences ->
             preferences[Keys.LAST_BACKUP_TIME] = timestamp
         }
