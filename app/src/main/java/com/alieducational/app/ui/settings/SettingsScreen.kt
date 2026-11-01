@@ -55,6 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alieducational.app.data.service.SyncConnectionState
 import com.alieducational.app.data.service.TwoPhoneSyncService
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.ui.platform.LocalContext
+import com.alieducational.app.widget.AliSlimBarWidgetProvider
 import com.alieducational.app.ui.AliViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -357,6 +363,45 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(label, style = MaterialTheme.typography.bodyMedium)
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // 4. Home Screen Widget Card
+                val context = LocalContext.current
+                val canPinWidget = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                    (context.getSystemService(AppWidgetManager::class.java)?.isRequestPinAppWidgetSupported == true)
+
+                if (canPinWidget) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Widgets, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text("Home Screen Widget", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text("Slim bar with Cash In, Cash Out, New Bill & Add Stock", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = {
+                                    val appWidgetManager = context.getSystemService(AppWidgetManager::class.java)
+                                    val myProvider = ComponentName(context, AliSlimBarWidgetProvider::class.java)
+                                    appWidgetManager?.requestPinAppWidget(myProvider, null, null)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(Icons.Filled.AddCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Add Widget to Home Screen")
                             }
                         }
                     }

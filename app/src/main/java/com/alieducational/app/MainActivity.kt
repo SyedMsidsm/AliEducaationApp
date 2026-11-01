@@ -42,6 +42,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         extractWidgetAction(intent)
+        com.alieducational.app.widget.AliSlimBarWidgetProvider.updateAllWidgets(this)
 
         setContent {
             val viewModel: AliViewModel = hiltViewModel()
@@ -146,14 +147,30 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun extractWidgetAction(intent: android.content.Intent?) {
+        if (intent?.action == "com.alieducational.app.action.PIN_WIDGET" || intent?.getStringExtra("action") == "PIN_WIDGET") {
+            requestPinWidget()
+            return
+        }
         val action = intent?.getStringExtra(com.alieducational.app.widget.AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION)
         if (action != null) {
             pendingWidgetAction = action
         }
     }
 
+    fun requestPinWidget() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val appWidgetManager = getSystemService(android.appwidget.AppWidgetManager::class.java)
+            val myProvider = android.content.ComponentName(this, com.alieducational.app.widget.AliSlimBarWidgetProvider::class.java)
+            if (appWidgetManager != null && appWidgetManager.isRequestPinAppWidgetSupported) {
+                appWidgetManager.requestPinAppWidget(myProvider, null, null)
+            }
+        }
+        com.alieducational.app.widget.AliSlimBarWidgetProvider.updateAllWidgets(this)
+    }
+
     override fun onResume() {
         super.onResume()
+        com.alieducational.app.widget.AliSlimBarWidgetProvider.updateAllWidgets(this)
         if (lastPausedTime > 0L) {
             val elapsedSeconds = (System.currentTimeMillis() - lastPausedTime) / 1000
             // If background timeout exceeded (default 120s), relock

@@ -8,6 +8,7 @@
     android:targetCellHeight="1"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_slim_bar"
+    android:previewLayout="@layout/widget_slim_bar"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/widget_slim_bar_description" />

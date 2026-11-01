@@ -28,13 +28,14 @@
         android:contentDescription="@string/app_name" />
 
     <!-- Subtle Horizontal Divider Line matching Reference -->
-    <View
+    <ImageView
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginStart="4dp"
         android:layout_marginEnd="4dp"
         android:layout_marginBottom="6dp"
-        android:background="#2E3A33" />
+        android:background="#2E3A33"
+        android:importantForAccessibility="no" />
 
     <!-- 4 Equal Action Columns with Vertical Dividers -->
     <LinearLayout
@@ -81,11 +82,12 @@
         </LinearLayout>
 
         <!-- Vertical Divider 1 -->
-        <View
+        <ImageView
             android:layout_width="1dp"
             android:layout_height="32dp"
             android:layout_gravity="center_vertical"
-            android:background="#2E3A33" />
+            android:background="#2E3A33"
+            android:importantForAccessibility="no" />
 
         <!-- Action 2: Cash Out -->
         <LinearLayout
@@ -123,11 +125,12 @@
         </LinearLayout>
 
         <!-- Vertical Divider 2 -->
-        <View
+        <ImageView
             android:layout_width="1dp"
             android:layout_height="32dp"
             android:layout_gravity="center_vertical"
-            android:background="#2E3A33" />
+            android:background="#2E3A33"
+            android:importantForAccessibility="no" />
 
         <!-- Action 3: New Bill -->
         <LinearLayout
@@ -165,11 +168,12 @@
         </LinearLayout>
 
         <!-- Vertical Divider 3 -->
-        <View
+        <ImageView
             android:layout_width="1dp"
             android:layout_height="32dp"
             android:layout_gravity="center_vertical"
-            android:background="#2E3A33" />
+            android:background="#2E3A33"
+            android:importantForAccessibility="no" />
 
         <!-- Action 4: Add Stock -->
         <LinearLayout
