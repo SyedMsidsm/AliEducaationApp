@@ -107,6 +107,14 @@ fun StockScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductEntity?>(null) }
 
+    val widgetAction by viewModel.widgetActionTrigger.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(widgetAction) {
+        if (widgetAction == com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_ADD_STOCK) {
+            showAddDialog = true
+            viewModel.consumeWidgetAction()
+        }
+    }
+
     val filteredProducts = allProducts.filter { product ->
         val matchesSearch = searchQuery.isBlank() ||
                 product.name.contains(searchQuery, ignoreCase = true) ||

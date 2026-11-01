@@ -194,6 +194,18 @@ class AliViewModel @Inject constructor(
     val activePigmyDeposits = repository.activePigmyDeposits
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // ── Home Screen Widget Action Trigger ──────────────────────────
+    private val _widgetActionTrigger = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val widgetActionTrigger: StateFlow<String?> = _widgetActionTrigger.asStateFlow()
+
+    fun triggerWidgetAction(action: String) {
+        _widgetActionTrigger.value = action
+    }
+
+    fun consumeWidgetAction() {
+        _widgetActionTrigger.value = null
+    }
+
     val totalPigmyDepositsPaise = repository.totalPigmyDepositsPaise
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 

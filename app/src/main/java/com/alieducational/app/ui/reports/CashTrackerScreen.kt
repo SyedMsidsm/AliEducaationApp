@@ -153,6 +153,22 @@ fun CashTrackerScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var isIncomeMode by remember { mutableStateOf(true) }
+
+    val widgetAction by viewModel.widgetActionTrigger.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(widgetAction) {
+        when (widgetAction) {
+            com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN -> {
+                isIncomeMode = true
+                showAddDialog = true
+                viewModel.consumeWidgetAction()
+            }
+            com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_OUT -> {
+                isIncomeMode = false
+                showAddDialog = true
+                viewModel.consumeWidgetAction()
+            }
+        }
+    }
     var selectedItemForVoid by remember { mutableStateOf<ShopExpenseEntity?>(null) }
     var viewingPhotoFile by remember { mutableStateOf<File?>(null) }
 

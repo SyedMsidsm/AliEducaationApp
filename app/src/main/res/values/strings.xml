@@ -207,4 +207,12 @@
     <string name="voucher_share_button">Share Payment Voucher</string>
     <string name="voucher_print_button">Print Voucher</string>
     <string name="voucher_done_button">Done</string>
+
+    <!-- Widget Strings -->
+    <string name="widget_slim_bar_name">Ali Educational Quick Actions</string>
+    <string name="widget_slim_bar_description">Quick actions for Cash In, Cash Out, New Bill, and Add Stock</string>
+    <string name="widget_action_cash_in">Cash In</string>
+    <string name="widget_action_cash_out">Cash Out</string>
+    <string name="widget_action_new_bill">New Bill</string>
+    <string name="widget_action_add_stock">Add Stock</string>
 </resources>

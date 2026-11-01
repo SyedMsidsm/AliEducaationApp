@@ -32,12 +32,26 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.AliEducational">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Slim-Bar Home Screen Widget -->
+        <receiver
+            android:name=".widget.AliSlimBarWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_slim_bar_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/ali_slim_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -36,10 +36,12 @@ class MainActivity : FragmentActivity() {
 
     private var lastPausedTime: Long = 0L
     private var isAppLocked by mutableStateOf(false)
+    private var pendingWidgetAction by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        extractWidgetAction(intent)
 
         setContent {
             val viewModel: AliViewModel = hiltViewModel()
@@ -73,6 +75,43 @@ class MainActivity : FragmentActivity() {
                             !isFirstLaunch &&
                             (!isLockEnabled || !isAppLocked)
 
+                    androidx.compose.runtime.LaunchedEffect(pendingWidgetAction, isLockEnabled, isAppLocked, isFirstLaunch) {
+                        val action = pendingWidgetAction
+                        if (action != null && !isFirstLaunch && (!isLockEnabled || !isAppLocked)) {
+                            when (action) {
+                                com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN -> {
+                                    viewModel.triggerWidgetAction(com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN)
+                                    navController.navigate(Screen.CashTracker.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                                com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_OUT -> {
+                                    viewModel.triggerWidgetAction(com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_OUT)
+                                    navController.navigate(Screen.CashTracker.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                                com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_NEW_BILL -> {
+                                    navController.navigate(Screen.Billing.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                                com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_ADD_STOCK -> {
+                                    viewModel.triggerWidgetAction(com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_ADD_STOCK)
+                                    navController.navigate(Screen.Stock.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                                com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_HOME -> {
+                                    navController.navigate(Screen.Home.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            }
+                            pendingWidgetAction = null
+                        }
+                    }
+
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         bottomBar = {
@@ -98,6 +137,19 @@ class MainActivity : FragmentActivity() {
     override fun onPause() {
         super.onPause()
         lastPausedTime = System.currentTimeMillis()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractWidgetAction(intent)
+    }
+
+    private fun extractWidgetAction(intent: android.content.Intent?) {
+        val action = intent?.getStringExtra(com.alieducational.app.widget.AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION)
+        if (action != null) {
+            pendingWidgetAction = action
+        }
     }
 
     override fun onResume() {
