@@ -249,12 +249,18 @@ fun ProfitScreen(
     val totalNetOperatingExpensesPaise = netProductExpensesPaise + netServiceExpensesPaise + netSharedExpensesPaise
     val combinedRecordedOperatingResultPaise = productGrossProfitPaise + serviceRevenuePaise - totalNetOperatingExpensesPaise
 
-    // Potential inventory gross profit from current unsold stock
-    val expectedGrossProfitPaise = remember(allProducts) {
-        allProducts.sumOf { p ->
+    // Potential inventory gross profit from current unsold positive stock (A06)
+    val positiveProducts = remember(allProducts) {
+        allProducts.filter { it.currentSellableStock > 0 }
+    }
+    val shortageProducts = remember(allProducts) {
+        allProducts.filter { it.currentSellableStock < 0 }
+    }
+    val expectedGrossProfitPaise = remember(positiveProducts) {
+        positiveProducts.sumOf { p ->
             val potentialRevenue = p.currentSellableStock.toLong() * p.sellingPricePiecePaise
             val costValue = p.currentSellableStock.toLong() * p.movingAvgCostPaise
-            potentialRevenue - costValue
+            (potentialRevenue - costValue).coerceAtLeast(0L)
         }
     }
 
@@ -586,6 +592,15 @@ fun ProfitScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (shortageProducts.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "⚠️ Shortage warning: ${shortageProducts.size} product(s) have negative stock.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }

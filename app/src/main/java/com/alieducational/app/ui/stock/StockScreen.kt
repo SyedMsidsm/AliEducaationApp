@@ -1,6 +1,13 @@
 package com.alieducational.app.ui.stock
 
 import android.Manifest
+import android.content.Intent
+import androidx.compose.foundation.Image
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.FileProvider
+import com.alieducational.app.data.service.BarcodeGeneratorService
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -106,6 +113,8 @@ fun StockScreen(
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Low Stock"
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductEntity?>(null) }
+    var showBarcodeLabelExport by remember { mutableStateOf<ProductEntity?>(null) }
+    val barcodeService = remember { BarcodeGeneratorService() }
 
     val widgetAction by viewModel.widgetActionTrigger.collectAsState()
     androidx.compose.runtime.LaunchedEffect(widgetAction) {
@@ -281,6 +290,14 @@ fun StockScreen(
                 showAddDialog = false
                 selectedProductForEdit = null
             },
+            onGenerateBarcode = { prodId, onDone ->
+                viewModel.generateShopBarcode(prodId, "PIECE", 1) { entity ->
+                    onDone(entity.barcode)
+                }
+            },
+            onExportLabels = { prod ->
+                showBarcodeLabelExport = prod
+            },
             onSave = { existingId, name, barcode, category, brand, packSize, boxesBrought, loosePieces, costPaise, sellingPaise, wholesalePaise, lowStock, supplierName, billNo, transportPaise, isPaidNow, billPaymentMethod ->
                 viewModel.addOrUpdateProductWithStock(
                     existingId = existingId,
@@ -303,6 +320,115 @@ fun StockScreen(
                 )
                 showAddDialog = false
                 selectedProductForEdit = null
+            }
+        )
+    }
+
+    // ── BARCODE LABEL EXPORT DIALOG (Section 16) ───────────────────
+    showBarcodeLabelExport?.let { exportProd ->
+        val exportBarcode = exportProd.barcode ?: ""
+        var includePriceOnLabel by remember { mutableStateOf(true) }
+        var copiesCountStr by remember { mutableStateOf("24") }
+        var selectedUnitLabel by remember { mutableStateOf("Piece") }
+        val exportContext = LocalContext.current
+
+        val barcodeBitmap = remember(exportBarcode) {
+            try {
+                if (exportBarcode.isNotBlank()) barcodeService.generateBarcodeBitmap(exportBarcode, 360, 100) else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showBarcodeLabelExport = null },
+            title = { Text("Print / Export Barcode Labels", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(exportProd.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Text("Barcode: $exportBarcode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+
+                    if (barcodeBitmap != null) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp),
+                            colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Image(
+                                    bitmap = barcodeBitmap.asImageBitmap(),
+                                    contentDescription = "Barcode Preview",
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = includePriceOnLabel,
+                            onCheckedChange = { includePriceOnLabel = it }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Include Price: ${CostCalculator.formatPaiseToRupees(exportProd.sellingPricePiecePaise)}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = copiesCountStr,
+                        onValueChange = { copiesCountStr = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Number of Copies (1 - 100)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val copies = (copiesCountStr.toIntOrNull() ?: 24).coerceIn(1, 100)
+                        val price = if (includePriceOnLabel) exportProd.sellingPricePiecePaise else null
+                        try {
+                            val pdfFile = barcodeService.generateLabelsPdf(
+                                context = exportContext,
+                                productName = exportProd.name,
+                                barcode = exportBarcode,
+                                unitLabel = selectedUnitLabel,
+                                pricePaise = price,
+                                copies = copies
+                            )
+                            val uri = FileProvider.getUriForFile(
+                                exportContext,
+                                "${exportContext.packageName}.fileprovider",
+                                pdfFile
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/pdf"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            exportContext.startActivity(Intent.createChooser(shareIntent, "Share Barcode Labels PDF"))
+                            showBarcodeLabelExport = null
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(exportContext, "Error creating PDF: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                ) {
+                    Text("Export / Share PDF")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showBarcodeLabelExport = null }) {
+                    Text("Close")
+                }
             }
         )
     }
@@ -434,6 +560,8 @@ fun IntegratedAddStockProductDialog(
     suppliers: List<SupplierEntity>,
     onAddSupplier: (SupplierEntity, (SupplierEntity) -> Unit) -> Unit = { _, _ -> },
     onDismiss: () -> Unit,
+    onGenerateBarcode: (String, (String) -> Unit) -> Unit = { _, _ -> },
+    onExportLabels: (ProductEntity) -> Unit = {},
     onSave: (
         existingId: String?,
         name: String,
@@ -553,6 +681,7 @@ fun IntegratedAddStockProductDialog(
                     onValueChange = { name = it },
                     label = { Text("Product Name *") },
                     placeholder = { Text("Product Name") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -584,12 +713,43 @@ fun IntegratedAddStockProductDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (existingProduct != null) {
+                    if (barcode.isBlank()) {
+                        Button(
+                            onClick = {
+                                onGenerateBarcode(existingProduct.id) { generated ->
+                                    if (generated.isNotBlank()) barcode = generated
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Generate Shop Barcode (Code 128)")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                onExportLabels(existingProduct.copy(barcode = barcode))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Print / Export Barcode Labels")
+                        }
+                    }
+                }
+
                 // 3. Category & Brand
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = category,
                         onValueChange = { category = it },
                         label = { Text("Category") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -597,6 +757,7 @@ fun IntegratedAddStockProductDialog(
                         value = brand,
                         onValueChange = { brand = it },
                         label = { Text("Brand") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )

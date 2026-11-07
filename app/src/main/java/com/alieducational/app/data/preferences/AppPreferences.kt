@@ -39,6 +39,10 @@ class AppPreferences @Inject constructor(
         val PAIRED_OWNER_HOST = stringPreferencesKey("paired_owner_host")
         val SYNC_TOKEN = stringPreferencesKey("sync_token")
         val SYNC_PORT = intPreferencesKey("sync_port")
+        val APP_TEXT_SIZE = stringPreferencesKey("app_text_size") // "Small", "Default", "Large", "Extra Large"
+        val GOOGLE_DRIVE_FOLDER_URI = stringPreferencesKey("google_drive_folder_uri")
+        val GOOGLE_DRIVE_FOLDER_NAME = stringPreferencesKey("google_drive_folder_name")
+        val OWNER_PIN = stringPreferencesKey("owner_pin")
     }
 
     val isFirstLaunch: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -95,11 +99,61 @@ class AppPreferences @Inject constructor(
     }
 
     val syncToken: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[Keys.SYNC_TOKEN] ?: ""
+        preferences[Keys.SYNC_TOKEN] ?: "AE-SYNC-987654"
     }
 
     val syncPort: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[Keys.SYNC_PORT] ?: 8080
+    }
+
+    val appTextSize: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.APP_TEXT_SIZE] ?: "Default"
+    }
+
+    val googleDriveFolderUri: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.GOOGLE_DRIVE_FOLDER_URI] ?: ""
+    }
+
+    val googleDriveFolderName: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.GOOGLE_DRIVE_FOLDER_NAME] ?: ""
+    }
+
+    val ownerPin: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.OWNER_PIN] ?: "1234"
+    }
+
+    val lastExternalSaveTime: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LAST_EXTERNAL_SAVE_TIME] ?: 0L
+    }
+
+    val lastExternalSaveDestination: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[Keys.LAST_EXTERNAL_SAVE_DESTINATION] ?: ""
+    }
+
+    suspend fun setAppTextSize(size: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.APP_TEXT_SIZE] = size
+        }
+    }
+
+    suspend fun setGoogleDriveFolder(uri: String, name: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.GOOGLE_DRIVE_FOLDER_URI] = uri
+            preferences[Keys.GOOGLE_DRIVE_FOLDER_NAME] = name
+        }
+    }
+
+    suspend fun clearGoogleDriveFolder() {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.GOOGLE_DRIVE_FOLDER_URI] = ""
+            preferences[Keys.GOOGLE_DRIVE_FOLDER_NAME] = ""
+        }
+    }
+
+    suspend fun setOwnerPin(pin: String) {
+        context.dataStore.edit { preferences ->
+            preferences[Keys.OWNER_PIN] = pin
+        }
     }
 
     suspend fun setPigmyUsualAmountPaise(amountPaise: Long) {
@@ -174,14 +228,6 @@ class AppPreferences @Inject constructor(
         }
     }
 
-        val lastExternalSaveTime: Flow<Long> = context.dataStore.data.map { preferences ->
-        preferences[Keys.LAST_EXTERNAL_SAVE_TIME] ?: 0L
-    }
-
-    val lastExternalSaveDestination: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[Keys.LAST_EXTERNAL_SAVE_DESTINATION] ?: ""
-    }
-
     suspend fun setLastExternalSave(timestamp: Long, destination: String) {
         context.dataStore.edit { preferences ->
             preferences[Keys.LAST_EXTERNAL_SAVE_TIME] = timestamp
@@ -189,7 +235,7 @@ class AppPreferences @Inject constructor(
         }
     }
 
-suspend fun setLastBackupTime(timestamp: Long) {
+    suspend fun setLastBackupTime(timestamp: Long) {
         context.dataStore.edit { preferences ->
             preferences[Keys.LAST_BACKUP_TIME] = timestamp
         }

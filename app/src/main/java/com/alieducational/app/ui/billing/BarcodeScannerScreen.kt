@@ -71,6 +71,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.alieducational.app.R
+import com.alieducational.app.data.local.entity.ProductEntity
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import java.util.concurrent.Executors
@@ -109,6 +112,12 @@ fun BarcodeScannerScreen(
 
     var camera by remember { mutableStateOf<Camera?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
+
+    // Barcode confirmation state (Section 6)
+    var scannedProductToConfirm by remember { mutableStateOf<Pair<ProductEntity, String>?>(null) }
+    var scannedPackQty by remember { mutableStateOf(1) }
+    var scannedQuantityStr by remember { mutableStateOf("1") }
+    var isScannerPaused by remember { mutableStateOf(false) }
 
     // Unknown Barcode Link Dialog State
     var unknownBarcodeToLink by remember { mutableStateOf<String?>(null) }
@@ -200,12 +209,18 @@ fun BarcodeScannerScreen(
                                             cameraExecutor,
                                             BarcodeAnalyzer(
                                                 onBarcodeDetected = { barcode, _ ->
-                                                    viewModel.handleScannedBarcode(
-                                                        barcode = barcode,
-                                                        onUnknown = { unknownCode ->
-                                                            unknownBarcodeToLink = unknownCode
+                                                    if (!isScannerPaused && scannedProductToConfirm == null && unknownBarcodeToLink == null) {
+                                                        isScannerPaused = true
+                                                        viewModel.lookupBarcode(barcode) { prod, unitType, packQty ->
+                                                            if (prod != null) {
+                                                                scannedProductToConfirm = Pair(prod, unitType ?: "PIECE")
+                                                                scannedPackQty = packQty ?: 1
+                                                                scannedQuantityStr = "1"
+                                                            } else {
+                                                                unknownBarcodeToLink = barcode
+                                                            }
                                                         }
-                                                    )
+                                                    }
                                                 }
                                             )
                                         )
@@ -395,12 +410,119 @@ fun BarcodeScannerScreen(
         }
     }
 
+    // Quantity Confirmation Dialog (Section 6)
+    if (scannedProductToConfirm != null) {
+        val (prod, unitType) = scannedProductToConfirm!!
+        val unitPricePaise = if (unitType == "PACK") prod.sellingPricePackPaise else prod.sellingPricePiecePaise
+        val unitLabel = if (unitType == "PACK") "Pack of ${prod.packSize}" else "Piece"
+
+        AlertDialog(
+            onDismissRequest = {
+                scannedProductToConfirm = null
+                isScannerPaused = false
+            },
+            title = {
+                Text("Confirm Scanned Product", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = prod.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Unit: $unitLabel", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Price: ${CostCalculator.formatPaiseToRupees(unitPricePaise)}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Text(
+                        text = "Current Stock: ${prod.currentSellableStock} pieces available",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text("Enter Quantity:", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val current = scannedQuantityStr.toIntOrNull() ?: 1
+                                if (current > 1) scannedQuantityStr = (current - 1).toString()
+                            },
+                            modifier = Modifier.size(44.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                        ) {
+                            Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedTextField(
+                            value = scannedQuantityStr,
+                            onValueChange = { scannedQuantityStr = it.filter { ch -> ch.isDigit() } },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+
+                        OutlinedButton(
+                            onClick = {
+                                val current = scannedQuantityStr.toIntOrNull() ?: 1
+                                scannedQuantityStr = (current + 1).toString()
+                            },
+                            modifier = Modifier.size(44.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                        ) {
+                            Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val qty = scannedQuantityStr.toIntOrNull() ?: 1
+                        if (qty > 0) {
+                            viewModel.addItemToBill(prod, unitType, qty)
+                        }
+                        scannedProductToConfirm = null
+                        isScannerPaused = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Add to Bill")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        scannedProductToConfirm = null
+                        isScannerPaused = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Dialog for Unknown Barcode: Link to existing product or Cancel
     if (unknownBarcodeToLink != null) {
         val code = unknownBarcodeToLink!!
         AlertDialog(
             onDismissRequest = {
                 unknownBarcodeToLink = null
+                isScannerPaused = false
                 viewModel.clearUnknownBarcode()
             },
             title = { Text(stringResource(R.string.scanner_unknown_title)) },
@@ -452,7 +574,8 @@ fun BarcodeScannerScreen(
                                 productId = selectedProductForLink,
                                 unitType = selectedUnitForLink,
                                 packQty = 1,
-                                onDone = { unknownBarcodeToLink = null }
+                                onDone = { unknownBarcodeToLink = null
+                                isScannerPaused = false }
                             )
                         }
                     },

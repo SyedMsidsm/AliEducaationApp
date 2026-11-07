@@ -279,6 +279,9 @@ interface ShopExpenseDao {
     @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 ORDER BY timestamp DESC")
     fun getAllExpenses(): Flow<List<ShopExpenseEntity>>
 
+    @Query("SELECT notes FROM shop_expenses WHERE isVoided = 0 AND isIncome = :isIncome AND notes IS NOT NULL AND TRIM(notes) != '' ORDER BY timestamp DESC LIMIT 100")
+    suspend fun getRecentRawNotes(isIncome: Boolean): List<String>
+
     @Query("SELECT * FROM shop_expenses WHERE linkedExpenseId = :expenseId AND isVoided = 0")
     suspend fun getActiveRefundsForExpense(expenseId: String): List<ShopExpenseEntity>
 
@@ -570,4 +573,3 @@ interface PigmyWithdrawalDao {
     @Query("UPDATE pigmy_withdrawals SET isVoided = 1, voidReason = :reason, updatedAt = :timestamp WHERE id = :id")
     suspend fun voidWithdrawal(id: String, reason: String, timestamp: Long = System.currentTimeMillis())
 }
-

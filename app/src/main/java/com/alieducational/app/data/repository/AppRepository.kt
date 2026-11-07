@@ -53,7 +53,8 @@ import javax.inject.Singleton
 data class PurchaseItemParam(
     val productId: String,
     val quantityBase: Int,
-    val unitPurchasePricePaise: Long
+    val unitPurchasePricePaise: Long,
+    val newSellingPricePiecePaise: Long? = null
 )
 
 data class SaleItemParam(
@@ -96,7 +97,8 @@ class AppRepository @Inject constructor(
     private val cashCategoryDao: CashCategoryDao,
     private val productGiveawayDao: ProductGiveawayDao,
     private val serviceDefinitionDao: ServiceDefinitionDao,
-    private val syncEventDao: SyncEventDao
+    private val syncEventDao: SyncEventDao,
+    private val barcodeGeneratorService: com.alieducational.app.data.service.BarcodeGeneratorService = com.alieducational.app.data.service.BarcodeGeneratorService()
 ) {
 
     // ── Stock & Inventory ──────────────────────────────────────────────
@@ -480,6 +482,15 @@ class AppRepository @Inject constructor(
 
             productDao.updateWeightedAverageCost(item.productId, newAvgCost)
             productDao.adjustSellableStock(item.productId, item.quantityBase)
+
+            if (item.newSellingPricePiecePaise != null && item.newSellingPricePiecePaise > 0L) {
+                val updatedProd = product.copy(
+                    sellingPricePiecePaise = item.newSellingPricePiecePaise,
+                    sellingPricePackPaise = item.newSellingPricePiecePaise * product.packSize,
+                    updatedAt = System.currentTimeMillis()
+                )
+                productDao.updateProduct(updatedProd)
+            }
 
             stockMovementDao.insertMovement(
                 StockMovementEntity(
@@ -1307,6 +1318,106 @@ class AppRepository @Inject constructor(
 
     fun getSalesForCustomer(customerId: String): Flow<List<SaleEntity>> =
         saleDao.getSalesForCustomer(customerId)
+
+    suspend fun updateShopExpense(
+        id: String,
+        amountPaise: Long,
+        category: String,
+        paymentMethod: String,
+        notes: String?,
+        timestamp: Long,
+        attachmentUri: String? = null
+    ): Boolean = db.withTransaction {
+        val existing = expenseDao.getExpenseById(id) ?: return@withTransaction false
+        val updated = existing.copy(
+            amountPaise = amountPaise,
+            category = category,
+            paymentMethod = paymentMethod,
+            notes = notes,
+            timestamp = timestamp,
+            attachmentUri = attachmentUri ?: existing.attachmentUri
+        )
+        expenseDao.updateExpense(updated)
+        val payload = org.json.JSONObject().apply {
+            put("action", "UPDATE_EXPENSE")
+            put("expenseId", id)
+            put("oldAmountPaise", existing.amountPaise)
+            put("newAmountPaise", amountPaise)
+            put("oldCategory", existing.category)
+            put("newCategory", category)
+            put("oldPaymentMethod", existing.paymentMethod)
+            put("newPaymentMethod", paymentMethod)
+            put("oldNotes", existing.notes ?: "")
+            put("newNotes", notes ?: "")
+            put("oldTimestamp", existing.timestamp)
+            put("newTimestamp", timestamp)
+        }.toString()
+        val event = SyncEventEntity(
+            eventType = "EXPENSE_UPDATED",
+            entityId = id,
+            payloadJson = payload,
+            originDeviceId = "DEVICE",
+            status = "ACKNOWLEDGED",
+            timestamp = System.currentTimeMillis()
+        )
+        syncEventDao.insertEvent(event)
+        true
+    }
+
+    suspend fun voidShopExpense(id: String, reason: String): Boolean = db.withTransaction {
+        expenseDao.voidExpense(id, reason)
+        pigmyDepositDao.voidByLinkedExpenseId(id, reason)
+        pigmyWithdrawalDao.voidByLinkedExpenseId(id, reason)
+        true
+    }
+
+    suspend fun getNoteSuggestions(isIncome: Boolean, query: String = ""): List<String> {
+        val raw = expenseDao.getRecentRawNotes(isIncome)
+        val cleanQuery = query.trim().lowercase()
+        val seen = mutableSetOf<String>()
+        val result = mutableListOf<String>()
+        for (note in raw) {
+            val trimmed = note.trim()
+            val lower = trimmed.lowercase()
+            if (lower.isNotEmpty() && !seen.contains(lower)) {
+                seen.add(lower)
+                if (cleanQuery.isEmpty() || lower.contains(cleanQuery)) {
+                    result.add(trimmed)
+                    if (result.size >= 8) break
+                }
+            }
+        }
+        return result
+    }
+
+    suspend fun generateAndRegisterBarcode(
+        productId: String,
+        unitType: String = "PIECE",
+        packQty: Int = 1
+    ): ProductBarcodeEntity = db.withTransaction {
+        val product = productDao.getProductById(productId)
+            ?: throw IllegalArgumentException("Product $productId not found")
+
+        val code = barcodeGeneratorService.createBarcodePayload(productId, unitType, packQty)
+        val existing = productBarcodeDao.findByBarcode(code)
+        if (existing != null) {
+            return@withTransaction existing
+        }
+
+        val entity = ProductBarcodeEntity(
+            barcode = code,
+            productId = productId,
+            unitType = unitType,
+            packQuantity = if (unitType == "PACK") packQty else 1
+        )
+        productBarcodeDao.insertBarcode(entity)
+
+        if (product.barcode.isNullOrBlank() && unitType == "PIECE") {
+            productDao.updateProduct(product.copy(barcode = code, updatedAt = System.currentTimeMillis()))
+        }
+
+        entity
+    }
 
     suspend fun recordShopExpense(
         category: String,

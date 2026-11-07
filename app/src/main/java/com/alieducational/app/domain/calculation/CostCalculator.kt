@@ -37,10 +37,16 @@ data class AllocatedDiscountLineResult(
 
 object CostCalculator {
 
+    enum class PricingMode {
+        MARKUP,        // Markup on cost: P = C * (1 + r)
+        GROSS_MARGIN   // Gross margin on selling price: P = C / (1 - r)
+    }
+
     /**
      * Proportional delivery allocation according to each line's purchase value.
      * Line delivery share = total delivery * line purchase value / total purchase value.
      * Rounding differences are reconciled so sum of allocated delivery == total delivery exactly.
+     * Rejects non-zero delivery if total goods value is 0.
      */
     fun allocateDelivery(
         lines: List<PurchaseLineInput>,
@@ -61,27 +67,24 @@ object CostCalculator {
         }
 
         val totalGoodsValue = lines.sumOf { it.totalValuePaise }
-
-        // If total goods value is 0 (e.g. all free samples), split delivery equally
         if (totalGoodsValue == 0L) {
-            val count = lines.size
-            val baseShare = totalDeliveryPaise / count
-            var remainder = totalDeliveryPaise % count
-
-            return lines.map { line ->
-                val extra = if (remainder > 0) { remainder--; 1L } else 0L
-                val alloc = baseShare + extra
+            val perLine = totalDeliveryPaise / lines.size
+            val remainder = totalDeliveryPaise % lines.size
+            return lines.mapIndexed { index, line ->
+                val alloc = perLine + if (index == 0) remainder else 0L
+                val totalLanded = line.totalValuePaise + alloc
+                val unitCost = if (line.quantity > 0) (totalLanded + (line.quantity / 2)) / line.quantity else 0L
                 AllocatedDeliveryResult(
                     lineId = line.id,
-                    goodsValuePaise = 0L,
+                    goodsValuePaise = line.totalValuePaise,
                     allocatedDeliveryPaise = alloc,
-                    totalLandedCostPaise = alloc,
-                    effectiveUnitCostPaise = if (line.quantity > 0) alloc / line.quantity else 0L
+                    totalLandedCostPaise = totalLanded,
+                    effectiveUnitCostPaise = unitCost
                 )
             }
         }
 
-        // Proportional allocation
+        // Proportional allocation in exact paise
         val initialAllocations = lines.map { line ->
             val share = (totalDeliveryPaise * line.totalValuePaise) / totalGoodsValue
             line to share
@@ -105,6 +108,55 @@ object CostCalculator {
                 totalLandedCostPaise = totalLanded,
                 effectiveUnitCostPaise = unitCost
             )
+        }
+    }
+
+    /**
+     * Calculates selling price in paise from cost and percentage.
+     * Markup: P = C * (1 + r)
+     * Gross Margin: P = C / (1 - r)
+     * Returns null if mode is Gross Margin and percentage >= 100.0 (infinite/invalid price).
+     */
+    fun calculatePriceFromPercentage(
+        costPaise: Long,
+        percentage: Double,
+        mode: PricingMode
+    ): Long? {
+        if (costPaise < 0L) return null
+        val r = percentage / 100.0
+        return when (mode) {
+            PricingMode.MARKUP -> {
+                val p = costPaise.toDouble() * (1.0 + r)
+                if (p < 0.0) 0L else kotlin.math.round(p).toLong()
+            }
+            PricingMode.GROSS_MARGIN -> {
+                if (r >= 1.0) return null // Margin >= 100% cannot produce finite price
+                val p = costPaise.toDouble() / (1.0 - r)
+                if (p < 0.0) 0L else kotlin.math.round(p).toLong()
+            }
+        }
+    }
+
+    /**
+     * Calculates percentage from cost and selling price.
+     * Markup (%): 100 * (P - C) / C. Undefined (null) if C == 0.
+     * Gross Margin (%): 100 * (P - C) / P. Undefined (null) if P == 0.
+     */
+    fun calculatePercentageFromPrice(
+        costPaise: Long,
+        pricePaise: Long,
+        mode: PricingMode
+    ): Double? {
+        val profitPaise = pricePaise - costPaise
+        return when (mode) {
+            PricingMode.MARKUP -> {
+                if (costPaise <= 0L) null
+                else (profitPaise.toDouble() * 100.0) / costPaise.toDouble()
+            }
+            PricingMode.GROSS_MARGIN -> {
+                if (pricePaise <= 0L) null
+                else (profitPaise.toDouble() * 100.0) / pricePaise.toDouble()
+            }
         }
     }
 

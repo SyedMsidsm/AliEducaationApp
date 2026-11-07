@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -100,6 +101,27 @@ fun BackupRestoreScreen(
             viewModel.exportBackupToUri(pendingFileToSave!!, uri)
         }
         pendingFileToSave = null
+    }
+
+    val driveFolderUri by viewModel.googleDriveFolderUri.collectAsState()
+    val driveFolderName by viewModel.googleDriveFolderName.collectAsState()
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // Ignore if not grantable
+            }
+            val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)
+            val folderName = docFile?.name ?: "Google Drive / External Folder"
+            viewModel.setGoogleDriveFolder(uri.toString(), folderName)
+        }
     }
 
     val restoreFilePicker = rememberLauncherForActivityResult(
@@ -256,15 +278,61 @@ fun BackupRestoreScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Primary Save Both Button
+                            // ── CONNECTED GOOGLE DRIVE FOLDER (Section 10) ────────
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (driveFolderUri.isNotBlank()) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            if (driveFolderUri.isNotBlank()) Icons.Filled.CheckCircle else Icons.Filled.Folder,
+                                            contentDescription = null,
+                                            tint = if (driveFolderUri.isNotBlank()) positiveColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = if (driveFolderUri.isNotBlank()) "Drive: $driveFolderName" else "Google Drive Destination",
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (driveFolderUri.isNotBlank()) "One-tap backup destination active" else "Connect folder once for one-tap backup",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    TextButton(
+                                        onClick = { folderPickerLauncher.launch(null) }
+                                    ) {
+                                        Text(if (driveFolderUri.isNotBlank()) "Change" else "Connect", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Primary One-Tap Backup & Save Button (Section 10)
                             Button(
                                 onClick = {
-                                    val target = latestBackup ?: return@Button
-                                    val f = File(target.packageFilePath ?: target.filePath)
-                                    pendingFileToSave = f
-                                    saveToDriveLauncher.launch(f.name)
+                                    viewModel.createBackup()
                                 },
-                                enabled = hasBackup && !isCreatingBackup,
+                                enabled = !isCreatingBackup,
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -274,7 +342,11 @@ fun BackupRestoreScreen(
                             ) {
                                 Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Save Both to Drive / Files", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(
+                                    text = if (driveFolderUri.isNotBlank()) "One-Tap Backup (Phone + Drive)" else "Create Backup Now",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))

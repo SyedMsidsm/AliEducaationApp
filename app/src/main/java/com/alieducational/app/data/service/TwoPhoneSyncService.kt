@@ -2,14 +2,18 @@ package com.alieducational.app.data.service
 
 import android.content.Context
 import android.net.wifi.WifiManager
+import androidx.room.withTransaction
+import com.alieducational.app.data.local.AppDatabase
 import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.SaleDao
 import com.alieducational.app.data.local.dao.ServiceDefinitionDao
 import com.alieducational.app.data.local.dao.StockMovementDao
+import com.alieducational.app.data.local.dao.SyncEventDao
 import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
+import com.alieducational.app.data.local.entity.SyncEventEntity
 import com.alieducational.app.data.preferences.AppPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -48,12 +52,14 @@ sealed class SyncConnectionState {
 @Singleton
 class TwoPhoneSyncService @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val db: AppDatabase,
     private val preferences: AppPreferences,
     private val productDao: ProductDao,
     private val serviceDao: ServiceDefinitionDao,
     private val saleDao: SaleDao,
     private val customerDao: CustomerDao,
-    private val stockMovementDao: StockMovementDao
+    private val stockMovementDao: StockMovementDao,
+    private val syncEventDao: SyncEventDao
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var serverSocket: ServerSocket? = null
@@ -140,14 +146,38 @@ class TwoPhoneSyncService @Inject constructor(
             val method = parts[0]
             val path = parts[1]
 
-            // Read headers to get content length if POST
+            // Read headers to get content length and authorization
             var contentLength = 0
+            var authHeader: String? = null
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 if (line.isNullOrBlank()) break
-                if (line!!.lowercase().startsWith("content-length:")) {
-                    contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
+                val l = line!!.trim()
+                if (l.lowercase().startsWith("content-length:")) {
+                    contentLength = l.substringAfter(":").trim().toIntOrNull() ?: 0
+                } else if (l.lowercase().startsWith("authorization:")) {
+                    authHeader = l.substringAfter(":").trim()
                 }
+            }
+
+            // Secure authenticated endpoints (A01):
+            val requiredToken = preferences.syncToken.first()
+            val providedToken = authHeader?.removePrefix("Bearer ")?.trim()
+
+            if (providedToken.isNullOrEmpty() || providedToken != requiredToken) {
+                val errJson = JSONObject().apply {
+                    put("status", "UNAUTHORIZED")
+                    put("message", "Invalid or missing Bearer authorization token.")
+                }.toString().toByteArray(Charsets.UTF_8)
+
+                writer.write("HTTP/1.1 401 Unauthorized\r\n")
+                writer.write("Content-Type: application/json; charset=utf-8\r\n")
+                writer.write("Content-Length: ${errJson.size}\r\n")
+                writer.write("\r\n")
+                writer.flush()
+                socket.getOutputStream().write(errJson)
+                socket.getOutputStream().flush()
+                return@withContext
             }
 
             if (method == "GET" && path.startsWith("/api/catalog")) {
@@ -208,121 +238,139 @@ class TwoPhoneSyncService @Inject constructor(
 
                 val acknowledgedIds = JSONArray()
 
-                for (i in 0 until billsArray.length()) {
-                    val billObj = billsArray.getJSONObject(i)
-                    val saleId = billObj.getString("id")
+                // A03: Atomically commit incoming sales, stock, and customer ledgers in one Room transaction
+                db.withTransaction {
+                    for (i in 0 until billsArray.length()) {
+                        val billObj = billsArray.getJSONObject(i)
+                        val saleId = billObj.getString("id")
 
-                    // Deduplicate: check if already committed
-                    val existingSale = saleDao.getSaleById(saleId)
-                    if (existingSale == null) {
-                        val receiptNumber = billObj.getString("receiptNumber")
-                        val customerId = billObj.optString("customerId").ifBlank { null }
-                        val customerName = billObj.optString("customerName").ifBlank { null }
-                        val grossTotal = billObj.getLong("grossTotalPaise")
-                        val discountType = billObj.getString("discountType")
-                        val discountValue = billObj.getLong("discountValuePaise")
-                        val discountPercent = billObj.optDouble("discountPercent", 0.0)
-                        val netTotal = billObj.getLong("netTotalPaise")
-                        val amountReceived = billObj.getLong("amountReceivedPaise")
-                        val changeGiven = billObj.optLong("changeGivenPaise", 0L)
-                        val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
-                        val paymentMethod = billObj.getString("paymentMethod")
-                        val timestamp = billObj.getLong("timestamp")
-                        val originDevice = billObj.optString("originDeviceId", "device-billing")
+                        // Deduplicate: check if already committed
+                        val existingSale = saleDao.getSaleById(saleId)
+                        if (existingSale == null) {
+                            val receiptNumber = billObj.getString("receiptNumber")
+                            val customerId = billObj.optString("customerId").ifBlank { null }
+                            val customerName = billObj.optString("customerName").ifBlank { null }
+                            val grossTotal = billObj.getLong("grossTotalPaise")
+                            val discountType = billObj.getString("discountType")
+                            val discountValue = billObj.getLong("discountValuePaise")
+                            val discountPercent = billObj.optDouble("discountPercent", 0.0)
+                            val netTotal = billObj.getLong("netTotalPaise")
+                            val amountReceived = billObj.getLong("amountReceivedPaise")
+                            val changeGiven = billObj.optLong("changeGivenPaise", 0L)
+                            val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
+                            val paymentMethod = billObj.getString("paymentMethod")
+                            val timestamp = billObj.getLong("timestamp")
+                            val originDevice = billObj.optString("originDeviceId", "device-billing")
 
-                        val sale = SaleEntity(
-                            id = saleId,
-                            receiptNumber = receiptNumber,
-                            customerId = customerId,
-                            customerName = customerName,
-                            grossTotalPaise = grossTotal,
-                            discountType = discountType,
-                            discountValuePaise = discountValue,
-                            discountPercent = discountPercent,
-                            netTotalPaise = netTotal,
-                            amountReceivedPaise = amountReceived,
-                            changeGivenPaise = changeGiven,
-                            remainingCreditPaise = remainingCredit,
-                            paymentMethod = paymentMethod,
-                            isSummaryEntry = false,
-                            unresolvedStockDetails = false,
-                            originDeviceId = originDevice,
-                            syncStatus = "SYNCED",
-                            timestamp = timestamp
-                        )
-                        saleDao.insertSale(sale)
-
-                        // Insert lines and adjust stock
-                        val linesArray = billObj.getJSONArray("lines")
-                        val saleLines = mutableListOf<SaleLineEntity>()
-                        for (j in 0 until linesArray.length()) {
-                            val lineObj = linesArray.getJSONObject(j)
-                            val lineType = lineObj.optString("lineType", "PRODUCT")
-                            val productId = lineObj.optString("productId").ifBlank { null }
-                            val productName = lineObj.getString("productName")
-                            val qtyBase = lineObj.getInt("quantityBase")
-                            val isPack = lineObj.optBoolean("isPack", false)
-                            val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
-                            val lineGross = lineObj.getLong("lineGrossPaise")
-                            val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
-                            val lineNet = lineObj.getLong("lineNetPaise")
-
-                            // Owner phone looks up product moving average cost snapshot
-                            val costSnapshot = if (lineType == "PRODUCT" && productId != null) {
-                                val p = productDao.getProductById(productId)
-                                p?.movingAvgCostPaise
-                            } else null
-
-                            val lineProfit = if (costSnapshot != null) {
-                                lineNet - (qtyBase * costSnapshot)
-                            } else null
-
-                            val line = SaleLineEntity(
-                                id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                saleId = saleId,
-                                productId = productId,
-                                productName = productName,
-                                quantityBase = qtyBase,
-                                isPack = isPack,
-                                unitSellingPricePaise = unitSellingPrice,
-                                unitCostSnapshotPaise = costSnapshot,
-                                lineGrossPaise = lineGross,
-                                lineDiscountAllocatedPaise = lineDiscount,
-                                lineNetPaise = lineNet,
-                                lineProfitPaise = lineProfit,
-                                lineType = lineType,
-                                serviceId = lineObj.optString("serviceId").ifBlank { null },
-                                serviceName = lineObj.optString("serviceName").ifBlank { null },
-                                serviceOption = lineObj.optString("serviceOption").ifBlank { null },
-                                unitLabel = lineObj.optString("unitLabel").ifBlank { null }
+                            val sale = SaleEntity(
+                                id = saleId,
+                                receiptNumber = receiptNumber,
+                                customerId = customerId,
+                                customerName = customerName,
+                                grossTotalPaise = grossTotal,
+                                discountType = discountType,
+                                discountValuePaise = discountValue,
+                                discountPercent = discountPercent,
+                                netTotalPaise = netTotal,
+                                amountReceivedPaise = amountReceived,
+                                changeGivenPaise = changeGiven,
+                                remainingCreditPaise = remainingCredit,
+                                paymentMethod = paymentMethod,
+                                isSummaryEntry = false,
+                                unresolvedStockDetails = false,
+                                originDeviceId = originDevice,
+                                syncStatus = "SYNCED",
+                                timestamp = timestamp
                             )
-                            saleLines.add(line)
+                            saleDao.insertSale(sale)
 
-                            // Deduct stock for product lines
-                            if (lineType == "PRODUCT" && productId != null) {
-                                productDao.adjustSellableStock(productId, -qtyBase)
-                                val product = productDao.getProductById(productId)
-                                stockMovementDao.insertMovement(
-                                    StockMovementEntity(
-                                        productId = productId,
-                                        type = "SALE",
-                                        quantityChangeBase = -qtyBase,
-                                        unitCostPaise = product?.movingAvgCostPaise ?: 0L,
-                                        reason = "Synced Bill $receiptNumber",
-                                        referenceId = saleId
-                                    )
+                            // Insert lines and adjust stock
+                            val linesArray = billObj.getJSONArray("lines")
+                            val saleLines = mutableListOf<SaleLineEntity>()
+                            for (j in 0 until linesArray.length()) {
+                                val lineObj = linesArray.getJSONObject(j)
+                                val lineType = lineObj.optString("lineType", "PRODUCT")
+                                val productId = lineObj.optString("productId").ifBlank { null }
+                                val productName = lineObj.getString("productName")
+                                val qtyBase = lineObj.getInt("quantityBase")
+                                val isPack = lineObj.optBoolean("isPack", false)
+                                val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
+                                val lineGross = lineObj.getLong("lineGrossPaise")
+                                val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
+                                val lineNet = lineObj.getLong("lineNetPaise")
+
+                                // Preserve valid sale-time cost snapshot if present; otherwise resolve from Owner DB (A07)
+                                val costSnapshot = if (lineObj.has("unitCostSnapshotPaise") && !lineObj.isNull("unitCostSnapshotPaise")) {
+                                    lineObj.getLong("unitCostSnapshotPaise")
+                                } else if (lineType == "PRODUCT" && productId != null) {
+                                    val p = productDao.getProductById(productId)
+                                    p?.movingAvgCostPaise
+                                } else null
+
+                                val lineProfit = if (costSnapshot != null) {
+                                    lineNet - (qtyBase * costSnapshot)
+                                } else null
+
+                                val line = SaleLineEntity(
+                                    id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                    saleId = saleId,
+                                    productId = productId,
+                                    productName = productName,
+                                    quantityBase = qtyBase,
+                                    isPack = isPack,
+                                    unitSellingPricePaise = unitSellingPrice,
+                                    unitCostSnapshotPaise = costSnapshot,
+                                    lineGrossPaise = lineGross,
+                                    lineDiscountAllocatedPaise = lineDiscount,
+                                    lineNetPaise = lineNet,
+                                    lineProfitPaise = lineProfit,
+                                    lineType = lineType,
+                                    serviceId = lineObj.optString("serviceId").ifBlank { null },
+                                    serviceName = lineObj.optString("serviceName").ifBlank { null },
+                                    serviceOption = lineObj.optString("serviceOption").ifBlank { null },
+                                    unitLabel = lineObj.optString("unitLabel").ifBlank { null }
                                 )
+                                saleLines.add(line)
+
+                                // Deduct stock for product lines
+                                if (lineType == "PRODUCT" && productId != null) {
+                                    productDao.adjustSellableStock(productId, -qtyBase)
+                                    val product = productDao.getProductById(productId)
+                                    stockMovementDao.insertMovement(
+                                        StockMovementEntity(
+                                            productId = productId,
+                                            type = "SALE",
+                                            quantityChangeBase = -qtyBase,
+                                            unitCostPaise = product?.movingAvgCostPaise ?: 0L,
+                                            reason = "Synced Bill $receiptNumber",
+                                            referenceId = saleId
+                                        )
+                                    )
+                                }
                             }
-                        }
-                        saleDao.insertSaleLines(saleLines)
+                            saleDao.insertSaleLines(saleLines)
 
-                        // Customer debt adjustment if credit
-                        if (customerId != null && remainingCredit > 0) {
-                            customerDao.adjustBalance(customerId, remainingCredit)
+                            // Customer debt adjustment if credit
+                            if (customerId != null && remainingCredit > 0) {
+                                customerDao.adjustBalance(customerId, remainingCredit)
+                            }
+
+                            // Durable sync event entry (A03 / A09)
+                            syncEventDao.insertEvent(
+                                SyncEventEntity(
+                                    id = UUID.randomUUID().toString(),
+                                    eventType = "SYNC_BILL_INGESTION",
+                                    entityId = saleId,
+                                    payloadJson = billObj.toString(),
+                                    originDeviceId = originDevice,
+                                    status = "ACKNOWLEDGED",
+                                    timestamp = System.currentTimeMillis()
+                                )
+                            )
                         }
+
+                        acknowledgedIds.put(saleId)
                     }
-
-                    acknowledgedIds.put(saleId)
                 }
 
                 val responseRoot = JSONObject()
@@ -351,6 +399,7 @@ class TwoPhoneSyncService @Inject constructor(
 
     suspend fun syncWithMainPhone(ownerHost: String, port: Int = 8080): Boolean = withContext(Dispatchers.IO) {
         try {
+            val token = preferences.syncToken.first()
             _connectionState.value = SyncConnectionState.Syncing("Connecting to $ownerHost:$port...")
 
             // 1. Fetch latest catalog
@@ -359,6 +408,7 @@ class TwoPhoneSyncService @Inject constructor(
                 connectTimeout = 4000
                 readTimeout = 6000
                 requestMethod = "GET"
+                setRequestProperty("Authorization", "Bearer $token")
             }
 
             if (catalogConn.responseCode != 200) {
@@ -429,6 +479,7 @@ class TwoPhoneSyncService @Inject constructor(
                                 put("quantityBase", line.quantityBase)
                                 put("isPack", line.isPack)
                                 put("unitSellingPricePaise", line.unitSellingPricePaise)
+                                put("unitCostSnapshotPaise", line.unitCostSnapshotPaise ?: JSONObject.NULL)
                                 put("lineGrossPaise", line.lineGrossPaise)
                                 put("lineDiscountAllocatedPaise", line.lineDiscountAllocatedPaise)
                                 put("lineNetPaise", line.lineNetPaise)
@@ -451,6 +502,7 @@ class TwoPhoneSyncService @Inject constructor(
                     requestMethod = "POST"
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Authorization", "Bearer $token")
                 }
 
                 val bodyBytes = billsArray.toString().toByteArray(Charsets.UTF_8)

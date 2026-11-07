@@ -146,6 +146,27 @@ class AliViewModel @Inject constructor(
         .combine(preferences.isFirstLaunch) { mode, _ -> mode == "dark" }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val appTextSize: StateFlow<String> = preferences.appTextSize
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Default")
+
+    fun setAppTextSize(size: String) {
+        viewModelScope.launch { preferences.setAppTextSize(size) }
+    }
+
+    val googleDriveFolderUri: StateFlow<String> = preferences.googleDriveFolderUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    val googleDriveFolderName: StateFlow<String> = preferences.googleDriveFolderName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    fun setGoogleDriveFolder(uri: String, name: String) {
+        viewModelScope.launch { preferences.setGoogleDriveFolder(uri, name) }
+    }
+
+    fun clearGoogleDriveFolder() {
+        viewModelScope.launch { preferences.clearGoogleDriveFolder() }
+    }
+
     val appLanguage: StateFlow<String> = preferences.appLanguage
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en")
 
@@ -532,6 +553,22 @@ class AliViewModel @Inject constructor(
         )
     }
 
+    fun lookupBarcode(barcode: String, onResult: (ProductEntity?, String?, Int?) -> Unit) {
+        val code = barcode.trim()
+        if (code.isEmpty()) {
+            onResult(null, null, null)
+            return
+        }
+        viewModelScope.launch {
+            val result = repository.lookupBarcode(code)
+            if (result != null) {
+                onResult(result.product, result.unitType, result.packQuantity)
+            } else {
+                onResult(null, null, null)
+            }
+        }
+    }
+
     fun handleScannedBarcode(barcode: String, onUnknown: (String) -> Unit = {}) {
         val code = barcode.trim()
         if (code.isEmpty()) return
@@ -881,6 +918,53 @@ class AliViewModel @Inject constructor(
         viewModelScope.launch {
             repository.recordDailyMonetaryTotal(dateTimestamp, amountPaise, isFullDayTotal, notes)
             onDone()
+        }
+    }
+
+    fun updateShopExpense(
+        id: String,
+        amountPaise: Long,
+        category: String,
+        paymentMethod: String,
+        notes: String?,
+        timestamp: Long,
+        attachmentUri: String? = null,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.updateShopExpense(
+                id = id,
+                amountPaise = amountPaise,
+                category = category,
+                paymentMethod = paymentMethod,
+                notes = notes,
+                timestamp = timestamp,
+                attachmentUri = attachmentUri
+            )
+            onDone()
+        }
+    }
+
+    fun voidShopExpense(id: String, reason: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.voidShopExpense(id, reason)
+            onDone()
+        }
+    }
+
+    suspend fun getNoteSuggestions(isIncome: Boolean, query: String = ""): List<String> {
+        return repository.getNoteSuggestions(isIncome, query)
+    }
+
+    fun generateShopBarcode(
+        productId: String,
+        unitType: String = "PIECE",
+        packQty: Int = 1,
+        onResult: (com.alieducational.app.data.local.entity.ProductBarcodeEntity) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val entity = repository.generateAndRegisterBarcode(productId, unitType, packQty)
+            onResult(entity)
         }
     }
 

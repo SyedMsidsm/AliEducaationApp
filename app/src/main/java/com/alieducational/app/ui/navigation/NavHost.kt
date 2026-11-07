@@ -2,6 +2,26 @@ package com.alieducational.app.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -276,10 +296,18 @@ fun AppNavigation(
         }
 
         composable(Screen.ProfitAnalysis.route) {
-            ProfitScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            val deviceRole by viewModel.deviceRole.collectAsState()
+            if (deviceRole.uppercase() == "BILLING") {
+                OwnerPermissionDeniedScreen(
+                    title = "Profit Analysis",
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            } else {
+                ProfitScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.Expenses.route) {
@@ -297,10 +325,18 @@ fun AppNavigation(
         }
 
         composable(Screen.BackupRestore.route) {
-            BackupRestoreScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            val deviceRole by viewModel.deviceRole.collectAsState()
+            if (deviceRole.uppercase() == "BILLING") {
+                OwnerPermissionDeniedScreen(
+                    title = "Backup & Restore",
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            } else {
+                BackupRestoreScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.PigmySavings.route) {
@@ -315,6 +351,48 @@ fun AppNavigation(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+        }
+    }
+}
+@Composable
+fun OwnerPermissionDeniedScreen(
+    title: String,
+    onNavigateBack: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Owner Access Required",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "$title is restricted to the Owner device. Switch this device to Owner role in Settings with PIN to access.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(onClick = onNavigateBack) {
+                Text("Go Back")
+            }
         }
     }
 }

@@ -47,6 +47,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             val viewModel: AliViewModel = hiltViewModel()
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+            val appTextSize by viewModel.appTextSize.collectAsState()
             val appLanguage by viewModel.appLanguage.collectAsState()
             val isFirstLaunch by viewModel.isFirstLaunch.collectAsState()
             val isLockEnabled by viewModel.isLockEnabled.collectAsState()
@@ -54,7 +55,7 @@ class MainActivity : FragmentActivity() {
             val layoutDirection = LayoutDirection.Ltr
 
             CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-                AliEducationalTheme(darkTheme = isDarkTheme) {
+                AliEducationalTheme(darkTheme = isDarkTheme, appTextSize = appTextSize) {
                     val navController = rememberNavController()
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
                     val currentRoute = navBackStackEntry?.destination?.route

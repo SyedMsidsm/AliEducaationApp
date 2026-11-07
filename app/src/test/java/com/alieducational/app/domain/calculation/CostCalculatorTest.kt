@@ -157,4 +157,43 @@ class CostCalculatorTest {
         // 123456 pieces -> 1,23,456 pcs
         assertEquals("1,23,456 pcs", CostCalculator.formatQuantityWithGrouping(123456, "pcs"))
     }
+
+    @Test
+    fun testGrossMarginAndMarkupCalculations_Section8() {
+        val costPaise = 10000L // ₹100.00
+
+        // 1. Markup 20% -> P = 100 * (1 + 0.20) = ₹120.00
+        val markupPrice = CostCalculator.calculatePriceFromPercentage(costPaise, 20.0, CostCalculator.PricingMode.MARKUP)
+        assertEquals(12000L, markupPrice)
+
+        // 2. Gross Margin 20% -> P = 100 / (1 - 0.20) = ₹125.00
+        val marginPrice = CostCalculator.calculatePriceFromPercentage(costPaise, 20.0, CostCalculator.PricingMode.GROSS_MARGIN)
+        assertEquals(12500L, marginPrice)
+
+        // 3. Percentage from Price: Cost ₹100, Selling ₹125 -> Markup 25%, Gross Margin 20%
+        val markupPct = CostCalculator.calculatePercentageFromPrice(costPaise, 12500L, CostCalculator.PricingMode.MARKUP)
+        assertEquals(25.0, markupPct!!, 0.001)
+
+        val marginPct = CostCalculator.calculatePercentageFromPrice(costPaise, 12500L, CostCalculator.PricingMode.GROSS_MARGIN)
+        assertEquals(20.0, marginPct!!, 0.001)
+
+        // 4. Invalid margin >= 100% returns null
+        assertNull(CostCalculator.calculatePriceFromPercentage(costPaise, 100.0, CostCalculator.PricingMode.GROSS_MARGIN))
+        assertNull(CostCalculator.calculatePriceFromPercentage(costPaise, 120.0, CostCalculator.PricingMode.GROSS_MARGIN))
+    }
+
+    @Test
+    fun testTransportProportionalAllocation_Section7() {
+        // Section 7 example: goods A ₹600 and B ₹400, transport ₹100 -> shares ₹60 and ₹40
+        val lines = listOf(
+            PurchaseLineInput(id = "item_A", quantity = 1, unitPricePaise = 60000L),
+            PurchaseLineInput(id = "item_B", quantity = 1, unitPricePaise = 40000L)
+        )
+        val results = CostCalculator.allocateDelivery(lines, totalDeliveryPaise = 10000L)
+        assertEquals(6000L, results[0].allocatedDeliveryPaise)
+        assertEquals(4000L, results[1].allocatedDeliveryPaise)
+        assertEquals(66000L, results[0].totalLandedCostPaise)
+        assertEquals(44000L, results[1].totalLandedCostPaise)
+        assertEquals(10000L, results.sumOf { it.allocatedDeliveryPaise })
+    }
 }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import com.alieducational.app.data.local.AppDatabase
 import com.alieducational.app.data.preferences.AppPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -255,6 +256,12 @@ class BackupRestoreService @Inject constructor(
             }
         } catch (_: Exception) {}
 
+        // 7. If connected Google Drive / external folder URI is configured, auto-export
+        val connectedFolderUri = preferences.googleDriveFolderUri.first()
+        if (connectedFolderUri.isNotBlank()) {
+            saveBackupToConnectedFolder(packageFile, connectedFolderUri)
+        }
+
         preferences.setLastBackupTime(timestamp)
 
         return@withContext BackupMetadata(
@@ -276,6 +283,36 @@ class BackupRestoreService @Inject constructor(
             cashInOutCount = cashExpenses.size,
             pigmyCount = pigmyDeposits.size + pigmyWithdrawals.size
         )
+    }
+
+    suspend fun saveBackupToConnectedFolder(packageFile: File, treeUriStr: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            if (treeUriStr.isBlank()) {
+                return@withContext Pair(false, "No Google Drive or external backup folder connected")
+            }
+            val treeUri = Uri.parse(treeUriStr)
+            val docFolder = DocumentFile.fromTreeUri(context, treeUri)
+                ?: return@withContext Pair(false, "Cannot open connected backup folder")
+            if (!docFolder.canWrite()) {
+                return@withContext Pair(false, "Folder write permission expired or revoked. Please reconnect folder.")
+            }
+
+            // Create or replace package file in connected folder
+            val targetDoc = docFolder.createFile("application/zip", packageFile.name)
+                ?: return@withContext Pair(false, "Failed to create backup in connected folder")
+
+            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                FileInputStream(packageFile).use { input ->
+                    input.copyTo(out)
+                }
+            } ?: return@withContext Pair(false, "Failed to open output stream to destination")
+
+            val destName = docFolder.name ?: "Connected Folder"
+            preferences.setLastExternalSave(System.currentTimeMillis(), destName)
+            Pair(true, "Successfully saved to $destName")
+        } catch (e: Exception) {
+            Pair(false, "External save error: ${e.localizedMessage ?: "Unknown error"}")
+        }
     }
 
     suspend fun getAvailableBackups(): List<BackupMetadata> = withContext(Dispatchers.IO) {
@@ -385,80 +422,127 @@ class BackupRestoreService @Inject constructor(
         }
     }
 
+    /**
+     * Staged and validated restore (A04):
+     * 1. Extracts to an isolated staging directory.
+     * 2. Runs SQLite PRAGMA integrity_check and checks required tables on the staged database.
+     * 3. Creates a pre-restore safety copy of the live database.
+     * 4. Safely closes active Room DB and replaces live database and attachments.
+     */
     suspend fun restoreBackup(backupFile: File): Boolean = withContext(Dispatchers.IO) {
         val destDbFile = context.getDatabasePath("ali_educational.db")
+        val stagingDir = File(context.cacheDir, "staged_restore_${System.currentTimeMillis()}")
+        if (!stagingDir.exists()) stagingDir.mkdirs()
 
-        // 1. Safety backup of current database before restoring
-        if (destDbFile.exists()) {
-            val safetyDir = File(context.cacheDir, "pre_restore_safety")
-            if (!safetyDir.exists()) safetyDir.mkdirs()
-            val safetyBackup = File(safetyDir, "safety_${System.currentTimeMillis()}.db")
-            destDbFile.copyTo(safetyBackup, overwrite = true)
-        }
-
-        // 2. Check if selected file is the outer package containing Complete_Backup.zip
-        var sourceArchive = backupFile
-        var isTempStaged = false
-
-        ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
-            var entry: ZipEntry?
-            while (zipIn.nextEntry.also { entry = it } != null) {
-                val name = entry!!.name
-                if (name == "Complete_Backup.zip" || name.startsWith("Ali_Educational_Complete_Backup_")) {
-                    val staged = File(context.cacheDir, "staged_complete_backup.zip")
-                    FileOutputStream(staged).use { out -> zipIn.copyTo(out) }
-                    sourceArchive = staged
-                    isTempStaged = true
-                    break
-                }
-                zipIn.closeEntry()
-            }
-        }
-
-        // 3. Restore from sourceArchive (with strict zip-slip protection)
-        var restoredDb = false
         try {
-            ZipInputStream(FileInputStream(sourceArchive)).use { zipIn ->
+            var stagedDbFile: File? = null
+            val stagedAttachments = mutableListOf<File>()
+
+            // Check if selected file is the outer package containing Complete_Backup.zip
+            var archiveToRead = backupFile
+
+            ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
+                var entry: ZipEntry?
+                while (zipIn.nextEntry.also { entry = it } != null) {
+                    val name = entry!!.name
+                    if (name == "Complete_Backup.zip" || name.startsWith("Ali_Educational_Complete_Backup_")) {
+                        val nestedZip = File(stagingDir, "nested_complete_backup.zip")
+                        FileOutputStream(nestedZip).use { out -> zipIn.copyTo(out) }
+                        archiveToRead = nestedZip
+                        break
+                    }
+                    zipIn.closeEntry()
+                }
+            }
+
+            // Unpack archive to staging directory with strict zip-slip validation
+            ZipInputStream(FileInputStream(archiveToRead)).use { zipIn ->
                 var entry: ZipEntry?
                 while (zipIn.nextEntry.also { entry = it } != null) {
                     val entryName = entry!!.name
-
-                    // Strict zip slip check
                     if (entryName.contains("..") || entryName.startsWith("/") || entryName.startsWith("\\")) {
                         throw SecurityException("Malicious path detected in archive entry: $entryName")
                     }
 
                     if (entryName == "ali_educational.db") {
-                        val tempDb = File(context.cacheDir, "restored_temp.db")
-                        FileOutputStream(tempDb).use { out -> zipIn.copyTo(out) }
-
-                        // Close DB and replace main DB file
-                        db.close()
-                        tempDb.copyTo(destDbFile, overwrite = true)
-                        tempDb.delete()
-
-                        // Remove existing WAL / SHM files if any
-                        File(destDbFile.parent, "ali_educational.db-wal").delete()
-                        File(destDbFile.parent, "ali_educational.db-shm").delete()
-
-                        restoredDb = true
+                        val outDb = File(stagingDir, "staged_ali_educational.db")
+                        FileOutputStream(outDb).use { out -> zipIn.copyTo(out) }
+                        stagedDbFile = outDb
                     } else if (entryName.startsWith("attachments/") && !entry!!.isDirectory) {
-                        val destDir = File(context.filesDir, "attachments")
-                        if (!destDir.exists()) destDir.mkdirs()
-                        val filename = File(entryName).name
-                        val destFile = File(destDir, filename)
-                        FileOutputStream(destFile).use { out -> zipIn.copyTo(out) }
+                        val attFile = File(stagingDir, File(entryName).name)
+                        FileOutputStream(attFile).use { out -> zipIn.copyTo(out) }
+                        stagedAttachments.add(attFile)
                     }
                     zipIn.closeEntry()
                 }
             }
-        } finally {
-            if (isTempStaged) {
-                sourceArchive.delete()
-            }
-        }
 
-        return@withContext restoredDb
+            if (stagedDbFile == null || !stagedDbFile!!.exists() || stagedDbFile!!.length() == 0L) {
+                throw IllegalStateException("Archive does not contain a valid ali_educational.db database file.")
+            }
+
+            // Validate staged database integrity using SQLite PRAGMA integrity_check
+            val testDb = android.database.sqlite.SQLiteDatabase.openDatabase(
+                stagedDbFile!!.absolutePath,
+                null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+            try {
+                val cursor = testDb.rawQuery("PRAGMA integrity_check;", null)
+                var integrityOk = false
+                if (cursor.moveToFirst()) {
+                    val res = cursor.getString(0)
+                    integrityOk = (res.equals("ok", ignoreCase = true))
+                }
+                cursor.close()
+                if (!integrityOk) {
+                    throw IllegalStateException("SQLite PRAGMA integrity_check failed on staged backup.")
+                }
+
+                val tableCursor = testDb.rawQuery("SELECT name FROM sqlite_master WHERE type='table';", null)
+                val tables = mutableSetOf<String>()
+                while (tableCursor.moveToNext()) {
+                    tables.add(tableCursor.getString(0))
+                }
+                tableCursor.close()
+
+                val requiredTables = listOf("products", "sales", "suppliers", "customers", "shop_expenses")
+                val missing = requiredTables.filter { !tables.contains(it) }
+                if (missing.isNotEmpty()) {
+                    throw IllegalStateException("Backup database missing essential tables: $missing")
+                }
+            } finally {
+                testDb.close()
+            }
+
+            // Take pre-restore safety copy of live database
+            if (destDbFile.exists()) {
+                val safetyDir = File(context.filesDir, "pre_restore_safety")
+                if (!safetyDir.exists()) safetyDir.mkdirs()
+                val safetyBackup = File(safetyDir, "safety_live_${System.currentTimeMillis()}.db")
+                destDbFile.copyTo(safetyBackup, overwrite = true)
+            }
+
+            // Close active Room DB and replace
+            db.close()
+            stagedDbFile!!.copyTo(destDbFile, overwrite = true)
+
+            // Remove existing WAL / SHM files if any
+            File(destDbFile.parent, "ali_educational.db-wal").delete()
+            File(destDbFile.parent, "ali_educational.db-shm").delete()
+            File(destDbFile.parent, "ali_educational.db-journal").delete()
+
+            // Copy attachments
+            val destAttDir = File(context.filesDir, "attachments")
+            if (!destAttDir.exists()) destAttDir.mkdirs()
+            for (att in stagedAttachments) {
+                att.copyTo(File(destAttDir, att.name), overwrite = true)
+            }
+
+            return@withContext true
+        } finally {
+            stagingDir.deleteRecursively()
+        }
     }
 
     suspend fun restoreFromUri(uri: Uri): Boolean = withContext(Dispatchers.IO) {
