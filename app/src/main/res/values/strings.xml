@@ -1,0 +1,218 @@
+<resources>
+    <string name="app_name">Ali Educational</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_stock">Stock</string>
+    <string name="nav_billing">Billing</string>
+    <string name="nav_accounts">Accounts</string>
+    <string name="nav_more">More</string>
+
+    <string name="action_new_bill">New bill</string>
+    <string name="action_add_stock">Add stock</string>
+    <string name="action_remove_stock">Remove stock</string>
+    <string name="action_record_payment">Record payment</string>
+    <string name="action_record_sale">Record sale</string>
+
+    <string name="common_cancel">Cancel</string>
+
+    <string name="unlock_title">Ali Educational</string>
+    <string name="unlock_subtitle">Stationery Shop Management</string>
+    <string name="unlock_prompt">Confirm your fingerprint or device credential</string>
+    <string name="unlock_button">Unlock App</string>
+    <string name="unlock_failed">Authentication failed. Please try again.</string>
+    <string name="unlock_no_credential">No screen lock set on device. Please set a PIN or fingerprint in device settings.</string>
+
+    <string name="setup_welcome">Welcome to Ali Educational</string>
+    <string name="setup_title">Welcome to Ali Educational</string>
+    <string name="setup_continue">Continue</string>
+    <string name="setup_subtitle">Fast, offline stock &amp; accounts management</string>
+    <string name="setup_shop_name">Shop Name</string>
+    <string name="setup_default_shop_name">Ali Educational</string>
+    <string name="setup_select_language">Select Language</string>
+    <string name="setup_lang_english">English</string>
+    <string name="setup_lang_urdu">اردو (Urdu)</string>
+    <string name="setup_enable_lock">Enable App Lock (Fingerprint / PIN)</string>
+    <string name="setup_enable_lock_desc">Requires device fingerprint or PIN to open the app</string>
+    <string name="setup_get_started">Get Started</string>
+
+    <string name="stock_title">Stock</string>
+    <string name="accounts_title">Accounts</string>
+    <string name="more_title">More</string>
+    <string name="home_stock_value">Stock Value</string>
+    <string name="home_low_stock">Low Stock Items</string>
+    <string name="home_we_owe">We Owe Suppliers</string>
+    <string name="home_customers_owe">Customers Owe Us</string>
+    <string name="home_recent_activity">Recent Activity</string>
+    <string name="home_backup_status">Last backup: Never</string>
+    <string name="home_backup_now">Back up now</string>
+    <string name="home_stationery_subtitle">Stationery &amp; Education</string>
+    <string name="home_record_sale_desc">Quick item sale with discounts &amp; receipts</string>
+    <string name="home_no_activity">No stock activity recorded yet. Add your first stock to get started.</string>
+    <string name="home_stored_safely">Stored safely on this phone</string>
+    <string name="home_last_backup_prefix">Last backup: %1$s</string>
+    <string name="home_items_count">items %1$d</string>
+    <string name="home_reports_and_tools">Reports &amp; Tools</string>
+    <string name="home_profit_analysis">Gross Profit &amp; Margins</string>
+    <string name="home_backup_restore">Backup &amp; Restore</string>
+    <string name="home_settings">Settings</string>
+    <string name="home_expenses">Shop Expenses</string>
+
+    <!-- Billing Strings -->
+    <string name="billing_title">Billing</string>
+    <string name="billing_header_subtitle">Counter Sale</string>
+    <string name="billing_offline_badge">Offline</string>
+    <string name="billing_offline_ready">100% Offline</string>
+    <string name="billing_new_bill_title">New Bill</string>
+    <string name="billing_new_bill_desc">Scan or select items to create a counter sale</string>
+    <string name="billing_scan_barcode">Scan barcode</string>
+    <string name="billing_scan_with_camera">Scan with camera</string>
+    <string name="billing_search_placeholder">Search product name, brand, SKU...</string>
+    <string name="billing_filter_all">All</string>
+    <string name="billing_filter_favourites">Favourites</string>
+    <string name="billing_filter_category">Category</string>
+    <string name="billing_in_this_bill">In this bill</string>
+    <string name="billing_in_this_bill_title">In this bill</string>
+    <string name="billing_items_summary">%1$d items · %2$s</string>
+    <string name="billing_review_pill">Review %1$d items · %2$s →</string>
+    <string name="billing_review_action">Review %1$d items</string>
+    <string name="billing_add_btn">Add</string>
+    <string name="billing_add_again">Add again</string>
+    <string name="billing_undo">Undo</string>
+    <string name="billing_piece">Piece</string>
+    <string name="billing_pack">Pack</string>
+    <string name="billing_held_bills">Held bills</string>
+    <string name="billing_held_tag">held</string>
+    <string name="billing_hold_bill">Hold bill</string>
+    <string name="billing_resume">Resume</string>
+    <string name="billing_discard">Discard</string>
+    <string name="billing_no_items">No items in draft</string>
+    <string name="billing_no_items_desc">Scan a barcode, tap favourites, or search above to add items</string>
+    <string name="billing_stock_tag">Stock: %1$d</string>
+    <string name="billing_unknown_barcode_title">Unknown Barcode</string>
+    <string name="billing_unknown_barcode_desc">Barcode %1$s is not linked to any product.</string>
+    <string name="billing_link_existing">Link to Existing Product</string>
+    <string name="billing_create_new">Create New Product</string>
+
+    <!-- Scanner Strings -->
+    <string name="scanner_title">Scan Barcode</string>
+    <string name="scanner_guidance">Align product barcode within frame</string>
+    <string name="scanner_permission_needed">Camera permission is required to scan manufacturer barcodes.</string>
+    <string name="scanner_grant_permission">Grant Camera Permission</string>
+    <string name="scanner_torch">Flashlight</string>
+    <string name="scanner_added_label">Added</string>
+    <string name="scanner_undo">Undo</string>
+    <string name="scanner_debounce_hint">Hold barcode away to scan next item</string>
+    <string name="scanner_add_again">Add again</string>
+    <string name="scanner_view_bill">View bill</string>
+    <string name="scanner_no_barcode_fallback">No barcode? Search or browse items</string>
+    <string name="scanner_unknown_title">Unknown Barcode</string>
+    <string name="scanner_scanned_code">Scanned Code</string>
+    <string name="scanner_unknown_prompt">This barcode is not linked to any product. Would you like to link it now?</string>
+    <string name="scanner_select_product_to_link">Select product to link</string>
+    <string name="scanner_link_btn">Link Barcode</string>
+
+    <!-- Review Screen Strings -->
+    <string name="review_title">Review Bill</string>
+    <string name="review_customer">Customer</string>
+    <string name="review_walk_in">Walk-in Customer (Cash)</string>
+    <string name="review_select_customer">Select / Change Customer</string>
+    <string name="billing_existing_customer">Existing Customer</string>
+    <string name="billing_new_customer">+ New Customer</string>
+    <string name="billing_search_customer">Search name or phone...</string>
+    <string name="billing_customer_name">Customer Name *</string>
+    <string name="billing_customer_phone">Phone Number (Optional)</string>
+    <string name="billing_customer_notes">Address / Notes (Optional)</string>
+    <string name="billing_save_select_customer">Save &amp; Select Customer</string>
+    <string name="billing_customer_khata_due">Owes: %1$s</string>
+    <string name="billing_customer_khata_clear">Clear (₹0)</string>
+    <string name="review_items">Bill Items</string>
+    <string name="review_add_item">+ Scan or add another item</string>
+    <string name="review_subtotal">Subtotal</string>
+    <string name="review_discount">Discount</string>
+    <string name="review_add_discount">Add discount →</string>
+    <string name="review_remove_discount">Remove</string>
+    <string name="review_net_total">Net Bill Total</string>
+    <string name="review_notice">Stock reduces when the bill is saved. Items in this draft have not been deducted.</string>
+    <string name="review_continue_payment">Continue to payment →</string>
+    <string name="review_discount_title">Whole-Bill Discount</string>
+    <string name="review_discount_percent">Percentage (%)</string>
+    <string name="review_discount_fixed">Fixed Amount (₹)</string>
+    <string name="review_apply">Apply</string>
+    <string name="review_cancel">Cancel</string>
+
+    <!-- Payment Screen Strings -->
+    <string name="payment_title">Payment &amp; Change</string>
+    <string name="payment_summary">Bill Summary</string>
+    <string name="payment_method">Payment Method</string>
+    <string name="payment_cash">Cash</string>
+    <string name="payment_upi">UPI</string>
+    <string name="payment_credit">Customer Credit / Khata</string>
+    <string name="payment_other">Other</string>
+    <string name="payment_cash_received">Cash Received (₹)</string>
+    <string name="payment_exact">Exact</string>
+    <string name="payment_change_to_give">Change to give: %1$s</string>
+    <string name="payment_short_amount">Short by %1$s</string>
+    <string name="payment_treat_as_discount">Treat difference as discount</string>
+    <string name="payment_treat_as_credit">Add difference to customer khata</string>
+    <string name="payment_credit_req_customer">Customer account required for credit payment</string>
+    <string name="payment_receipt_action">Receipt after saving</string>
+    <string name="payment_action_none">No action (quick save)</string>
+    <string name="payment_action_preview">Preview receipt</string>
+    <string name="payment_action_print">Print receipt</string>
+    <string name="payment_action_share">Share on WhatsApp / PDF</string>
+    <string name="payment_save_bill">Save bill · %1$s</string>
+
+    <!-- Receipt Screen Strings -->
+    <string name="receipt_saved_title">Bill Saved Successfully!</string>
+    <string name="receipt_reference">Receipt #</string>
+    <string name="receipt_date">Date &amp; Time</string>
+    <string name="receipt_items_total">Total Items</string>
+    <string name="receipt_gross_total">Gross Total</string>
+    <string name="receipt_discount_given">Discount Given</string>
+    <string name="receipt_payment_mode">Payment Mode</string>
+    <string name="receipt_items_purchased">Purchased Items</string>
+    <string name="receipt_net_paid">Net Total Paid</string>
+    <string name="receipt_cash_tendered">Cash Tendered</string>
+    <string name="receipt_change_given">Change Given</string>
+    <string name="receipt_new_bill">New Bill</string>
+    <string name="receipt_done">Done / Return to Home</string>
+    <string name="receipt_share_button">Share Receipt</string>
+    <string name="receipt_print_button">Print Receipt</string>
+
+    <!-- Held Bills Strings -->
+    <string name="held_bills_title">Held Bills (Parked Drafts)</string>
+    <string name="held_bills_empty">No held bills at the moment</string>
+    <string name="held_bills_resume">Resume Draft</string>
+    <string name="held_bills_discard">Discard</string>
+    <string name="held_bill_prompt_note">Hold Bill Note (Optional)</string>
+    <string name="held_bill_confirm_hold">Hold Current Bill</string>
+
+    <!-- Sale Void & Return Strings -->
+    <string name="receipt_void_button">Cancel / Void Bill</string>
+    <string name="receipt_void_title">Cancel Bill &amp; Return Items</string>
+    <string name="receipt_void_warning">This will cancel this bill, refund the customer, and update inventory.</string>
+    <string name="receipt_void_refund_payout">Refund Payout to Customer</string>
+    <string name="receipt_void_stock_question">Returned Stock Condition:</string>
+    <string name="receipt_void_condition_sellable">Sellable (Restore to stock)</string>
+    <string name="receipt_void_condition_damaged">Damaged (Move to damaged)</string>
+    <string name="receipt_void_reason_label">Reason for cancellation (optional)</string>
+    <string name="receipt_void_confirm">Confirm Cancellation &amp; Refund</string>
+    <string name="receipt_voided_badge">VOIDED &amp; REFUNDED</string>
+
+    <!-- Account Payment & Receipt Voucher Strings -->
+    <string name="voucher_title">Payment Receipt Voucher</string>
+    <string name="voucher_recorded_success">Payment Recorded Successfully!</string>
+    <string name="voucher_amount_paid">Amount Paid</string>
+    <string name="voucher_payment_mode">Payment Mode</string>
+    <string name="voucher_remaining_balance">Remaining Outstanding Balance</string>
+    <string name="voucher_share_button">Share Payment Voucher</string>
+    <string name="voucher_print_button">Print Voucher</string>
+    <string name="voucher_done_button">Done</string>
+
+    <!-- Widget Strings -->
+    <string name="widget_slim_bar_name">Ali Educational Quick Actions</string>
+    <string name="widget_slim_bar_description">Quick actions for Cash In, Cash Out, New Bill, and Add Stock</string>
+    <string name="widget_action_cash_in">Cash In</string>
+    <string name="widget_action_cash_out">Cash Out</string>
+    <string name="widget_action_new_bill">New Bill</string>
+    <string name="widget_action_add_stock">Add Stock</string>
+</resources>

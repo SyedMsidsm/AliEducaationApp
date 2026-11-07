@@ -1,0 +1,42 @@
+[
+  {
+    "id": "01-overview",
+    "title": "Your daily overview",
+    "caption": "Stock and unpaid balances lead the dashboard. Billing is kept out of the main workflow."
+  },
+  {
+    "id": "02-inventory",
+    "title": "Find and manage stock",
+    "caption": "Search variants, check pack sizes, and see low stock without opening a billing screen."
+  },
+  {
+    "id": "03-suppliers",
+    "title": "Know whom you owe",
+    "caption": "A supplier account combines invoices, partial payments, attachments, and the remaining balance."
+  },
+  {
+    "id": "04-customers",
+    "title": "Know who owes you",
+    "caption": "Record credit and repayments with a clear running balance. A receipt is optional."
+  },
+  {
+    "id": "05-stock-out",
+    "title": "A quick way to record stock leaving",
+    "caption": "Record sale quantities, shop use, giveaways, or losses. Detailed checkout remains optional for later."
+  },
+  {
+    "id": "06-settings",
+    "title": "Choose receipt defaults once",
+    "caption": "One default action and language, with an override whenever you issue a receipt."
+  },
+  {
+    "id": "07-sign-in",
+    "title": "A simple, branded sign-in",
+    "caption": "The supplied logo uses warm-white lettering and gold details against the dark background."
+  },
+  {
+    "id": "08-light",
+    "title": "Optional light appearance",
+    "caption": "The same inventory-first layout, with a light surface and restrained gold accents."
+  }
+]

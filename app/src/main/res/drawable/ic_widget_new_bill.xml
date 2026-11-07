@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="32dp"
+    android:height="32dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Receipt Body (Gold) -->
+    <path
+        android:fillColor="#FBC02D"
+        android:pathData="M5,2 C4.4,2 4,2.5 4,3.2 V19.5 L6,18 L8,19.5 L10,18 L12,19.5 V14.5 H16 C16.6,14.5 17,14.1 17,13.5 V3.2 C17,2.5 16.6,2 16,2 Z" />
+    <!-- Receipt Lines Cutout (Dark) -->
+    <path
+        android:fillColor="#1C211D"
+        android:pathData="M6.5,5.5 H14.5 V7 H6.5 Z M6.5,8.5 H12.5 V10 H6.5 Z" />
+    <!-- Plus Circle Badge (Gold) -->
+    <path
+        android:fillColor="#FBC02D"
+        android:pathData="M17,12.5 C19.5,12.5 21.5,14.5 21.5,17 C21.5,19.5 19.5,21.5 17,21.5 C14.5,21.5 12.5,19.5 12.5,17 C12.5,14.5 14.5,12.5 17,12.5 Z" />
+    <!-- Plus Symbol in Badge (Dark) -->
+    <path
+        android:fillColor="#1C211D"
+        android:pathData="M14.5,16.2 H19.5 V17.8 H14.5 Z M16.2,14.5 H17.8 V19.5 H16.2 Z" />
+</vector>
