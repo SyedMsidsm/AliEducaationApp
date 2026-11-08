@@ -68,6 +68,12 @@ class TwoPhoneSyncService @Inject constructor(
     private val _connectionState = MutableStateFlow<SyncConnectionState>(SyncConnectionState.Idle)
     val connectionState: StateFlow<SyncConnectionState> = _connectionState.asStateFlow()
 
+    private val _blockedAttempts = MutableStateFlow(0)
+    val blockedAttempts: StateFlow<Int> = _blockedAttempts.asStateFlow()
+
+    private val connectionSemaphore = java.util.concurrent.Semaphore(4)
+    private val rateLimiter = SyncIpRateLimiter()
+
     fun getLocalIpAddress(): String {
         try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -111,13 +117,25 @@ class TwoPhoneSyncService @Inject constructor(
                 require(preferences.deviceRole.first() == "OWNER") { "Only the Owner can host" }
                 preferences.ensureSyncToken()
                 serverSocket = SyncTls.serverFactory().createServerSocket(port)
+                if (serverSocket is javax.net.ssl.SSLServerSocket) {
+                    (serverSocket as javax.net.ssl.SSLServerSocket).enabledProtocols = arrayOf("TLSv1.3", "TLSv1.2")
+                }
                 val ip = getLocalIpAddress()
                 _connectionState.value = SyncConnectionState.Hosting(ip, port)
 
                 while (serverSocket?.isClosed == false) {
                     val clientSocket = serverSocket?.accept() ?: break
+                    if (!connectionSemaphore.tryAcquire()) {
+                        try { clientSocket.close() } catch (_: Exception) {}
+                        _blockedAttempts.value++
+                        continue
+                    }
                     launch {
-                        handleClientRequest(clientSocket)
+                        try {
+                            handleClientRequest(clientSocket)
+                        } finally {
+                            connectionSemaphore.release()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -137,6 +155,12 @@ class TwoPhoneSyncService @Inject constructor(
     }
 
     private suspend fun handleClientRequest(socket: Socket) = withContext(Dispatchers.IO) {
+        val clientIp = socket.inetAddress?.hostAddress ?: "unknown"
+        if (rateLimiter.isBlocked(clientIp)) {
+            _blockedAttempts.value++
+            try { socket.close() } catch (_: Exception) {}
+            return@withContext
+        }
         try {
             socket.soTimeout = 10000
             require(preferences.deviceRole.first() == "OWNER") { "Owner hosting is no longer authorized" }
@@ -176,6 +200,8 @@ class TwoPhoneSyncService @Inject constructor(
             val providedToken = authHeader?.removePrefix("Bearer ")?.trim()
 
             if (requiredToken.length < 32 || providedToken.isNullOrEmpty() || !java.security.MessageDigest.isEqual(providedToken.toByteArray(), requiredToken.toByteArray())) {
+                rateLimiter.recordBadAttempt(clientIp)
+                _blockedAttempts.value++
                 val errJson = JSONObject().apply {
                     put("status", "UNAUTHORIZED")
                     put("message", "Invalid or missing Bearer authorization token.")
@@ -190,6 +216,8 @@ class TwoPhoneSyncService @Inject constructor(
                 socket.getOutputStream().flush()
                 return@withContext
             }
+
+            rateLimiter.recordSuccess(clientIp)
 
             if (method == "GET" && path.startsWith("/api/catalog")) {
                 // Send role-filtered catalog: selling prices and stock only (NO purchase costs or supplier dues!)
@@ -281,8 +309,8 @@ class TwoPhoneSyncService @Inject constructor(
                 writer.flush()
             }
         } catch (e: Exception) {
-            android.util.Log.e("AliSync", "Sync request rejected", e)
-            _connectionState.value = SyncConnectionState.Error("Sync request rejected: ${e.message}")
+            android.util.Log.w("AliSync", "Sync request blocked or failed from $clientIp: ${e.message}")
+            _blockedAttempts.value++
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
@@ -305,7 +333,7 @@ class TwoPhoneSyncService @Inject constructor(
                 requestMethod = "GET"
                 setRequestProperty("Authorization", "Bearer $token")
             }
-
+            try {
             if (catalogConn.responseCode != 200) {
                 _connectionState.value = SyncConnectionState.Error("Failed to reach Main Phone (Code ${catalogConn.responseCode})")
                 return@withContext false
@@ -366,6 +394,9 @@ class TwoPhoneSyncService @Inject constructor(
                 val value = serviceArray.getJSONObject(i)
                 serviceDao.insertService(com.alieducational.app.data.local.entity.ServiceDefinitionEntity(id = value.getString("id"), name = value.getString("name"), unitLabel = value.getString("unitLabel"), isPredefined = value.optBoolean("isPredefined")))
             }
+            }
+            } finally {
+                catalogConn.disconnect()
             }
             // 2. Deliver pending bills to Main Phone
             val pendingSales = if (refreshOnly) emptyList() else saleDao.getPendingSyncSales().take(500)
@@ -432,7 +463,7 @@ class TwoPhoneSyncService @Inject constructor(
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("Authorization", "Bearer $token")
                 }
-
+                try {
                 val bodyBytes = billsArray.toString().toByteArray(Charsets.UTF_8)
                 billsConn.outputStream.use { it.write(bodyBytes) }
 
@@ -482,6 +513,9 @@ class TwoPhoneSyncService @Inject constructor(
                 } else {
                     _connectionState.value = SyncConnectionState.Error("Sync delivery failed (Code ${billsConn.responseCode})")
                     return@withContext false
+                }
+                } finally {
+                    billsConn.disconnect()
                 }
             }
 

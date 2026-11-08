@@ -134,6 +134,7 @@ class AliViewModel @Inject constructor(
 ) : ViewModel() {
 
     val syncConnectionState: StateFlow<SyncConnectionState> = twoPhoneSyncService.connectionState
+    val blockedSyncAttempts: StateFlow<Int> = twoPhoneSyncService.blockedAttempts
 
     fun startSyncServer(port: Int = 8080) {
         OwnerSyncService.start(context, port)
