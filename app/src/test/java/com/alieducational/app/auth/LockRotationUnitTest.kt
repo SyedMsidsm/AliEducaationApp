@@ -59,7 +59,7 @@ class LockRotationUnitTest {
         val content = viewModelFile.readText()
         assertTrue(
             "AliViewModel must contain `isAppLocked` property to survive rotation",
-            content.contains("var isAppLocked by mutableStateOf")
+            content.contains("var isAppLocked") && content.contains("mutableStateOf")
         )
     }
 }

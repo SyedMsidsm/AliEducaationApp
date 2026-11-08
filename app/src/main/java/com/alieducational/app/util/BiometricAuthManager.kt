@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class BiometricAuthManager @Inject constructor(
+open class BiometricAuthManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
@@ -50,13 +50,13 @@ class BiometricAuthManager @Inject constructor(
         }
     }
 
-    fun canAuthenticate(): Boolean {
+    open fun canAuthenticate(): Boolean {
         val biometricManager = BiometricManager.from(context)
         val canAuth = biometricManager.canAuthenticate(getAllowedAuthenticators())
         return canAuth == BiometricManager.BIOMETRIC_SUCCESS
     }
 
-    fun promptBiometric(
+    open fun promptBiometric(
         activity: FragmentActivity,
         title: String = "Unlock Ali Educational",
         subtitle: String = "Confirm your fingerprint or device credential",

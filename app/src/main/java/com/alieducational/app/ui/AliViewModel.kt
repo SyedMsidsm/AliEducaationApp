@@ -36,6 +36,7 @@ import com.alieducational.app.data.service.ReceiptService
 import com.alieducational.app.data.service.SpreadsheetPreview
 import com.alieducational.app.data.service.SyncConnectionState
 import com.alieducational.app.data.service.TwoPhoneSyncService
+import com.alieducational.app.util.StepUpAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -124,7 +125,8 @@ class AliViewModel @Inject constructor(
     private val backupService: BackupRestoreService,
     val receiptService: ReceiptService,
     val cashTrackerExcelService: CashTrackerExcelService,
-    val twoPhoneSyncService: TwoPhoneSyncService
+    val twoPhoneSyncService: TwoPhoneSyncService,
+    val stepUp: StepUpAuth
 ) : ViewModel() {
 
     val syncConnectionState: StateFlow<SyncConnectionState> = twoPhoneSyncService.connectionState
@@ -175,7 +177,15 @@ class AliViewModel @Inject constructor(
 
     val startupSettings = preferences.startupSettings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    var isAppLocked by mutableStateOf(true)
+    private val _isAppLocked = mutableStateOf(true)
+    var isAppLocked: Boolean
+        get() = _isAppLocked.value
+        set(value) {
+            _isAppLocked.value = value
+            if (value) {
+                stepUp.reset()
+            }
+        }
 
     val isLockEnabled: StateFlow<Boolean> = preferences.isLockEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)

@@ -704,8 +704,21 @@ fun BackupRestoreScreen(
                 Button(
                     onClick = {
                         val file = File(backup.filePath)
-                        selectedBackupForRestore = null
-                        viewModel.restoreBackup(file)
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        if (activity != null) {
+                            viewModel.stepUp.require(
+                                activity = activity,
+                                title = "Authenticate to restore backup",
+                                onOk = {
+                                    selectedBackupForRestore = null
+                                    viewModel.restoreBackup(file)
+                                },
+                                onFail = { /* cancel restore */ }
+                            )
+                        } else {
+                            selectedBackupForRestore = null
+                            viewModel.restoreBackup(file)
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373))
                 ) {

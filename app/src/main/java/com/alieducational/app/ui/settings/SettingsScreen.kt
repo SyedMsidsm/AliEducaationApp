@@ -507,7 +507,23 @@ fun SettingsScreen(
                             }
                             Switch(
                                 checked = isLockEnabled,
-                                onCheckedChange = { viewModel.setLockEnabled(it) },
+                                onCheckedChange = { enable ->
+                                    if (!enable) {
+                                        val activity = context as? androidx.fragment.app.FragmentActivity
+                                        if (activity != null) {
+                                            viewModel.stepUp.require(
+                                                activity = activity,
+                                                title = "Authenticate to disable device lock",
+                                                onOk = { viewModel.setLockEnabled(false) },
+                                                onFail = { /* stay enabled */ }
+                                            )
+                                        } else {
+                                            viewModel.setLockEnabled(false)
+                                        }
+                                    } else {
+                                        viewModel.setLockEnabled(true)
+                                    }
+                                },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                                     checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
@@ -601,8 +617,21 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.setDeviceRole("BILLING")
-                        showSwitchToBillingWarning = false
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        if (activity != null) {
+                            viewModel.stepUp.require(
+                                activity = activity,
+                                title = "Authenticate to change device role",
+                                onOk = {
+                                    viewModel.setDeviceRole("BILLING")
+                                    showSwitchToBillingWarning = false
+                                },
+                                onFail = { /* cancel role switch */ }
+                            )
+                        } else {
+                            viewModel.setDeviceRole("BILLING")
+                            showSwitchToBillingWarning = false
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
