@@ -86,7 +86,7 @@ object AttachmentManager {
                         ExifInterface.ORIENTATION_NORMAL
                     )
                 }
-            } catch (ignored: Exception) {}
+            } catch (e: Exception) { android.util.Log.w("AttachmentManager", "Non-fatal attachment operation error: ${e.message}") }
 
             // 2. Decode bitmap bounds first to scale down if necessary
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -147,7 +147,7 @@ object AttachmentManager {
 
             "attachments/$outputFileName"
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("AttachmentManager", "Failed to persist image attachment: ${e.message}", e)
             null
         }
     }
@@ -162,6 +162,6 @@ object AttachmentManager {
             if (file != null && file.exists()) {
                 file.delete()
             }
-        } catch (ignored: Exception) {}
+        } catch (e: Exception) { android.util.Log.w("AttachmentManager", "Non-fatal attachment operation error: ${e.message}") }
     }
 }

@@ -341,6 +341,7 @@ fun StockScreen(
             try {
                 if (exportBarcode.isNotBlank()) barcodeService.generateBarcodeBitmap(exportBarcode, 360, 100) else null
             } catch (e: Exception) {
+                android.util.Log.w("StockScreen", "Failed to generate barcode preview bitmap: ${e.message}", e)
                 null
             }
         }
@@ -1177,7 +1178,9 @@ fun IntegratedAddStockProductDialog(
                                             preview,
                                             imageAnalyzer
                                         )
-                                    } catch (e: Exception) {}
+                                    } catch (e: Exception) {
+                                        android.util.Log.w("StockScreen", "Failed to bind camera preview: ${e.message}", e)
+                                    }
                                 }, ContextCompat.getMainExecutor(ctx))
                                 previewView
                             },

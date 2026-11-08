@@ -647,6 +647,7 @@ class CashTrackerExcelService @Inject constructor(
                 else -> ""
             }
         } catch (e: Exception) {
+            android.util.Log.w("CashTrackerExcelService", "Error reading cell string value: ${e.message}")
             ""
         }
     }

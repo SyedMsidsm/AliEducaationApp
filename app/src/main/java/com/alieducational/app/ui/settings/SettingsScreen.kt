@@ -118,7 +118,10 @@ fun SettingsScreen(
                 val doc = DocumentFile.fromTreeUri(context, uri)
                 val name = doc?.name ?: "Selected Folder"
                 viewModel.setGoogleDriveFolder(uri.toString(), name)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.w("SettingsScreen", "Failed to take persistable URI permission: ${e.message}", e)
+                viewModel.setOperationError("Failed to access selected folder: ${e.message}")
+            }
         }
     }
 

@@ -113,7 +113,8 @@ fun BillReceiptScreen(
     }
 
     val totalPaise = currentSale?.netTotalPaise ?: billingState.netTotalPaise
-    val discountPaise = if (currentSale != null) currentSale!!.grossTotalPaise - currentSale!!.netTotalPaise else billingState.actualDiscountPaise
+    val sale = currentSale
+    val discountPaise = if (sale != null) sale.grossTotalPaise - sale.netTotalPaise else billingState.actualDiscountPaise
     val grossPaise = totalPaise + discountPaise
     val changeGivenPaise = currentSale?.changeGivenPaise ?: 0L
 

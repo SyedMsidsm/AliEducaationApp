@@ -69,8 +69,8 @@ class MainActivity : FragmentActivity() {
             val appLanguage by viewModel.appLanguage.collectAsState()
             val startupSettings by viewModel.startupSettings.collectAsState()
             if (startupSettings == null) return@setContent
-            val isFirstLaunch = startupSettings!!.first
-            val isLockEnabled = startupSettings!!.second
+            val isFirstLaunch = startupSettings?.first ?: false
+            val isLockEnabled = startupSettings?.second ?: false
             val timeout by viewModel.lockTimeoutSeconds.collectAsState()
             androidx.compose.runtime.SideEffect { configuredLockTimeout = timeout }
 

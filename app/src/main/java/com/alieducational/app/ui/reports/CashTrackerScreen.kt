@@ -1617,6 +1617,7 @@ fun CashTrackerScreen(
             try {
                 BitmapFactory.decodeFile(file.absolutePath)
             } catch (e: Exception) {
+                android.util.Log.w("CashTrackerScreen", "Failed to decode photo: ${e.message}", e)
                 null
             }
         }
@@ -2143,9 +2144,11 @@ private fun queryFileName(context: Context, uri: Uri): String {
                     }
                 }
             }
-        } catch (ignored: Exception) {}
-    } else if (uri.path != null) {
-        name = java.io.File(uri.path!!).name
+        } catch (e: Exception) {
+            android.util.Log.w("CashTrackerScreen", "Failed to query file name: ${e.message}", e)
+        }
+    } else uri.path?.let {
+        name = java.io.File(it).name
     }
     return name
 }

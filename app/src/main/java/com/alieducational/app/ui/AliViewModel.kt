@@ -231,6 +231,7 @@ class AliViewModel @Inject constructor(
     private val _operationError = MutableStateFlow<String?>(null)
     val operationError = _operationError.asStateFlow()
     fun clearOperationError() { _operationError.value = null }
+    fun setOperationError(message: String) { _operationError.value = message }
     private val operationHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
         android.util.Log.e("AliOperation", "Operation failed", e)
         _operationError.value = e.message ?: "Operation failed. Please retry."
@@ -975,7 +976,9 @@ class AliViewModel @Inject constructor(
                     )
                 )
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.w("AliViewModel", "Failed to deserialize held bill items: ${e.message}", e)
+        }
         return list
     }
 
@@ -1556,7 +1559,10 @@ class AliViewModel @Inject constructor(
             try {
                 val id = repository.createCashCategory(name)
                 onDone(id)
-            } catch (ignored: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.w("AliViewModel", "Failed to create cash category: ${e.message}", e)
+                _operationError.value = "Failed to create category: ${e.message}"
+            }
         }
     }
 

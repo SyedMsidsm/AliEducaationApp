@@ -102,7 +102,9 @@ class TwoPhoneSyncService @Inject constructor(
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.w("TwoPhoneSyncService", "NetworkInterface IP lookup failed: ${e.message}")
+        }
 
         return "127.0.0.1"
     }

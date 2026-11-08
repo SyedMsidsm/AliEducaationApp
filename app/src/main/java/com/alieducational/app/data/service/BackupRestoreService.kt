@@ -603,7 +603,8 @@ class BackupRestoreService @Inject constructor(
                 }
             }
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.w("BackupRestoreService", "Failed to export backup to target URI: ${e.message}", e)
             false
         }
     }
