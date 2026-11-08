@@ -380,6 +380,9 @@ interface HeldBillDao {
 
     @Query("DELETE FROM held_bills WHERE id = :id")
     suspend fun deleteHeldBill(id: String)
+
+    @Query("DELETE FROM held_bills WHERE id IN (:ids)")
+    suspend fun deleteHeldBills(ids: List<String>)
 }
 
 @Dao

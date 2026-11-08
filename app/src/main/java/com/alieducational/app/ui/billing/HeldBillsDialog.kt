@@ -20,6 +20,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +59,8 @@ fun HeldBillsDialog(
     var isHolding by remember { mutableStateOf(false) }
 
     val dateFormat = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
+    val selectedHeldBillIds by viewModel.selectedHeldBillIds.collectAsState()
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -145,6 +149,42 @@ fun HeldBillsDialog(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (selectedHeldBillIds.isNotEmpty()) {
+                            Text(
+                                text = "${selectedHeldBillIds.size} selected",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = { viewModel.clearHeldBillSelection() }) {
+                                    Text("Clear")
+                                }
+                                Button(
+                                    onClick = { showDeleteConfirmDialog = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    )
+                                ) {
+                                    Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
+                                    Text("Delete (${selectedHeldBillIds.size})")
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Held Bills (${heldBills.size})",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            TextButton(onClick = { viewModel.selectAllHeldBills(heldBills.map { it.id }) }) {
+                                Text("Select All")
+                            }
+                        }
+                    }
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -152,12 +192,20 @@ fun HeldBillsDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(heldBills, key = { it.id }) { bill ->
+                            val isSelected = selectedHeldBillIds.contains(bill.id)
                             Card(
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                     else MaterialTheme.colorScheme.surfaceVariant
                                 ),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (selectedHeldBillIds.isNotEmpty()) {
+                                            viewModel.toggleHeldBillSelection(bill.id)
+                                        }
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -166,6 +214,11 @@ fun HeldBillsDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { viewModel.toggleHeldBillSelection(bill.id) }
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = stringResource(
@@ -239,9 +292,39 @@ fun HeldBillsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = {
+                viewModel.clearHeldBillSelection()
+                onDismiss()
+            }) {
                 Text(stringResource(R.string.review_cancel))
             }
         }
     )
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete ${selectedHeldBillIds.size} Held Bills?", fontWeight = FontWeight.Bold) },
+            text = { Text("These held drafts will be permanently deleted. This cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        viewModel.deleteHeldBills(selectedHeldBillIds.toList())
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }

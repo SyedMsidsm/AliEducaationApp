@@ -9,6 +9,11 @@ import android.provider.OpenableColumns
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.Checkbox
+import com.alieducational.app.ui.BulkResult
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -115,7 +120,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CashTrackerScreen(
     viewModel: AliViewModel,
@@ -123,6 +128,17 @@ fun CashTrackerScreen(
     modifier: Modifier = Modifier
 ) {
     val allExpenses by viewModel.allExpenses.collectAsState()
+    val selectedCashEntryIds by viewModel.selectedCashEntryIds.collectAsState()
+    val deviceRole by viewModel.deviceRole.collectAsState()
+    val isOwner = deviceRole == "OWNER"
+
+    var showBulkVoidConfirmDialog by remember { mutableStateOf(false) }
+    var bulkVoidResult by remember { mutableStateOf<BulkResult?>(null) }
+
+    BackHandler(enabled = selectedCashEntryIds.isNotEmpty()) {
+        viewModel.clearCashEntrySelection()
+    }
+
     val activeCategories by viewModel.activeCashCategories.collectAsState()
     val allPigmySchemes by viewModel.allPigmySchemes.collectAsState()
     val activePigmySchemes = remember(allPigmySchemes) { allPigmySchemes.filter { !it.isArchived } }
@@ -285,13 +301,62 @@ fun CashTrackerScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            if (selectedCashEntryIds.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { viewModel.clearCashEntrySelection() }) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Cancel selection",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "${selectedCashEntryIds.size} selected",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = {
+                        viewModel.selectAllCashEntries(filteredItems.map { it.id })
+                    }) {
+                        Text("Select All", fontWeight = FontWeight.SemiBold)
+                    }
+                    if (isOwner) {
+                        IconButton(onClick = {
+                            val activity = context as? androidx.fragment.app.FragmentActivity
+                            if (activity != null) {
+                                viewModel.stepUp.require(
+                                    activity = activity,
+                                    title = "Authenticate to void cash entries",
+                                    onOk = { showBulkVoidConfirmDialog = true },
+                                    onFail = { /* no-op */ }
+                                )
+                            } else {
+                                showBulkVoidConfirmDialog = true
+                            }
+                        }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Void Selected Entries",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 IconButton(onClick = onNavigateBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -375,6 +440,7 @@ fun CashTrackerScreen(
                     }
                 }
             }
+        }
 
             // Period Tabs (All, Daily, Weekly, Monthly, Yearly)
             TabRow(
@@ -577,8 +643,11 @@ fun CashTrackerScreen(
                         }
 
                         // Day's Entries (Section 2 Layout)
-                        items(itemsOnDay) { entry ->
+                        // Day's Entries (Section 2 Layout)
+                        items(itemsOnDay, key = { it.id }) { entry ->
                             var menuExpanded by remember { mutableStateOf(false) }
+                            val isSelected = selectedCashEntryIds.contains(entry.id)
+                            val isInSelectionMode = selectedCashEntryIds.isNotEmpty()
 
                             val displayDescription = if (!entry.notes.isNullOrBlank()) entry.notes else entry.category
                             val displayPayment = when (entry.paymentMethod.uppercase()) {
@@ -592,9 +661,32 @@ fun CashTrackerScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                        else Color.Transparent
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (isInSelectionMode) {
+                                                viewModel.toggleCashEntrySelection(entry.id)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (isOwner) {
+                                                viewModel.toggleCashEntrySelection(entry.id)
+                                            }
+                                        }
+                                    )
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (isInSelectionMode) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { viewModel.toggleCashEntrySelection(entry.id) }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = displayDescription,
@@ -1927,6 +2019,115 @@ fun CashTrackerScreen(
             )
         }
     }
+    // Bulk Void Confirmation Dialog
+    if (showBulkVoidConfirmDialog) {
+        val selectedEntries = remember(selectedCashEntryIds, allExpenses) {
+            allExpenses.filter { it.id in selectedCashEntryIds }
+        }
+        val totalPaise = remember(selectedEntries) {
+            selectedEntries.sumOf { it.amountPaise }
+        }
+        var reasonText by remember { mutableStateOf("") }
+        var errorMsg by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showBulkVoidConfirmDialog = false },
+            title = {
+                Text("Void ${selectedCashEntryIds.size} Cash Entries", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Total Amount: ${CostCalculator.formatPaiseToRupees(totalPaise)}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Refund entries will be voided before parent expenses. Voiding will reverse cash/bank totals safely.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = reasonText,
+                        onValueChange = {
+                            reasonText = it
+                            if (errorMsg != null) errorMsg = null
+                        },
+                        label = { Text("Void Reason (Required) *") },
+                        isError = errorMsg != null,
+                        supportingText = errorMsg?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = reasonText.trim()
+                        if (trimmed.isBlank()) {
+                            errorMsg = "Reason is required"
+                            return@Button
+                        }
+                        showBulkVoidConfirmDialog = false
+                        viewModel.voidExpenses(selectedCashEntryIds.toList(), trimmed) { res ->
+                            bulkVoidResult = res
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Confirm Void")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showBulkVoidConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Bulk Void Result Dialog
+    bulkVoidResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { bulkVoidResult = null },
+            title = { Text("Bulk Void Completed", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Successfully voided: ${res.done} entries")
+                    if (res.skipped.isNotEmpty()) {
+                        Text(
+                            "Skipped: ${res.skipped.size} entries",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 200.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(res.skipped) { (id, reason) ->
+                                Text(
+                                    "• Entry $id: $reason",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { bulkVoidResult = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+
 }
 
 private fun queryFileName(context: Context, uri: Uri): String {

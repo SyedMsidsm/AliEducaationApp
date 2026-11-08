@@ -181,7 +181,9 @@ class AppRepository @Inject constructor(
 
     suspend fun holdBill(bill: HeldBillEntity) = heldBillDao.insertHeldBill(bill)
     suspend fun deleteHeldBill(id: String) = heldBillDao.deleteHeldBill(id)
+    suspend fun deleteHeldBills(ids: List<String>) = heldBillDao.deleteHeldBills(ids)
     suspend fun getHeldBillById(id: String): HeldBillEntity? = heldBillDao.getHeldBillById(id)
+    suspend fun getExpenseById(id: String): ShopExpenseEntity? = expenseDao.getExpenseById(id)
 
     val allSaleLines: Flow<List<SaleLineEntity>> = saleDao.getAllSaleLines()
 

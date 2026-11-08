@@ -2,8 +2,10 @@ package com.alieducational.app.ui.billing
 
 import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +27,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoneyOff
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Person
@@ -35,6 +39,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -44,6 +49,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -67,6 +73,7 @@ import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.ui.BulkResult
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -81,13 +88,23 @@ fun BillHistoryScreen(
     onNavigateToCustomerAccount: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    BackHandler {
-        onNavigateBack()
-    }
-
     val context = LocalContext.current
     val allSales by viewModel.allSales.collectAsState()
     val allSaleLines by viewModel.allSaleLines.collectAsState()
+    val selectedBillIds by viewModel.selectedBillIds.collectAsState()
+    val deviceRole by viewModel.deviceRole.collectAsState()
+    val isOwner = deviceRole == "OWNER"
+
+    var showVoidConfirmDialog by remember { mutableStateOf(false) }
+    var bulkResult by remember { mutableStateOf<BulkResult?>(null) }
+
+    BackHandler {
+        if (selectedBillIds.isNotEmpty()) {
+            viewModel.clearBillSelection()
+        } else {
+            onNavigateBack()
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedPeriod by remember { mutableStateOf("Today") } // Today, This Week, This Month, All Time, Custom
@@ -182,27 +199,72 @@ fun BillHistoryScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Bill History", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text(
-                            displayDateRangeText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
+            if (selectedBillIds.isNotEmpty()) {
+                TopAppBar(
+                    title = {
+                        Text("${selectedBillIds.size} selected", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearBillSelection() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel")
+                        }
+                    },
+                    actions = {
+                        TextButton(onClick = {
+                            viewModel.selectAllBills(filteredSales.map { it.id })
+                        }) {
+                            Text("Select All", fontWeight = FontWeight.SemiBold)
+                        }
+                        if (isOwner) {
+                            IconButton(onClick = {
+                                val activity = context as? androidx.fragment.app.FragmentActivity
+                                if (activity != null) {
+                                    viewModel.stepUp.require(
+                                        activity = activity,
+                                        title = "Authenticate to void bills",
+                                        onOk = { showVoidConfirmDialog = true },
+                                        onFail = { /* cancel */ }
+                                    )
+                                } else {
+                                    showVoidConfirmDialog = true
+                                }
+                            }) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "Void Selected Bills",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        titleContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 )
-            )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("Bill History", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text(
+                                displayDateRangeText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+            }
         }
     ) { padding ->
         Surface(
@@ -385,8 +447,17 @@ fun BillHistoryScreen(
                     }
                 } else {
                     items(filteredSales, key = { it.id }) { sale ->
+                        val isSelected = selectedBillIds.contains(sale.id)
                         BillHistoryRow(
                             sale = sale,
+                            isSelected = isSelected,
+                            isInSelectionMode = selectedBillIds.isNotEmpty(),
+                            onToggleSelect = { viewModel.toggleBillSelection(sale.id) },
+                            onLongClick = {
+                                if (isOwner) {
+                                    viewModel.toggleBillSelection(sale.id)
+                                }
+                            },
                             onClick = { selectedSaleForDetail = sale },
                             onRepay = { repaymentSaleTarget = sale },
                             onOpenCustomer = {
@@ -631,11 +702,160 @@ fun BillHistoryScreen(
             }
         )
     }
+
+    // Bulk Void Confirmation Dialog
+    if (showVoidConfirmDialog) {
+        val selectedSales = remember(selectedBillIds, allSales) {
+            allSales.filter { it.id in selectedBillIds }
+        }
+        val totalAmountPaise = remember(selectedSales) {
+            selectedSales.sumOf { it.netTotalPaise }
+        }
+        var reasonText by remember { mutableStateOf("") }
+        var conditionChoice by remember { mutableStateOf("SELLABLE") } // SELLABLE, DAMAGED, NONE
+        var errorMsg by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showVoidConfirmDialog = false },
+            title = {
+                Text("Void ${selectedBillIds.size} Bills", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Total Amount: ${CostCalculator.formatPaiseToRupees(totalAmountPaise)}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "This will restore stock (if selected), reverse customer dues, and mark these bills as VOIDED in the audit trail.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Text("Stock restoration condition:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = conditionChoice == "SELLABLE",
+                                onClick = { conditionChoice = "SELLABLE" }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sellable (Restores to active stock)", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = conditionChoice == "DAMAGED",
+                                onClick = { conditionChoice = "DAMAGED" }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Damaged (Logs as damaged write-off)", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = conditionChoice == "NONE",
+                                onClick = { conditionChoice = "NONE" }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("No stock change", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = reasonText,
+                        onValueChange = {
+                            reasonText = it
+                            if (errorMsg != null) errorMsg = null
+                        },
+                        label = { Text("Void Reason (Required) *") },
+                        isError = errorMsg != null,
+                        supportingText = errorMsg?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = reasonText.trim()
+                        if (trimmed.isBlank()) {
+                            errorMsg = "Reason is required"
+                            return@Button
+                        }
+                        showVoidConfirmDialog = false
+                        viewModel.voidSales(
+                            ids = selectedBillIds.toList(),
+                            stockCondition = conditionChoice,
+                            reason = trimmed
+                        ) { result ->
+                            bulkResult = result
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Confirm Void")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showVoidConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Bulk Void Result Dialog
+    bulkResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { bulkResult = null },
+            title = {
+                Text("Bulk Void Completed", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Successfully voided: ${res.done} bills")
+                    if (res.skipped.isNotEmpty()) {
+                        Text(
+                            "Skipped: ${res.skipped.size} bills",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 200.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(res.skipped) { (id, reason) ->
+                                Text(
+                                    "• Bill $id: $reason",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { bulkResult = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BillHistoryRow(
     sale: SaleEntity,
+    isSelected: Boolean = false,
+    isInSelectionMode: Boolean = false,
+    onToggleSelect: () -> Unit = {},
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit,
     onRepay: () -> Unit,
     onOpenCustomer: () -> Unit,
@@ -644,11 +864,34 @@ fun BillHistoryRow(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            .combinedClickable(
+                onClick = {
+                    if (isInSelectionMode) {
+                        onToggleSelect()
+                    } else {
+                        onClick()
+                    }
+                },
+                onLongClick = onLongClick
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.surface
+        ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isInSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelect() }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -754,6 +997,7 @@ fun BillHistoryRow(
                     }
                 }
             }
+        }
         }
     }
 }

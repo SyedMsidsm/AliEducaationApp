@@ -120,6 +120,8 @@ data class BillingState(
         } else 0L
 }
 
+data class BulkResult(val done: Int, val skipped: List<Pair<String, String>>)
+
 @HiltViewModel
 class AliViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -1113,6 +1115,108 @@ class AliViewModel @Inject constructor(
         viewModelScope.launch(operationHandler) {
             repository.voidExpense(expenseId, reason)
             onDone()
+        }
+    }
+
+    val selectedBillIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedCashEntryIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedHeldBillIds = MutableStateFlow<Set<String>>(emptySet())
+
+    fun toggleBillSelection(id: String) {
+        val current = selectedBillIds.value
+        selectedBillIds.value = if (current.contains(id)) current - id else current + id
+    }
+
+    fun selectAllBills(ids: Collection<String>) {
+        selectedBillIds.value = ids.toSet()
+    }
+
+    fun clearBillSelection() {
+        selectedBillIds.value = emptySet()
+    }
+
+    fun toggleCashEntrySelection(id: String) {
+        val current = selectedCashEntryIds.value
+        selectedCashEntryIds.value = if (current.contains(id)) current - id else current + id
+    }
+
+    fun selectAllCashEntries(ids: Collection<String>) {
+        selectedCashEntryIds.value = ids.toSet()
+    }
+
+    fun clearCashEntrySelection() {
+        selectedCashEntryIds.value = emptySet()
+    }
+
+    fun toggleHeldBillSelection(id: String) {
+        val current = selectedHeldBillIds.value
+        selectedHeldBillIds.value = if (current.contains(id)) current - id else current + id
+    }
+
+    fun selectAllHeldBills(ids: Collection<String>) {
+        selectedHeldBillIds.value = ids.toSet()
+    }
+
+    fun clearHeldBillSelection() {
+        selectedHeldBillIds.value = emptySet()
+    }
+
+    fun voidSales(ids: List<String>, stockCondition: String, reason: String, onResult: (BulkResult) -> Unit) {
+        require(reason.isNotBlank()) { "Void reason cannot be blank" }
+        require(ids.size <= 200) { "Cannot void more than 200 items in a single batch" }
+        viewModelScope.launch(operationHandler) {
+            var done = 0
+            val skipped = mutableListOf<Pair<String, String>>()
+            for (id in ids) {
+                try {
+                    repository.voidSale(id, stockCondition, reason)
+                    done++
+                } catch (e: IllegalStateException) {
+                    skipped += id to (e.message ?: "Not allowed")
+                } catch (e: IllegalArgumentException) {
+                    skipped += id to (e.message ?: "Not found")
+                } catch (e: Exception) {
+                    skipped += id to (e.message ?: "Failed")
+                }
+            }
+            clearBillSelection()
+            onResult(BulkResult(done, skipped))
+        }
+    }
+
+    fun voidExpenses(ids: List<String>, reason: String, onResult: (BulkResult) -> Unit) {
+        require(reason.isNotBlank()) { "Void reason cannot be blank" }
+        require(ids.size <= 200) { "Cannot void more than 200 items in a single batch" }
+        viewModelScope.launch(operationHandler) {
+            val entries = ids.mapNotNull { repository.getExpenseById(it) }
+            val ordered = entries.sortedWith(
+                compareByDescending<com.alieducational.app.data.local.entity.ShopExpenseEntity> { it.isExpenseRefund }
+                    .thenByDescending { it.timestamp }
+            )
+            var done = 0
+            val skipped = mutableListOf<Pair<String, String>>()
+            for (e in ordered) {
+                try {
+                    repository.voidExpense(e.id, reason)
+                    done++
+                } catch (x: IllegalStateException) {
+                    skipped += e.id to (x.message ?: "Not allowed")
+                } catch (x: IllegalArgumentException) {
+                    skipped += e.id to (x.message ?: "Not found")
+                } catch (x: Exception) {
+                    skipped += e.id to (x.message ?: "Failed")
+                }
+            }
+            clearCashEntrySelection()
+            onResult(BulkResult(done, skipped))
+        }
+    }
+
+    fun deleteHeldBills(ids: List<String>, onResult: (Int) -> Unit = {}) {
+        viewModelScope.launch(operationHandler) {
+            repository.deleteHeldBills(ids)
+            clearHeldBillSelection()
+            onResult(ids.size)
         }
     }
 
