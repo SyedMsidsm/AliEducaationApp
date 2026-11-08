@@ -58,18 +58,19 @@ import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.domain.calculation.PurchaseLineInput
 import com.alieducational.app.ui.AliViewModel
 
-data class ReceiveLineState(
-    var productId: String = "",
-    var productName: String = "",
-    var packSize: Int = 1,
-    var isPack: Boolean = false,
-    var quantityStr: String = "1",
-    var unitPriceStr: String = "0",
-    var pricingMode: CostCalculator.PricingMode = CostCalculator.PricingMode.GROSS_MARGIN,
-    var percentageStr: String = "20",
-    var newSellingPriceStr: String = "",
-    var lastEditedField: String = "PERCENTAGE"
-)
+class ReceiveLineState {
+    val lineId: String = java.util.UUID.randomUUID().toString()
+    var productId by mutableStateOf("")
+    var productName by mutableStateOf("")
+    var packSize by mutableStateOf(1)
+    var isPack by mutableStateOf(false)
+    var quantityStr by mutableStateOf("1")
+    var unitPriceStr by mutableStateOf("0")
+    var pricingMode by mutableStateOf(CostCalculator.PricingMode.GROSS_MARGIN)
+    var percentageStr by mutableStateOf("20")
+    var newSellingPriceStr by mutableStateOf("")
+    var lastEditedField by mutableStateOf("PERCENTAGE")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,7 +105,7 @@ fun ReceiveStockScreen(
         val baseQty = if (line.isPack) qty * line.packSize else qty
         val pricePaise = ((line.unitPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
         if (line.productId.isNotBlank() && baseQty > 0) {
-            PurchaseLineInput(id = line.productId, quantity = baseQty, unitPricePaise = pricePaise)
+            PurchaseLineInput(id = line.lineId, quantity = baseQty, unitPricePaise = pricePaise)
         } else null
     }
 
@@ -348,7 +349,7 @@ fun ReceiveStockScreen(
                             }
 
                             // Show allocated delivery share for this line if delivery > 0
-                            val alloc = allocatedDelivery.firstOrNull { it.lineId == line.productId }
+                            val alloc = allocatedDelivery.firstOrNull { it.lineId == line.lineId }
                             if (alloc != null && totalDeliveryPaise > 0L) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(
@@ -615,7 +616,8 @@ fun ReceiveStockScreen(
                                         productId = line.productId,
                                         quantityBase = baseQty,
                                         unitPurchasePricePaise = pricePaise,
-                                        newSellingPricePiecePaise = newSellPaise
+                                        newSellingPricePiecePaise = newSellPaise,
+                                        lineId = line.lineId
                                     )
                                 } else null
                             }

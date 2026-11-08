@@ -73,13 +73,16 @@ fun ExpensesScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val allExpenses by viewModel.allExpenses.collectAsState()
+    val entries by viewModel.allExpenses.collectAsState()
+    val allExpenses = entries.filter { !it.isVoided && !it.isSavingsTransfer && (!it.isIncome || it.isExpenseRefund) }
+    val grossExpenses = allExpenses.filter { !it.isIncome }.sumOf { it.amountPaise }
+    val refunds = allExpenses.filter { it.isExpenseRefund }.sumOf { it.amountPaise }
     var showAddDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Other Money & Expenses", fontWeight = FontWeight.Bold) },
+                title = { Text("Shop Expenses", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -116,7 +119,7 @@ fun ExpensesScreen(
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Separate from sales profit. Tracks operational shop costs like rent, electricity, tea, staff salary, and external deposits.",
+                        text = "Gross expenses: ${com.alieducational.app.domain.calculation.CostCalculator.formatPaiseToRupees(grossExpenses)}\nLinked refunds: ${com.alieducational.app.domain.calculation.CostCalculator.formatPaiseToRupees(refunds)}\nNet expenses: ${com.alieducational.app.domain.calculation.CostCalculator.formatPaiseToRupees(grossExpenses - refunds)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -316,6 +319,7 @@ fun ExpensesScreen(
                         value = notes,
                         onValueChange = { notes = it },
                         label = { Text("Notes / Description") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

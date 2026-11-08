@@ -101,6 +101,13 @@ fun AccountsScreen(
 
     var showOnlyOutstanding by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    val customerTarget by viewModel.accountCustomerTarget.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(customerTarget, customers) {
+        customerTarget?.let { id -> customers.firstOrNull { it.id == id }?.let { customer ->
+            selectedTab = 1; searchQuery = customer.name; showOnlyOutstanding = false
+            viewModel.clearCustomerAccountTarget()
+        } }
+    }
 
     val filteredSuppliers = remember(suppliers, showOnlyOutstanding, searchQuery) {
         suppliers.filter { sup ->
@@ -558,6 +565,7 @@ fun AccountsScreen(
                         value = notes,
                         onValueChange = { notes = it },
                         label = { Text("Notes / Reference (Optional)") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

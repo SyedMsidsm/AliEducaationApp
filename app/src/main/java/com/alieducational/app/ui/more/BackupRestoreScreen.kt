@@ -306,12 +306,12 @@ fun BackupRestoreScreen(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(
-                                                text = if (driveFolderUri.isNotBlank()) "Drive: $driveFolderName" else "Google Drive Destination",
+                                                text = if (driveFolderUri.isNotBlank()) "Drive: $driveFolderName" else "External backup destination",
                                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = if (driveFolderUri.isNotBlank()) "One-tap backup destination active" else "Connect folder once for one-tap backup",
+                                                text = if (driveFolderUri.isNotBlank()) "Connected folder; external copy status is checked on each backup" else "Connect folder once for one-tap backup",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -343,7 +343,7 @@ fun BackupRestoreScreen(
                                 Icon(Icons.Filled.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (driveFolderUri.isNotBlank()) "One-Tap Backup (Phone + Drive)" else "Create Backup Now",
+                                    text = if (driveFolderUri.isNotBlank()) "Back up locally + copy to connected folder" else "Create Backup Now",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )

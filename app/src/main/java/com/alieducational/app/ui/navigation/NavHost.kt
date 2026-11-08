@@ -107,6 +107,10 @@ fun AppNavigation(
         }
 
         composable(Screen.Stock.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             StockScreen(
                 viewModel = viewModel,
                 onNavigateToReceiveStock = { navController.navigate(Screen.ReceiveStock.route) },
@@ -120,6 +124,8 @@ fun AppNavigation(
                     }
                 }
             )
+
+            }
         }
 
         composable(Screen.Billing.route) {
@@ -146,6 +152,7 @@ fun AppNavigation(
                     navController.navigate(Screen.BillReceipt.createRoute(receiptNumber))
                 },
                 onNavigateToCustomerAccount = { customerId ->
+                    viewModel.openCustomerAccount(customerId)
                     navController.navigate(Screen.Accounts.route) {
                         launchSingleTop = true
                     }
@@ -154,6 +161,10 @@ fun AppNavigation(
         }
 
         composable(Screen.Accounts.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             AccountsScreen(
                 viewModel = viewModel,
                 onNavigateBack = {
@@ -164,6 +175,8 @@ fun AppNavigation(
                     }
                 }
             )
+
+            }
         }
 
         // Full Counter Billing Workflow Screens
@@ -256,13 +269,23 @@ fun AppNavigation(
 
         // Workflows
         composable(Screen.ReceiveStock.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             ReceiveStockScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.RemoveStock.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             RemoveStockScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() },
@@ -272,32 +295,52 @@ fun AppNavigation(
                     }
                 }
             )
+
+            }
         }
 
         composable(Screen.RecordSale.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             RecordSaleScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.RecordDailyTotal.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             RecordDailyTotalScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.ImportCatalog.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             ImportCatalogScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.ProfitAnalysis.route) {
             val deviceRole by viewModel.deviceRole.collectAsState()
-            if (deviceRole.uppercase() == "BILLING") {
+            if (deviceRole.uppercase() != "OWNER") {
                 OwnerPermissionDeniedScreen(
                     title = "Profit Analysis",
                     onNavigateBack = { navController.popBackStack() }
@@ -311,22 +354,34 @@ fun AppNavigation(
         }
 
         composable(Screen.Expenses.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             ExpensesScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.CashTracker.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             CashTrackerScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.BackupRestore.route) {
             val deviceRole by viewModel.deviceRole.collectAsState()
-            if (deviceRole.uppercase() == "BILLING") {
+            if (deviceRole.uppercase() != "OWNER") {
                 OwnerPermissionDeniedScreen(
                     title = "Backup & Restore",
                     onNavigateBack = { navController.popBackStack() }
@@ -340,10 +395,16 @@ fun AppNavigation(
         }
 
         composable(Screen.PigmySavings.route) {
+            val role by viewModel.deviceRole.collectAsState()
+            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
+            else {
+
             PigmySavingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
+
+            }
         }
 
         composable(Screen.Settings.route) {

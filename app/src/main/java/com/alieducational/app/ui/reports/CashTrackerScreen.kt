@@ -814,7 +814,7 @@ fun CashTrackerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "Balance",
+                            text = "Register Net",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (netBalancePaise >= 0) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )

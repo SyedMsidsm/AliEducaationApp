@@ -596,6 +596,7 @@ fun BillHistoryScreen(
                         value = notes,
                         onValueChange = { notes = it },
                         label = { Text("Notes / Reference") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

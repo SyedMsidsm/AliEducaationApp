@@ -135,7 +135,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun syncWithMainPhone(host: String, port: Int = 8080, onResult: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val success = twoPhoneSyncService.syncWithMainPhone(host, port)
             onResult(success)
         }
@@ -150,7 +150,7 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Default")
 
     fun setAppTextSize(size: String) {
-        viewModelScope.launch { preferences.setAppTextSize(size) }
+        viewModelScope.launch(operationHandler) { preferences.setAppTextSize(size) }
     }
 
     val googleDriveFolderUri: StateFlow<String> = preferences.googleDriveFolderUri
@@ -160,15 +160,17 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     fun setGoogleDriveFolder(uri: String, name: String) {
-        viewModelScope.launch { preferences.setGoogleDriveFolder(uri, name) }
+        viewModelScope.launch(operationHandler) { preferences.setGoogleDriveFolder(uri, name) }
     }
 
     fun clearGoogleDriveFolder() {
-        viewModelScope.launch { preferences.clearGoogleDriveFolder() }
+        viewModelScope.launch(operationHandler) { preferences.clearGoogleDriveFolder() }
     }
 
     val appLanguage: StateFlow<String> = preferences.appLanguage
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en")
+
+    val startupSettings = preferences.startupSettings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val isLockEnabled: StateFlow<Boolean> = preferences.isLockEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -189,15 +191,36 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 100000L)
 
     val deviceRole: StateFlow<String> = preferences.deviceRole
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "OWNER")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "UNKNOWN")
 
     val deviceId: StateFlow<String> = preferences.deviceId
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "device-main")
 
+    val syncToken = preferences.syncToken.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val ownerCertificatePin = preferences.ownerCertificatePin.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    fun rotateSyncToken() { viewModelScope.launch(operationHandler) { preferences.setSyncToken(java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID().toString()) } }
+    fun configurePairing(token: String, pin: String) { viewModelScope.launch(operationHandler) { preferences.setSyncToken(token.trim()); preferences.setOwnerCertificatePin(pin) } }
+    fun recoverOwner(activity: androidx.fragment.app.FragmentActivity, done: (String?) -> Unit) = preferences.recoverOwnerOnTrustedDevice(activity, done)
+    fun saveOwnerPin(pin: String, done: (String?) -> Unit) { viewModelScope.launch(operationHandler) { try { preferences.setOwnerPin(pin); done(null) } catch (e: Exception) { done(e.message) } } }
+    fun authorizeOwner(pin: String, done: (Boolean) -> Unit) { viewModelScope.launch(operationHandler) { done(preferences.authorizeOwner(pin)) } }
+
+    private val _operationError = MutableStateFlow<String?>(null)
+    val operationError = _operationError.asStateFlow()
+    fun clearOperationError() { _operationError.value = null }
+    private val operationHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        android.util.Log.e("AliOperation", "Operation failed", e)
+        _operationError.value = e.message ?: "Operation failed. Please retry."
+    }
+
     val pairedOwnerHost: StateFlow<String> = preferences.pairedOwnerHost
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-        val allPigmySchemes = repository.allPigmySchemes
+        private val _accountCustomerTarget = MutableStateFlow<String?>(null)
+    val accountCustomerTarget = _accountCustomerTarget.asStateFlow()
+    fun openCustomerAccount(id: String) { _accountCustomerTarget.value = id }
+    fun clearCustomerAccountTarget() { _accountCustomerTarget.value = null }
+
+    val allPigmySchemes = repository.allPigmySchemes
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activePigmySchemes = repository.activePigmySchemes
@@ -258,11 +281,11 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.ensureDefaultPigmySchemes()
             repository.ensureDefaultCashCategories()
         }
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             preferences.setAppLanguage("en")
             repository.ensurePredefinedServices()
         }
@@ -331,7 +354,7 @@ class AliViewModel @Inject constructor(
         paymentMethod: String = "CASH",
         onDone: (ProductEntity) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val result = repository.addOrUpdateProductWithStock(
                 existingId = existingId,
                 name = name,
@@ -358,14 +381,14 @@ class AliViewModel @Inject constructor(
     fun getPurchasesForSupplier(supplierId: String) = repository.getPurchasesForSupplier(supplierId)
 
     fun addProduct(product: ProductEntity, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.addProduct(product)
             onDone()
         }
     }
 
     fun updateProduct(product: ProductEntity, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updateProduct(product)
             onDone()
         }
@@ -379,7 +402,7 @@ class AliViewModel @Inject constructor(
         reason: String?,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.recordStockAdjustment(productId, type, quantityChange, countedTotal, reason)
             onDone()
         }
@@ -390,7 +413,7 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun addSupplier(supplier: SupplierEntity, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.addSupplier(supplier)
             onDone()
         }
@@ -407,7 +430,7 @@ class AliViewModel @Inject constructor(
         notes: String?,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.receiveGoods(
                 supplierId = supplierId,
                 invoiceNumber = invoiceNumber,
@@ -427,12 +450,13 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun addCustomer(customer: CustomerEntity, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.addCustomer(customer)
             onDone()
         }
     }
 
+    private var isRecordingPayment = false
     fun recordAccountPayment(
         accountType: String,
         accountId: String,
@@ -442,7 +466,10 @@ class AliViewModel @Inject constructor(
         receiptRef: String?,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        if (isRecordingPayment) return
+        isRecordingPayment = true
+        viewModelScope.launch(operationHandler) {
+            try {
             repository.recordAccountPayment(
                 accountType = accountType,
                 accountId = accountId,
@@ -452,6 +479,7 @@ class AliViewModel @Inject constructor(
                 receiptRef = receiptRef
             )
             onDone()
+            } finally { isRecordingPayment = false }
         }
     }
 
@@ -476,7 +504,7 @@ class AliViewModel @Inject constructor(
         notes: String?,
         onSuccess: (SaleEntity) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val sale = repository.recordSale(
                 customerId = customerId,
                 customerName = customerName,
@@ -513,20 +541,21 @@ class AliViewModel @Inject constructor(
     }
 
     fun toggleFavorite(productId: String, isFav: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.setFavorite(productId, isFav)
         }
     }
 
-    fun addItemToBill(product: ProductEntity, unitType: String = "PIECE", quantity: Int = 1) {
+    fun addItemToBill(product: ProductEntity, unitType: String = "PIECE", quantity: Int = 1, packSizeOverride: Int? = null) {
         val currentItems = _billingState.value.items.toMutableList()
+        val conversion = packSizeOverride ?: product.packSize
         val price = if (unitType == "PACK") {
-            if (product.sellingPricePackPaise > 0) product.sellingPricePackPaise else product.sellingPricePiecePaise * product.packSize
+            if (product.sellingPricePackPaise > 0 && conversion == product.packSize) product.sellingPricePackPaise else product.sellingPricePiecePaise * conversion
         } else {
             product.sellingPricePiecePaise
         }
 
-        val existingIndex = currentItems.indexOfFirst { it.productId == product.id && it.unitType == unitType }
+        val existingIndex = currentItems.indexOfFirst { it.productId == product.id && it.unitType == unitType && it.packSize == conversion }
         val addedItem: BillingDraftItem
         if (existingIndex >= 0) {
             val existing = currentItems[existingIndex]
@@ -538,7 +567,7 @@ class AliViewModel @Inject constructor(
                 productName = product.name,
                 urduName = product.urduName,
                 unitType = unitType,
-                packSize = product.packSize,
+                packSize = packSizeOverride ?: product.packSize,
                 quantity = quantity,
                 unitPricePaise = price,
                 movingAvgCostPaise = product.movingAvgCostPaise
@@ -559,7 +588,7 @@ class AliViewModel @Inject constructor(
             onResult(null, null, null)
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val result = repository.lookupBarcode(code)
             if (result != null) {
                 onResult(result.product, result.unitType, result.packQuantity)
@@ -573,7 +602,7 @@ class AliViewModel @Inject constructor(
         val code = barcode.trim()
         if (code.isEmpty()) return
 
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val result = repository.lookupBarcode(code)
             if (result != null) {
                 addItemToBill(result.product, result.unitType, 1)
@@ -596,12 +625,8 @@ class AliViewModel @Inject constructor(
         packQty: Int = 1,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.linkBarcode(barcode, productId, unitType, packQty)
-            val product = repository.getProductById(productId)
-            if (product != null) {
-                addItemToBill(product, unitType, 1)
-            }
             clearUnknownBarcode()
             onDone()
         }
@@ -659,11 +684,12 @@ class AliViewModel @Inject constructor(
         val currentItems = _billingState.value.items.toMutableList()
         val index = currentItems.indexOfFirst { it.productId == productId && it.unitType == currentUnit }
         if (index >= 0) {
-            viewModelScope.launch {
+            viewModelScope.launch(operationHandler) {
                 val product = repository.getProductById(productId)
                 if (product != null) {
+                    val conversion = currentItems[index].packSize
                     val newPrice = if (newUnit == "PACK") {
-                        if (product.sellingPricePackPaise > 0) product.sellingPricePackPaise else product.sellingPricePiecePaise * product.packSize
+                        if (product.sellingPricePackPaise > 0 && conversion == product.packSize) product.sellingPricePackPaise else product.sellingPricePiecePaise * conversion
                     } else {
                         product.sellingPricePiecePaise
                     }
@@ -748,7 +774,7 @@ class AliViewModel @Inject constructor(
             totalPaise = state.netTotalPaise
         )
 
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.holdBill(heldBill)
             resetBilling()
             onDone()
@@ -756,7 +782,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun resumeHeldBill(bill: HeldBillEntity, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val restoredItems = jsonToItems(bill.draftJson)
             val customer = if (bill.customerId != null) repository.getCustomerById(bill.customerId) else null
 
@@ -773,10 +799,12 @@ class AliViewModel @Inject constructor(
     }
 
     fun discardHeldBill(billId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.deleteHeldBill(billId)
         }
     }
+
+    suspend fun getSaleByReceipt(number: String): SaleEntity? = repository.getSaleByReceipt(number)
 
     suspend fun getSaleLines(saleId: String): List<SaleLineEntity> =
         repository.getLinesForSale(saleId)
@@ -797,7 +825,7 @@ class AliViewModel @Inject constructor(
         }
 
         isPostingBill = true
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 val saleItems = state.items.map { item ->
                     SaleItemParam(
@@ -811,20 +839,21 @@ class AliViewModel @Inject constructor(
                         serviceId = item.serviceId,
                         serviceName = item.serviceName,
                         serviceOption = item.serviceOption,
-                        unitLabel = item.unitLabel
+                        unitLabel = item.unitLabel,
+                        packSizeSnapshot = if (item.unitType == "PACK") item.packSize else null
                     )
                 }
 
                 val amountPaid = if (state.paymentMethod == "CASH") {
                     if (state.cashReceivedPaise > 0L) {
-                        state.cashReceivedPaise.coerceAtMost(state.netTotalPaise)
+                        state.cashReceivedPaise
                     } else {
                         state.netTotalPaise
                     }
                 } else if (state.paymentMethod == "UPI" || state.paymentMethod == "CARD") {
                     state.netTotalPaise
                 } else {
-                    state.cashReceivedPaise.coerceAtMost(state.netTotalPaise)
+                    state.cashReceivedPaise
                 }
 
                 val discountInput = if (state.discountType == "PERCENT") {
@@ -915,7 +944,7 @@ class AliViewModel @Inject constructor(
         notes: String?,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.recordDailyMonetaryTotal(dateTimestamp, amountPaise, isFullDayTotal, notes)
             onDone()
         }
@@ -931,7 +960,7 @@ class AliViewModel @Inject constructor(
         attachmentUri: String? = null,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updateShopExpense(
                 id = id,
                 amountPaise = amountPaise,
@@ -946,7 +975,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun voidShopExpense(id: String, reason: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.voidShopExpense(id, reason)
             onDone()
         }
@@ -962,7 +991,7 @@ class AliViewModel @Inject constructor(
         packQty: Int = 1,
         onResult: (com.alieducational.app.data.local.entity.ProductBarcodeEntity) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val entity = repository.generateAndRegisterBarcode(productId, unitType, packQty)
             onResult(entity)
         }
@@ -982,7 +1011,7 @@ class AliViewModel @Inject constructor(
         linkedExpenseId: String? = null,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.recordShopExpense(
                 category = category,
                 amountPaise = amountPaise,
@@ -1010,7 +1039,7 @@ class AliViewModel @Inject constructor(
         onDone: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 repository.recordExpenseRefund(
                     originalExpenseId = originalExpenseId,
@@ -1028,7 +1057,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun updateExpenseAttachment(expenseId: String, attachmentUri: String?, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updateExpenseAttachment(expenseId, attachmentUri)
             onDone()
         }
@@ -1041,7 +1070,7 @@ class AliViewModel @Inject constructor(
         onDone: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 repository.voidSale(saleId, stockCondition, voidReason)
                 onDone()
@@ -1052,7 +1081,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun voidExpense(expenseId: String, reason: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.voidExpense(expenseId, reason)
             onDone()
         }
@@ -1063,7 +1092,7 @@ class AliViewModel @Inject constructor(
         fileName: String,
         onResult: (CashTrackerImportPreview) -> Unit
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val preview = cashTrackerExcelService.parseExcelFile(uri, fileName)
             onResult(preview)
         }
@@ -1073,7 +1102,7 @@ class AliViewModel @Inject constructor(
         items: List<ShopExpenseEntity>,
         onDone: () -> Unit
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.recordShopExpensesBatch(items)
             onDone()
         }
@@ -1087,7 +1116,7 @@ class AliViewModel @Inject constructor(
         activeFiltersSummary: String = "All Categories, Active Transactions",
         onIntentReady: (Intent) -> Unit
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val intent = cashTrackerExcelService.exportCashTrackerExcel(
                 items = items,
                 periodTitle = periodTitle,
@@ -1100,28 +1129,28 @@ class AliViewModel @Inject constructor(
     }
 
     fun archiveCustomer(customerId: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.archiveCustomer(customerId)
             onDone()
         }
     }
 
     fun deleteCustomer(customerId: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.deleteCustomer(customerId)
             onDone()
         }
     }
 
     fun archiveSupplier(supplierId: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.archiveSupplier(supplierId)
             onDone()
         }
     }
 
     fun deleteSupplier(supplierId: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.deleteSupplier(supplierId)
             onDone()
         }
@@ -1145,7 +1174,7 @@ class AliViewModel @Inject constructor(
     val isCreatingBackup: StateFlow<Boolean> = _isCreatingBackup.asStateFlow()
 
     fun loadBackups() {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             _availableBackups.value = backupService.getAvailableBackups()
         }
     }
@@ -1154,7 +1183,7 @@ class AliViewModel @Inject constructor(
         if (_isCreatingBackup.value) return // Prevent overlapping jobs
         _isCreatingBackup.value = true
         _backupStatus.value = "Creating backup..."
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 val meta = backupService.createBackup()
                 _backupStatus.value = "Backup created: ${meta.fileName}"
@@ -1169,23 +1198,27 @@ class AliViewModel @Inject constructor(
     }
 
     fun restoreBackup(file: File, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            val success = backupService.restoreBackup(file)
-            _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
-            onDone()
+        viewModelScope.launch(operationHandler) {
+            try {
+                val success = backupService.restoreBackup(file)
+                _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
+                onDone()
+            } catch (e: Exception) { _backupStatus.value = "Restore rejected; existing data retained: ${e.message}" }
         }
     }
 
     fun restoreFromUri(uri: Uri, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            val success = backupService.restoreFromUri(uri)
-            _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
-            onDone()
+        viewModelScope.launch(operationHandler) {
+            try {
+                val success = backupService.restoreFromUri(uri)
+                _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
+                onDone()
+            } catch (e: Exception) { _backupStatus.value = "Restore rejected; existing data retained: ${e.message}" }
         }
     }
 
     fun exportBackupToUri(backupFile: File, targetUri: Uri, onDone: (Boolean) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val success = backupService.exportBackupToUri(backupFile, targetUri)
             _backupStatus.value = if (success) "Saved to Google Drive / Files successfully" else "Failed to save backup to destination"
             onDone(success)
@@ -1203,7 +1236,7 @@ class AliViewModel @Inject constructor(
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
 
     fun previewSpreadsheet(uri: Uri, fileName: String, sheetIndex: Int = 0) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             _previewData.value = importExportService.previewFile(uri, fileName, sheetIndex)
         }
     }
@@ -1217,7 +1250,7 @@ class AliViewModel @Inject constructor(
         onDone: () -> Unit = {}
     ) {
         if (_isImporting.value) return
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             _isImporting.value = true
             try {
                 val result = importExportService.importProducts(uri, fileName, sheetIndex, mapping, updateExisting)
@@ -1231,23 +1264,23 @@ class AliViewModel @Inject constructor(
 
     // ── Settings ───────────────────────────────────────────────────────
     fun setTheme(mode: String) {
-        viewModelScope.launch { preferences.setThemeMode(mode) }
+        viewModelScope.launch(operationHandler) { preferences.setThemeMode(mode) }
     }
 
     fun setLanguage(lang: String) {
-        viewModelScope.launch { preferences.setAppLanguage(lang) }
+        viewModelScope.launch(operationHandler) { preferences.setAppLanguage(lang) }
     }
 
     fun setLockEnabled(enabled: Boolean) {
-        viewModelScope.launch { preferences.setLockEnabled(enabled) }
+        viewModelScope.launch(operationHandler) { preferences.setLockEnabled(enabled) }
     }
 
     fun setLockTimeout(seconds: Int) {
-        viewModelScope.launch { preferences.setLockTimeoutSeconds(seconds) }
+        viewModelScope.launch(operationHandler) { preferences.setLockTimeoutSeconds(seconds) }
     }
 
     fun completeSetup(shopName: String, language: String, lockEnabled: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             preferences.setShopName(shopName)
             preferences.setAppLanguage(language)
             preferences.setLockEnabled(lockEnabled)
@@ -1257,27 +1290,27 @@ class AliViewModel @Inject constructor(
 
     // ── Pigmy Savings Actions ──────────────────────────────────────────
     fun setPigmyUsualAmount(amountPaise: Long) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             preferences.setPigmyUsualAmountPaise(amountPaise)
         }
     }
 
     fun createPigmyScheme(name: String, usualDailyAmountPaise: Long, onDone: (String) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val id = repository.createPigmyScheme(name, usualDailyAmountPaise)
             onDone(id)
         }
     }
 
     fun updatePigmyScheme(id: String, name: String, usualDailyAmountPaise: Long, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updatePigmyScheme(id, name, usualDailyAmountPaise)
             onDone()
         }
     }
 
     fun setPigmySchemeArchived(id: String, isArchived: Boolean, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.setPigmySchemeArchived(id, isArchived)
             onDone()
         }
@@ -1292,7 +1325,7 @@ class AliViewModel @Inject constructor(
         attachmentUri: String? = null,
         onDone: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val id = repository.recordPigmyDeposit(schemeId, amountPaise, paymentSource, notes, paidTimestamp, attachmentUri)
             onDone(id)
         }
@@ -1307,14 +1340,14 @@ class AliViewModel @Inject constructor(
         paidTimestamp: Long,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updatePigmyDeposit(depositId, schemeId, amountPaise, paymentSource, notes, paidTimestamp)
             onDone()
         }
     }
 
     fun voidPigmyDeposit(depositId: String, reason: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.voidPigmyDeposit(depositId, reason)
             onDone()
         }
@@ -1330,7 +1363,7 @@ class AliViewModel @Inject constructor(
         onDone: (String) -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 val id = repository.recordPigmyWithdrawal(schemeId, amountPaise, destination, notes, withdrawalTimestamp, attachmentUri)
                 onDone(id)
@@ -1349,28 +1382,28 @@ class AliViewModel @Inject constructor(
         withdrawalTimestamp: Long,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updatePigmyWithdrawal(withdrawalId, schemeId, amountPaise, destination, notes, withdrawalTimestamp)
             onDone()
         }
     }
 
     fun voidPigmyWithdrawal(withdrawalId: String, reason: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.voidPigmyWithdrawal(withdrawalId, reason)
             onDone()
         }
     }
 
     fun updatePigmySchemeOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long? = null, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.updatePigmySchemeOpeningBalance(schemeId, openingBalancePaise, date)
             onDone()
         }
     }
 
     fun createCashCategory(name: String, onDone: (String) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             try {
                 val id = repository.createCashCategory(name)
                 onDone(id)
@@ -1379,21 +1412,21 @@ class AliViewModel @Inject constructor(
     }
 
     fun renameCashCategory(id: String, newName: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.renameCashCategory(id, newName)
             onDone()
         }
     }
 
     fun setCashCategoryArchived(id: String, isArchived: Boolean, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.setCashCategoryArchived(id, isArchived)
             onDone()
         }
     }
 
     fun deleteCashCategory(id: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.deleteCashCategory(id)
             onDone()
         }
@@ -1409,7 +1442,7 @@ class AliViewModel @Inject constructor(
         recipientNote: String? = null,
         onDone: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.recordProductGiveaway(
                 productId = productId,
                 quantityBase = quantityBase,
@@ -1423,7 +1456,7 @@ class AliViewModel @Inject constructor(
     }
 
     fun cancelProductGiveaway(giveawayId: String, reason: String? = null, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.cancelProductGiveaway(giveawayId, reason)
             onDone()
         }
@@ -1431,14 +1464,14 @@ class AliViewModel @Inject constructor(
 
     // ── Services Actions ───────────────────────────────────────────────
     fun addCustomService(name: String, unitLabel: String, onDone: (ServiceDefinitionEntity) -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val svc = repository.addCustomService(name, unitLabel)
             onDone(svc)
         }
     }
 
     fun archiveService(serviceId: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             repository.archiveService(serviceId)
             onDone()
         }
@@ -1515,7 +1548,7 @@ class AliViewModel @Inject constructor(
         timestamp: Long = System.currentTimeMillis(),
         onDone: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             val id = repository.recordServiceExpense(
                 category = category,
                 amountPaise = amountPaise,
@@ -1535,13 +1568,13 @@ class AliViewModel @Inject constructor(
         repository.getServiceLinesInRange(startTime, endTime)
 
     fun setDeviceRole(role: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             preferences.setDeviceRole(role)
         }
     }
 
     fun setPairedOwnerHost(host: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(operationHandler) {
             preferences.setPairedOwnerHost(host)
         }
     }

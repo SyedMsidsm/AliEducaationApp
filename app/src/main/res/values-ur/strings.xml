@@ -207,4 +207,10 @@
     <string name="voucher_share_button">واؤچر شیئر کریں</string>
     <string name="voucher_print_button">واؤچر پرنٹ کریں</string>
     <string name="voucher_done_button">مکمل</string>
+    <string name="widget_slim_bar_name">علی ایجوکیشنل فوری اقدامات</string>
+    <string name="widget_slim_bar_description">رقم وصولی، ادائیگی، نیا بل اور اسٹاک شامل کرنے کے فوری اقدامات</string>
+    <string name="widget_action_cash_in">رقم وصولی</string>
+    <string name="widget_action_cash_out">رقم ادائیگی</string>
+    <string name="widget_action_new_bill">نیا بل</string>
+    <string name="widget_action_add_stock">اسٹاک شامل کریں</string>
 </resources>

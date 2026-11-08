@@ -85,6 +85,12 @@ fun SettingsScreen(
     val isLockEnabled by viewModel.isLockEnabled.collectAsState()
     val lockTimeoutSeconds by viewModel.lockTimeoutSeconds.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
+    val pairingToken by viewModel.syncToken.collectAsState()
+    val ownerCertificatePin by viewModel.ownerCertificatePin.collectAsState()
+    var newOwnerPin by remember { mutableStateOf("") }
+    var pinSetupMessage by remember { mutableStateOf<String?>(null) }
+    var tokenInput by remember(pairingToken) { mutableStateOf(pairingToken) }
+    var certificateInput by remember(ownerCertificatePin) { mutableStateOf(ownerCertificatePin) }
     val pairedOwnerHost by viewModel.pairedOwnerHost.collectAsState()
     val syncState by viewModel.syncConnectionState.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
@@ -188,6 +194,11 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
+                        if (deviceRole == "BILLING") {
+                            OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, label = { Text("Owner pairing token") })
+                            OutlinedTextField(value = certificateInput, onValueChange = { certificateInput = it }, label = { Text("Owner certificate SHA-256") })
+                            TextButton(onClick = { viewModel.configurePairing(tokenInput, certificateInput) }) { Text("Save verified pairing") }
+                        }
                         if (deviceRole == "OWNER") {
                             // OWNER HOST CONTROLS
                             val localIp = remember { viewModel.twoPhoneSyncService.getLocalIpAddress() }
@@ -200,7 +211,12 @@ fun SettingsScreen(
                                     Text("Main Phone Host Info", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text("IP Address: $localIp (Port: 8080)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                                    Text("Pairing Token: AE-SYNC-987654", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Pairing token: $pairingToken", style = MaterialTheme.typography.bodySmall)
+                                    Text("Certificate SHA-256: ${com.alieducational.app.data.service.SyncTls.fingerprint()}", style = MaterialTheme.typography.bodySmall)
+                                    TextButton(onClick = { viewModel.rotateSyncToken() }) { Text("Create / revoke pairing token") }
+                                    OutlinedTextField(value = newOwnerPin, onValueChange = { newOwnerPin = it }, label = { Text("Set Owner PIN (6–12 digits)") }, visualTransformation = PasswordVisualTransformation())
+                                    TextButton(onClick = { viewModel.saveOwnerPin(newOwnerPin) { pinSetupMessage = it ?: "Owner PIN saved"; newOwnerPin = "" } }) { Text("Save Owner PIN") }
+                                    pinSetupMessage?.let { Text(it) }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
                                         "Keep this phone connected to shop Wi-Fi or its personal hotspot. On the billing phone, enter this IP address.",
@@ -614,9 +630,17 @@ fun SettingsScreen(
             text = {
                 Column {
                     Text(
-                        "Promoting this device to Owner role requires Owner authorization. Enter the 4-digit Owner PIN to confirm:",
+                        "Enter the Owner PIN previously provisioned on this device. A paired Billing phone cannot create its own Owner authorization.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    TextButton(onClick = {
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        if (activity == null) ownerPinError = "Cannot open device authentication"
+                        else viewModel.recoverOwner(activity) { error ->
+                            if (error == null) { showOwnerPinDialog = false; pinSetupMessage = "Owner access recovered. Set and save a new Owner PIN below." }
+                            else ownerPinError = error
+                        }
+                    }) { Text("Forgot Owner PIN?") }
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = enteredOwnerPin,
@@ -637,12 +661,9 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        // Default owner PIN is 1234
-                        if (enteredOwnerPin == "1234") {
-                            viewModel.setDeviceRole("OWNER")
-                            showOwnerPinDialog = false
-                        } else {
-                            ownerPinError = "Incorrect PIN. Authorization failed."
+                        viewModel.authorizeOwner(enteredOwnerPin) { valid ->
+                            if (valid) showOwnerPinDialog = false
+                            else ownerPinError = "Owner authorization failed or temporarily locked."
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)

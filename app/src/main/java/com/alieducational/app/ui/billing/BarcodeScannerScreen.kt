@@ -493,7 +493,7 @@ fun BarcodeScannerScreen(
                     onClick = {
                         val qty = scannedQuantityStr.toIntOrNull() ?: 1
                         if (qty > 0) {
-                            viewModel.addItemToBill(prod, unitType, qty)
+                            viewModel.addItemToBill(prod, unitType, qty, if (unitType == "PACK") scannedPackQty else null)
                         }
                         scannedProductToConfirm = null
                         isScannerPaused = false
@@ -524,6 +524,7 @@ fun BarcodeScannerScreen(
                 unknownBarcodeToLink = null
                 isScannerPaused = false
                 viewModel.clearUnknownBarcode()
+                    isScannerPaused = false
             },
             title = { Text(stringResource(R.string.scanner_unknown_title)) },
             text = {
@@ -574,8 +575,14 @@ fun BarcodeScannerScreen(
                                 productId = selectedProductForLink,
                                 unitType = selectedUnitForLink,
                                 packQty = 1,
-                                onDone = { unknownBarcodeToLink = null
-                                isScannerPaused = false }
+                                onDone = {
+                                    unknownBarcodeToLink = null
+                                    allProducts.firstOrNull { it.id == selectedProductForLink }?.let { product ->
+                                        scannedProductToConfirm = product to selectedUnitForLink
+                                        scannedPackQty = 1
+                                        scannedQuantityStr = "1"
+                                    }
+                                }
                             )
                         }
                     },
@@ -589,6 +596,7 @@ fun BarcodeScannerScreen(
                 TextButton(onClick = {
                     unknownBarcodeToLink = null
                     viewModel.clearUnknownBarcode()
+                    isScannerPaused = false
                 }) {
                     Text(stringResource(R.string.common_cancel))
                 }

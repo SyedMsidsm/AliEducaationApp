@@ -43,6 +43,7 @@ import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.domain.calculation.PurchaseLineInput
 import com.alieducational.app.domain.calculation.SaleLineInput
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,7 +55,8 @@ data class PurchaseItemParam(
     val productId: String,
     val quantityBase: Int,
     val unitPurchasePricePaise: Long,
-    val newSellingPricePiecePaise: Long? = null
+    val newSellingPricePiecePaise: Long? = null,
+    val lineId: String = UUID.randomUUID().toString()
 )
 
 data class SaleItemParam(
@@ -68,7 +70,8 @@ data class SaleItemParam(
     val serviceId: String? = null,
     val serviceName: String? = null,
     val serviceOption: String? = null,
-    val unitLabel: String? = null
+    val unitLabel: String? = null,
+    val packSizeSnapshot: Int? = null
 )
 
 data class BarcodeLookupResult(
@@ -98,8 +101,13 @@ class AppRepository @Inject constructor(
     private val productGiveawayDao: ProductGiveawayDao,
     private val serviceDefinitionDao: ServiceDefinitionDao,
     private val syncEventDao: SyncEventDao,
-    private val barcodeGeneratorService: com.alieducational.app.data.service.BarcodeGeneratorService = com.alieducational.app.data.service.BarcodeGeneratorService()
+    private val barcodeGeneratorService: com.alieducational.app.data.service.BarcodeGeneratorService = com.alieducational.app.data.service.BarcodeGeneratorService(),
+    private val preferences: com.alieducational.app.data.preferences.AppPreferences? = null
 ) {
+
+    private suspend fun requireOwner() {
+        require(preferences == null || preferences.deviceRole.first() == "OWNER") { "Owner authorization required" }
+    }
 
     // ── Stock & Inventory ──────────────────────────────────────────────
 
@@ -127,7 +135,7 @@ class AppRepository @Inject constructor(
         val mapping = productBarcodeDao.findByBarcode(code)
         if (mapping != null) {
             val prod = productDao.getProductById(mapping.productId)
-            if (prod != null) {
+            if (prod != null && !prod.isArchived) {
                 return BarcodeLookupResult(
                     product = prod,
                     unitType = mapping.unitType,
@@ -196,13 +204,15 @@ class AppRepository @Inject constructor(
         isPaidNow: Boolean = false,
         paymentMethod: String = "CASH"
     ): ProductEntity = db.withTransaction {
-        val qtyBrought = (boxesBrought * packSize) + loosePiecesBrought
+        requireOwner()
+        require(packSize > 0 && boxesBrought >= 0 && loosePiecesBrought >= 0 && costPerPiecePaise >= 0 && transportChargesPaise >= 0 && sellingPricePiecePaise >= 0) { "Invalid product quantity or price" }
+        val qtyBrought = Math.addExact(Math.multiplyExact(boxesBrought, packSize), loosePiecesBrought)
 
         // Calculate landed cost including allocated transportation
         val transportPerPiecePaise = if (qtyBrought > 0 && transportChargesPaise > 0L) {
             transportChargesPaise / qtyBrought
         } else 0L
-        val effectiveLandedCostPaise = costPerPiecePaise + transportPerPiecePaise
+        val effectiveLandedCostPaise = if (qtyBrought > 0) CostCalculator.calculateMovingWeightedAverage(0, 0, qtyBrought, Math.addExact(Math.multiplyExact(qtyBrought.toLong(), costPerPiecePaise), transportChargesPaise)) else costPerPiecePaise
 
         // 1. Resolve or create supplier if provided
         var supplierId: String? = null
@@ -229,7 +239,7 @@ class AppRepository @Inject constructor(
 
         val targetProduct: ProductEntity
         if (existingProduct != null) {
-            val incomingTotalLandedCostPaise = qtyBrought.toLong() * effectiveLandedCostPaise
+            val incomingTotalLandedCostPaise = Math.addExact(Math.multiplyExact(qtyBrought.toLong(), costPerPiecePaise), transportChargesPaise)
             val newAvgCost = if (qtyBrought > 0) {
                 CostCalculator.calculateMovingWeightedAverage(
                     existingStockQuantity = existingProduct.currentSellableStock,
@@ -249,10 +259,10 @@ class AppRepository @Inject constructor(
                 packSize = packSize,
                 movingAvgCostPaise = newAvgCost,
                 sellingPricePiecePaise = sellingPricePiecePaise,
-                sellingPricePackPaise = sellingPricePiecePaise * packSize,
+                sellingPricePackPaise = Math.multiplyExact(sellingPricePiecePaise, packSize.toLong()),
                 wholesalePricePiecePaise = wholesalePricePiecePaise,
                 lowStockThreshold = lowStockThreshold,
-                currentSellableStock = existingProduct.currentSellableStock + qtyBrought,
+                currentSellableStock = Math.addExact(existingProduct.currentSellableStock, qtyBrought),
                 updatedAt = System.currentTimeMillis()
             )
             productDao.updateProduct(targetProduct)
@@ -265,7 +275,7 @@ class AppRepository @Inject constructor(
                 packSize = packSize,
                 movingAvgCostPaise = effectiveLandedCostPaise,
                 sellingPricePiecePaise = sellingPricePiecePaise,
-                sellingPricePackPaise = sellingPricePiecePaise * packSize,
+                sellingPricePackPaise = Math.multiplyExact(sellingPricePiecePaise, packSize.toLong()),
                 wholesalePricePiecePaise = wholesalePricePiecePaise,
                 lowStockThreshold = lowStockThreshold,
                 currentSellableStock = qtyBrought
@@ -321,8 +331,7 @@ class AppRepository @Inject constructor(
 
             if (totalBillAmountPaise > 0L) {
                 if (isPaidNow) {
-                    purchaseDao.insertPurchase(
-                        PurchaseEntity(
+                    val purchase = PurchaseEntity(
                             supplierId = supplierId,
                             invoiceNumber = billNo?.trim()?.ifBlank { null },
                             totalGoodsValuePaise = totalGoodsCostPaise,
@@ -332,7 +341,9 @@ class AppRepository @Inject constructor(
                             paymentMethod = paymentMethod,
                             notes = "Bill #${billNo?.trim() ?: "N/A"}: ${targetProduct.name} ($qtyBrought pcs) - Paid ($paymentMethod)"
                         )
-                    )
+                    purchaseDao.insertPurchase(purchase)
+                    purchaseDao.insertPurchaseLines(listOf(PurchaseLineEntity(purchaseId = purchase.id, productId = targetProduct.id,
+                        quantityBase = qtyBrought, unitPurchasePricePaise = costPerPiecePaise, allocatedDeliveryPaise = transportChargesPaise, effectiveUnitCostPaise = effectiveLandedCostPaise)))
                     paymentDao.insertPayment(
                         AccountPaymentEntity(
                             accountType = "SUPPLIER",
@@ -345,8 +356,7 @@ class AppRepository @Inject constructor(
                     )
                 } else {
                     supplierDao.adjustBalance(supplierId, totalBillAmountPaise)
-                    purchaseDao.insertPurchase(
-                        PurchaseEntity(
+                    val purchase = PurchaseEntity(
                             supplierId = supplierId,
                             invoiceNumber = billNo?.trim()?.ifBlank { null },
                             totalGoodsValuePaise = totalGoodsCostPaise,
@@ -356,7 +366,9 @@ class AppRepository @Inject constructor(
                             paymentMethod = paymentMethod,
                             notes = "Bill #${billNo?.trim() ?: "N/A"}: ${targetProduct.name} ($qtyBrought pcs) - Unpaid Credit"
                         )
-                    )
+                    purchaseDao.insertPurchase(purchase)
+                    purchaseDao.insertPurchaseLines(listOf(PurchaseLineEntity(purchaseId = purchase.id, productId = targetProduct.id,
+                        quantityBase = qtyBrought, unitPurchasePricePaise = costPerPiecePaise, allocatedDeliveryPaise = transportChargesPaise, effectiveUnitCostPaise = effectiveLandedCostPaise)))
                 }
             }
         }
@@ -367,6 +379,7 @@ class AppRepository @Inject constructor(
     suspend fun getProductById(id: String): ProductEntity? = productDao.getProductById(id)
 
     suspend fun addProduct(product: ProductEntity) {
+        requireOwner()
         db.withTransaction {
             productDao.insertProduct(product)
             if (product.currentSellableStock > 0) {
@@ -384,6 +397,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun updateProduct(product: ProductEntity) {
+        requireOwner()
         productDao.updateProduct(product)
     }
 
@@ -394,6 +408,7 @@ class AppRepository @Inject constructor(
         countedTotal: Int? = null,
         reason: String?
     ) {
+        requireOwner()
         db.withTransaction {
             val product = productDao.getProductById(productId) ?: return@withTransaction
             val actualChange = if (type == "CORRECTION" && countedTotal != null) {
@@ -429,6 +444,7 @@ class AppRepository @Inject constructor(
     val allPurchases: Flow<List<PurchaseEntity>> = purchaseDao.getAllPurchases()
 
     suspend fun addSupplier(supplier: SupplierEntity) {
+        requireOwner()
         supplierDao.insertSupplier(supplier)
     }
 
@@ -444,10 +460,18 @@ class AppRepository @Inject constructor(
         paymentMethod: String,
         notes: String?
     ): String = db.withTransaction {
+        requireOwner()
+        require(supplierDao.getSupplierById(supplierId)?.isArchived == false) { "Select an active supplier" }
+        require(items.isNotEmpty() && items.all { it.quantityBase > 0 && it.unitPurchasePricePaise >= 0 }) { "Invalid purchase items" }
+        require(items.map { it.lineId }.distinct().size == items.size) { "Duplicate purchase line" }
+        items.forEach { require(productDao.getProductById(it.productId)?.isArchived == false) { "Unknown product" } }
+        require(totalDeliveryPaise >= 0 && amountPaidPaise >= 0) { "Invalid payment or transport" }
+        val billed = items.fold(0L) { total, item -> Math.addExact(total, Math.multiplyExact(item.quantityBase.toLong(), item.unitPurchasePricePaise)) }
+        require(amountPaidPaise <= Math.addExact(billed, if (deliveryPaidTo == "SUPPLIER") totalDeliveryPaise else 0)) { "Payment exceeds invoice" }
         val purchaseId = UUID.randomUUID().toString()
         val lineInputs = items.map {
             PurchaseLineInput(
-                id = it.productId,
+                id = it.lineId,
                 quantity = it.quantityBase,
                 unitPricePaise = it.unitPurchasePricePaise
             )
@@ -457,7 +481,7 @@ class AppRepository @Inject constructor(
         val totalGoodsValuePaise = items.sumOf { it.quantityBase.toLong() * it.unitPurchasePricePaise }
 
         val purchaseLines = items.map { item ->
-            val alloc = allocatedDelivery.first { it.lineId == item.productId }
+            val alloc = allocatedDelivery.first { it.lineId == item.lineId }
             PurchaseLineEntity(
                 purchaseId = purchaseId,
                 productId = item.productId,
@@ -471,7 +495,7 @@ class AppRepository @Inject constructor(
         // Update product stock and moving weighted-average cost
         items.forEach { item ->
             val product = productDao.getProductById(item.productId) ?: return@forEach
-            val alloc = allocatedDelivery.first { it.lineId == item.productId }
+            val alloc = allocatedDelivery.first { it.lineId == item.lineId }
 
             val newAvgCost = CostCalculator.calculateMovingWeightedAverage(
                 existingStockQuantity = product.currentSellableStock,
@@ -484,7 +508,7 @@ class AppRepository @Inject constructor(
             productDao.adjustSellableStock(item.productId, item.quantityBase)
 
             if (item.newSellingPricePiecePaise != null && item.newSellingPricePiecePaise > 0L) {
-                val updatedProd = product.copy(
+                val updatedProd = (productDao.getProductById(item.productId) ?: error("Product disappeared")).copy(
                     sellingPricePiecePaise = item.newSellingPricePiecePaise,
                     sellingPricePackPaise = item.newSellingPricePiecePaise * product.packSize,
                     updatedAt = System.currentTimeMillis()
@@ -564,24 +588,48 @@ class AppRepository @Inject constructor(
         notes: String?,
         receiptRef: String?
     ) = db.withTransaction {
-        paymentDao.insertPayment(
-            AccountPaymentEntity(
-                accountType = accountType,
-                accountId = accountId,
-                amountPaise = amountPaise,
-                paymentMethod = paymentMethod,
-                notes = notes,
-                receiptReference = receiptRef
-            )
-        )
-
-        if (accountType == "SUPPLIER") {
-            // We paid supplier: our debt decreases
-            supplierDao.adjustBalance(accountId, -amountPaise)
+        requireOwner()
+        require(accountType in setOf("CUSTOMER", "SUPPLIER") && amountPaise > 0) { "Invalid payment" }
+        val balance = if (accountType == "CUSTOMER") {
+            val account = customerDao.getCustomerById(accountId) ?: error("Customer missing")
+            require(!account.isArchived) { "Account archived" }
+            account.currentBalancePaise
         } else {
-            // Customer paid us: their debt decreases
-            customerDao.adjustBalance(accountId, -amountPaise)
+            val account = supplierDao.getSupplierById(accountId) ?: error("Supplier missing")
+            require(!account.isArchived) { "Account archived" }
+            account.currentBalancePaise
         }
+        require(amountPaise <= balance) { "Payment exceeds outstanding balance" }
+        val payment = AccountPaymentEntity(accountType = accountType, accountId = accountId,
+            amountPaise = amountPaise, paymentMethod = paymentMethod, notes = notes, receiptReference = receiptRef)
+        var left = amountPaise
+        val allocations = org.json.JSONArray()
+        if (accountType == "CUSTOMER") {
+            val bills = saleDao.getSalesForCustomer(accountId).first().filter { !it.isVoided && it.remainingCreditPaise > 0 }
+                .sortedWith(compareBy<SaleEntity> { if (it.receiptNumber == receiptRef) 0 else 1 }.thenBy { it.timestamp })
+            for (bill in bills) {
+                if (left == 0L) break
+                val allocated = minOf(left, bill.remainingCreditPaise)
+                saleDao.updateSale(bill.copy(amountReceivedPaise = Math.addExact(bill.amountReceivedPaise, allocated), remainingCreditPaise = bill.remainingCreditPaise - allocated))
+                allocations.put(org.json.JSONObject().put("saleId", bill.id).put("amountPaise", allocated))
+                left -= allocated
+            }
+            customerDao.adjustBalance(accountId, -amountPaise)
+        } else {
+            val invoices = purchaseDao.getPurchasesForSupplier(accountId).first().filter { it.remainingPayablePaise > 0 }.sortedBy { it.timestamp }
+            for (invoice in invoices) {
+                if (left == 0L) break
+                val allocated = minOf(left, invoice.remainingPayablePaise)
+                purchaseDao.updatePurchase(invoice.copy(amountPaidPaise = Math.addExact(invoice.amountPaidPaise, allocated), remainingPayablePaise = invoice.remainingPayablePaise - allocated))
+                allocations.put(org.json.JSONObject().put("purchaseId", invoice.id).put("amountPaise", allocated))
+                left -= allocated
+            }
+            supplierDao.adjustBalance(accountId, -amountPaise)
+        }
+        paymentDao.insertPayment(payment)
+        syncEventDao.insertEvent(SyncEventEntity(eventType = "PAYMENT_ALLOCATED", entityId = payment.id,
+            payloadJson = org.json.JSONObject().put("allocations", allocations).put("openingBalancePaymentPaise", left).toString(),
+            originDeviceId = "OWNER", status = "ACKNOWLEDGED"))
     }
 
     fun getPaymentsForAccount(accountType: String, accountId: String): Flow<List<AccountPaymentEntity>> =
@@ -589,7 +637,7 @@ class AppRepository @Inject constructor(
 
     // ── Sales, Discounts & Profit ──────────────────────────────────────
 
-    val allSales: Flow<List<SaleEntity>> = saleDao.getAllSales()
+    val allSales: Flow<List<SaleEntity>> = saleDao.getAllSalesWithVoided()
     val unresolvedStockSales: Flow<List<SaleEntity>> = saleDao.getUnresolvedStockSales()
 
     suspend fun recordSale(
@@ -603,13 +651,38 @@ class AppRepository @Inject constructor(
         notes: String?,
         originDeviceId: String? = null
     ): SaleEntity = db.withTransaction {
+        require(items.isNotEmpty()) { "Empty bill" }
+        require(discountType in setOf("NONE", "FIXED", "PERCENT")) { "Invalid discount type" }
+        require(items.all { it.lineType in setOf("PRODUCT", "SERVICE") }) { "Invalid sale line type" }
+        require(discountInput.isFinite() && discountInput >= 0 && (discountType != "PERCENT" || discountInput <= 100)) { "Invalid discount" }
+        require(amountReceivedPaise >= 0) { "Invalid received amount" }
+        require(items.all { it.quantityBase > 0 && it.unitSellingPricePaise >= 0 }) { "Invalid quantity or price" }
+        require(items.map { it.lineId }.distinct().size == items.size) { "Duplicate sale line" }
+        require(items.none { saleDao.getLineById(it.lineId) != null }) { "This bill has already been posted; open Bill History" }
+        if (customerId != null) require(customerDao.getCustomerById(customerId)?.isArchived == false) { "Unknown customer" }
+        val products = items.filter { it.lineType == "PRODUCT" }.groupBy { it.productId }
+        products.forEach { (id, group) ->
+            require(id != null) { "Product required" }
+            val product = productDao.getProductById(id) ?: error("Unknown product")
+            require(!product.isArchived && group.sumOf { it.quantityBase.toLong() } <= product.currentSellableStock.toLong()) { "Insufficient stock for ${product.name}" }
+        }
+        val unitPrices = items.associate { item ->
+            val pack = if (item.isPack) item.packSizeSnapshot ?: productDao.getProductById(item.productId ?: "")?.packSize ?: 1 else 1
+            require(pack > 0 && item.quantityBase % pack == 0) { "Invalid pack quantity" }
+            // Sale lines persist base-unit pricing. Exact line totals are calculated separately below.
+            item.lineId to (item.unitSellingPricePaise / pack)
+        }
+        val grossValues = items.associate { item ->
+            val pack = if (item.isPack) item.packSizeSnapshot ?: productDao.getProductById(item.productId ?: "")?.packSize ?: 1 else 1
+            item.lineId to Math.multiplyExact((item.quantityBase / pack).toLong(), item.unitSellingPricePaise)
+        }
         val saleId = UUID.randomUUID().toString()
         val dateStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
-        val randomSuffix = (1000..9999).random()
+        val randomSuffix = UUID.randomUUID().toString().take(12)
         val devicePrefix = if (originDeviceId != null && originDeviceId != "device-main") "AE-B1" else "AE-M"
         val receiptNumber = "$devicePrefix-$dateStr-$randomSuffix"
 
-        val grossTotalPaise = items.sumOf { it.quantityBase.toLong() * it.unitSellingPricePaise }
+        val grossTotalPaise = grossValues.values.fold(0L) { a, b -> Math.addExact(a, b) }
 
         val discountValuePaise: Long = when (discountType) {
             "PERCENT" -> ((grossTotalPaise * discountInput) / 100.0).toLong()
@@ -623,20 +696,21 @@ class AppRepository @Inject constructor(
 
         val netTotalPaise = grossTotalPaise - discountValuePaise
         val remainingCreditPaise = (netTotalPaise - amountReceivedPaise).coerceAtLeast(0L)
+        require(remainingCreditPaise == 0L || customerId != null) { "Customer is required for unpaid balance" }
         val changeGivenPaise = (amountReceivedPaise - netTotalPaise).coerceAtLeast(0L)
 
         // Allocate whole-sale discount proportionally across items using lineId (not productId)
         val saleLineInputs = items.map { item ->
             val costSnapshot = if (item.lineType == "PRODUCT" && item.productId != null) {
                 val product = productDao.getProductById(item.productId)
-                product?.movingAvgCostPaise
+                product?.movingAvgCostPaise?.takeIf { it > 0 }
             } else null
 
             SaleLineInput(
                 id = item.lineId,
-                quantity = item.quantityBase,
-                unitSellingPricePaise = item.unitSellingPricePaise,
-                unitCostPaise = costSnapshot
+                quantity = 1,
+                unitSellingPricePaise = grossValues.getValue(item.lineId),
+                unitCostPaise = costSnapshot?.let { Math.multiplyExact(it, item.quantityBase.toLong()) }
             )
         }
 
@@ -647,7 +721,7 @@ class AppRepository @Inject constructor(
             val isProduct = item.lineType == "PRODUCT" && item.productId != null
             val costSnapshot = if (isProduct) {
                 val product = productDao.getProductById(item.productId!!)
-                product?.movingAvgCostPaise
+                product?.movingAvgCostPaise?.takeIf { it > 0 }
             } else null
 
             SaleLineEntity(
@@ -657,7 +731,7 @@ class AppRepository @Inject constructor(
                 productName = item.productName,
                 quantityBase = item.quantityBase,
                 isPack = item.isPack,
-                unitSellingPricePaise = item.unitSellingPricePaise,
+                unitSellingPricePaise = unitPrices.getValue(item.lineId),
                 unitCostSnapshotPaise = costSnapshot,
                 lineGrossPaise = alloc.grossValuePaise,
                 lineDiscountAllocatedPaise = alloc.allocatedDiscountPaise,
@@ -667,7 +741,7 @@ class AppRepository @Inject constructor(
                 serviceId = item.serviceId,
                 serviceName = item.serviceName,
                 serviceOption = item.serviceOption,
-                unitLabel = item.unitLabel
+                unitLabel = if (item.isPack) "pack:${item.packSizeSnapshot ?: productDao.getProductById(item.productId ?: "")?.packSize ?: 1}" else item.unitLabel
             )
         }
 
@@ -705,12 +779,18 @@ class AppRepository @Inject constructor(
             remainingCreditPaise = remainingCreditPaise,
             paymentMethod = paymentMethod,
             isSummaryEntry = false,
-            unresolvedStockDetails = false,
+            unresolvedStockDetails = saleLines.any { it.lineType == "PRODUCT" && it.unitCostSnapshotPaise == null },
             notes = notes,
             originDeviceId = originDeviceId,
-            syncStatus = "LOCAL"
+            syncStatus = if (preferences?.deviceRole?.first() == "BILLING") "PENDING_SYNC" else "LOCAL"
         )
         saleDao.insertSale(sale)
+        if (sale.syncStatus == "PENDING_SYNC") {
+            items.filter { it.productId != null }.forEach { item ->
+                val quote = syncEventDao.getEventByEntityId("catalog-quote-${item.productId}")?.payloadJson ?: ""
+                syncEventDao.insertEvent(SyncEventEntity(id = "sale-quote-${item.lineId}", eventType = "SALE_QUOTE", entityId = "sale-quote-${item.lineId}", payloadJson = quote, originDeviceId = originDeviceId ?: "BILLING", status = "ACKNOWLEDGED"))
+            }
+        }
 
         // If customer owed credit, update customer debt
         if (customerId != null && remainingCreditPaise > 0) {
@@ -742,6 +822,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun createCashCategory(name: String): String {
+        requireOwner()
         val trimmed = name.trim()
         require(trimmed.isNotBlank()) { "Category name cannot be blank" }
         val existing = cashCategoryDao.getCategoryByName(trimmed)
@@ -759,12 +840,14 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun renameCashCategory(id: String, newName: String) {
+        requireOwner()
         val trimmed = newName.trim()
         require(trimmed.isNotBlank()) { "Category name cannot be blank" }
         cashCategoryDao.renameCategory(id, trimmed)
     }
 
     suspend fun setCashCategoryArchived(id: String, isArchived: Boolean) {
+        requireOwner()
         cashCategoryDao.setArchived(id, isArchived)
     }
 
@@ -820,6 +903,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun createPigmyScheme(name: String, usualDailyAmountPaise: Long): String {
+        requireOwner()
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         val scheme = PigmySchemeEntity(
@@ -835,10 +919,12 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun updatePigmyScheme(id: String, name: String, usualDailyAmountPaise: Long) {
+        requireOwner()
         pigmySchemeDao.updateSchemeDetails(id, name.trim(), maxOf(100L, usualDailyAmountPaise))
     }
 
     suspend fun setPigmySchemeArchived(id: String, isArchived: Boolean) {
+        requireOwner()
         pigmySchemeDao.setArchived(id, isArchived)
     }
 
@@ -850,6 +936,7 @@ class AppRepository @Inject constructor(
         paidTimestamp: Long = System.currentTimeMillis(),
         attachmentUri: String? = null
     ): String = db.withTransaction {
+        requireOwner()
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
         val schemeName = scheme?.name ?: "Pigmy Savings"
         val depositId = UUID.randomUUID().toString()
@@ -897,7 +984,12 @@ class AppRepository @Inject constructor(
         notes: String?,
         paidTimestamp: Long
     ) = db.withTransaction {
+        requireOwner()
         val oldDeposit = pigmyDepositDao.getDepositById(depositId) ?: return@withTransaction
+        require(!oldDeposit.isVoided && amountPaise > 0) { "Invalid or cancelled deposit" }
+        val removed = if (schemeId == oldDeposit.accountSchemeId) oldDeposit.amountPaise - amountPaise else oldDeposit.amountPaise
+        require(pigmyBalance(oldDeposit.accountSchemeId) >= removed) { "Deposit edit would make savings negative" }
+        require(pigmySchemeDao.getSchemeById(schemeId)?.isArchived == false) { "Active scheme required" }
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
         val schemeName = scheme?.name ?: "Pigmy Savings"
         val noteText = if (!notes.isNullOrBlank()) "Pigmy Deposit ($schemeName): $notes" else "Pigmy Deposit ($schemeName)"
@@ -954,7 +1046,9 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun voidPigmyDeposit(depositId: String, reason: String) = db.withTransaction {
+        requireOwner()
         val deposit = pigmyDepositDao.getDepositById(depositId) ?: return@withTransaction
+        require(!deposit.isVoided && pigmyBalance(deposit.accountSchemeId) >= deposit.amountPaise) { "Deposit cancellation would make savings negative" }
         pigmyDepositDao.voidDeposit(depositId, reason)
         if (deposit.linkedExpenseId != null) {
             expenseDao.voidExpense(deposit.linkedExpenseId, "Voided with Pigmy deposit: $reason")
@@ -973,8 +1067,15 @@ class AppRepository @Inject constructor(
     fun getTotalPigmyWithdrawalsForScheme(schemeId: String): Flow<Long?> =
         pigmyWithdrawalDao.getTotalForScheme(schemeId)
 
-    suspend fun updatePigmySchemeOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long? = null) {
-        pigmySchemeDao.updateOpeningBalance(schemeId, maxOf(0L, openingBalancePaise), date)
+    private suspend fun pigmyBalance(schemeId: String): Long {
+        val scheme = pigmySchemeDao.getSchemeById(schemeId) ?: error("Savings scheme missing")
+        return Math.subtractExact(Math.addExact(scheme.openingBalancePaise, pigmyDepositDao.getTotalForScheme(schemeId).first() ?: 0L), pigmyWithdrawalDao.getTotalForScheme(schemeId).first() ?: 0L)
+    }
+    suspend fun updatePigmySchemeOpeningBalance(schemeId: String, openingBalancePaise: Long, date: Long? = null) = db.withTransaction {
+        requireOwner()
+        val scheme = pigmySchemeDao.getSchemeById(schemeId) ?: error("Savings scheme missing")
+        require(openingBalancePaise >= 0 && pigmyBalance(schemeId) - scheme.openingBalancePaise + openingBalancePaise >= 0) { "Opening balance would make savings negative" }
+        pigmySchemeDao.updateOpeningBalance(schemeId, openingBalancePaise, date)
     }
 
     suspend fun recordPigmyWithdrawal(
@@ -985,7 +1086,8 @@ class AppRepository @Inject constructor(
         withdrawalTimestamp: Long = System.currentTimeMillis(),
         attachmentUri: String? = null
     ): String = db.withTransaction {
-        require(amountPaise > 0) { "Withdrawal amount must be greater than zero" }
+        requireOwner()
+        require(amountPaise > 0 && amountPaise <= pigmyBalance(schemeId)) { "Withdrawal must be positive and within the savings balance" }
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
         val schemeName = scheme?.name ?: "Pigmy Savings"
 
@@ -1034,7 +1136,11 @@ class AppRepository @Inject constructor(
         notes: String?,
         withdrawalTimestamp: Long
     ) = db.withTransaction {
+        requireOwner()
         val oldWithdrawal = pigmyWithdrawalDao.getWithdrawalById(withdrawalId) ?: return@withTransaction
+        require(!oldWithdrawal.isVoided && amountPaise > 0) { "Invalid or cancelled withdrawal" }
+        val available = pigmyBalance(schemeId) + if (schemeId == oldWithdrawal.accountSchemeId) oldWithdrawal.amountPaise else 0L
+        require(amountPaise <= available) { "Withdrawal exceeds savings balance" }
         val scheme = pigmySchemeDao.getSchemeById(schemeId)
         val schemeName = scheme?.name ?: "Pigmy Savings"
         val noteText = if (!notes.isNullOrBlank()) "Pigmy withdrawal — $schemeName: $notes" else "Pigmy withdrawal — $schemeName"
@@ -1093,6 +1199,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun voidPigmyWithdrawal(withdrawalId: String, reason: String) = db.withTransaction {
+        requireOwner()
         val withdrawal = pigmyWithdrawalDao.getWithdrawalById(withdrawalId) ?: return@withTransaction
         pigmyWithdrawalDao.voidWithdrawal(withdrawalId, reason)
         if (withdrawal.linkedExpenseId != null) {
@@ -1117,6 +1224,7 @@ class AppRepository @Inject constructor(
         recipientNote: String? = null,
         timestamp: Long = System.currentTimeMillis()
     ): String = db.withTransaction {
+        requireOwner()
         val product = productDao.getProductById(productId)
             ?: throw IllegalArgumentException("Product not found")
 
@@ -1158,6 +1266,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun cancelProductGiveaway(giveawayId: String, reason: String? = null) = db.withTransaction {
+        requireOwner()
         val giveaway = productGiveawayDao.getGiveawayById(giveawayId) ?: return@withTransaction
         if (giveaway.isCancelled) return@withTransaction
 
@@ -1210,6 +1319,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun addCustomService(name: String, unitLabel: String): ServiceDefinitionEntity {
+        requireOwner()
         val service = ServiceDefinitionEntity(
             name = name.trim(),
             unitLabel = unitLabel.trim().ifBlank { "job" },
@@ -1220,6 +1330,7 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun archiveService(serviceId: String) {
+        requireOwner()
         serviceDefinitionDao.archiveService(serviceId)
     }
 
@@ -1231,6 +1342,7 @@ class AppRepository @Inject constructor(
         attachmentUri: String? = null,
         timestamp: Long = System.currentTimeMillis()
     ): String {
+        requireOwner()
         val expenseId = UUID.randomUUID().toString()
         val expense = ShopExpenseEntity(
             id = expenseId,
@@ -1283,6 +1395,8 @@ class AppRepository @Inject constructor(
         isFullDayTotal: Boolean,
         notes: String?
     ): SaleEntity = db.withTransaction {
+        requireOwner()
+        require(amountPaise > 0) { "Enter a positive total" }
         val saleId = UUID.randomUUID().toString()
         val dateStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date(dateTimestamp))
         val receiptNumber = "AE-DAILY-$dateStr"
@@ -1328,7 +1442,28 @@ class AppRepository @Inject constructor(
         timestamp: Long,
         attachmentUri: String? = null
     ): Boolean = db.withTransaction {
+        requireOwner()
         val existing = expenseDao.getExpenseById(id) ?: return@withTransaction false
+        require(!existing.isVoided && amountPaise > 0) { "Invalid or cancelled expense" }
+        val refunds = expenseDao.getActiveRefundsForExpense(id)
+        require(amountPaise >= refunds.sumOf { it.amountPaise }) { "Amount cannot be below existing refunds" }
+        if (existing.isExpenseRefund) {
+            val parent = expenseDao.getExpenseById(existing.linkedExpenseId ?: "") ?: error("Refund source missing")
+            require(!parent.isVoided && amountPaise + expenseDao.getActiveRefundsForExpense(parent.id).filter { it.id != id }.sumOf { it.amountPaise } <= parent.amountPaise) { "Refund exceeds original expense" }
+        }
+        if (existing.isSavingsTransfer) {
+            require(paymentMethod == existing.paymentMethod) { "Change savings payment source from Pigmy Savings" }
+            pigmyDepositDao.getByExpense(id)?.let {
+                require(pigmyBalance(it.accountSchemeId) - it.amountPaise + amountPaise >= 0) { "Deposit edit would make savings negative" }
+                pigmyDepositDao.updateDeposit(it.copy(amountPaise = amountPaise, notes = notes, paidTimestamp = timestamp, updatedAt = System.currentTimeMillis()))
+            }
+            pigmyWithdrawalDao.getByExpense(id)?.let {
+                val available = (pigmySchemeDao.getSchemeById(it.accountSchemeId)?.openingBalancePaise ?: 0) + (pigmyDepositDao.getTotalForScheme(it.accountSchemeId).first() ?: 0)
+                val other = (pigmyWithdrawalDao.getTotalForScheme(it.accountSchemeId).first() ?: 0) - it.amountPaise
+                require(amountPaise <= available - other) { "Withdrawal exceeds savings" }
+                pigmyWithdrawalDao.updateWithdrawal(it.copy(amountPaise = amountPaise, notes = notes, withdrawalTimestamp = timestamp, updatedAt = System.currentTimeMillis()))
+            }
+        }
         val updated = existing.copy(
             amountPaise = amountPaise,
             category = category,
@@ -1364,11 +1499,9 @@ class AppRepository @Inject constructor(
         true
     }
 
-    suspend fun voidShopExpense(id: String, reason: String): Boolean = db.withTransaction {
-        expenseDao.voidExpense(id, reason)
-        pigmyDepositDao.voidByLinkedExpenseId(id, reason)
-        pigmyWithdrawalDao.voidByLinkedExpenseId(id, reason)
-        true
+    suspend fun voidShopExpense(id: String, reason: String): Boolean {
+        voidExpense(id, reason)
+        return true
     }
 
     suspend fun getNoteSuggestions(isIncome: Boolean, query: String = ""): List<String> {
@@ -1395,12 +1528,18 @@ class AppRepository @Inject constructor(
         unitType: String = "PIECE",
         packQty: Int = 1
     ): ProductBarcodeEntity = db.withTransaction {
+        requireOwner()
         val product = productDao.getProductById(productId)
             ?: throw IllegalArgumentException("Product $productId not found")
 
+        require(!product.isArchived && unitType in setOf("PIECE", "PACK") && (unitType != "PACK" || packQty > 1)) { "Invalid product or pack" }
+        require(product.barcode.isNullOrBlank() || product.barcode.startsWith("AE-P")) { "Keep the manufacturer barcode; shop generation is only for items without one" }
+        val prior = productBarcodeDao.getBarcodesForProduct(productId).firstOrNull { it.unitType == unitType && (unitType != "PACK" || it.packQuantity == packQty) && it.barcode.startsWith("AE-P") }
+        if (prior != null) return@withTransaction prior
         val code = barcodeGeneratorService.createBarcodePayload(productId, unitType, packQty)
         val existing = productBarcodeDao.findByBarcode(code)
         if (existing != null) {
+            require(existing.productId == productId) { "Barcode collision; generation aborted" }
             return@withTransaction existing
         }
 
@@ -1432,6 +1571,7 @@ class AppRepository @Inject constructor(
         isExpenseRefund: Boolean = false,
         linkedExpenseId: String? = null
     ) {
+        requireOwner()
         expenseDao.insertExpense(
             ShopExpenseEntity(
                 category = category,
@@ -1457,11 +1597,13 @@ class AppRepository @Inject constructor(
         timestamp: Long = System.currentTimeMillis(),
         attachmentUri: String? = null
     ) = db.withTransaction {
+        requireOwner()
         val original = expenseDao.getExpenseById(originalExpenseId)
             ?: throw IllegalArgumentException("Original expense $originalExpenseId not found")
         if (amountPaise <= 0L) {
             throw IllegalArgumentException("Refund amount must be positive")
         }
+        require(!original.isVoided && !original.isIncome && !original.isSavingsTransfer) { "Select an active operating expense" }
         val activeRefunds = expenseDao.getActiveRefundsForExpense(originalExpenseId)
         val priorTotal = activeRefunds.sumOf { it.amountPaise }
         val remainingRefundable = original.amountPaise - priorTotal
@@ -1487,16 +1629,26 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun updateExpenseAttachment(expenseId: String, attachmentUri: String?) {
+        requireOwner()
         val existing = expenseDao.getExpenseById(expenseId) ?: return
         expenseDao.updateExpense(existing.copy(attachmentUri = attachmentUri))
     }
 
     suspend fun recordShopExpensesBatch(expenses: List<ShopExpenseEntity>) {
-        expenseDao.insertExpenses(expenses)
+        requireOwner()
+        db.withTransaction {
+            expenses.forEach { expense ->
+                require(expense.amountPaise > 0) { "Invalid imported amount" }
+                val key = java.util.UUID.nameUUIDFromBytes("${expense.timestamp}|${expense.category}|${expense.amountPaise}|${expense.isIncome}|${expense.notes}".toByteArray()).toString()
+                if (expenseDao.getExpenseById("import-$key") == null) expenseDao.insertExpense(expense.copy(id = "import-$key"))
+            }
+        }
     }
 
     fun getSalesByDateRange(startTime: Long, endTime: Long): Flow<List<SaleEntity>> =
         saleDao.getSalesByDateRange(startTime, endTime)
+
+    suspend fun getSaleByReceipt(number: String): SaleEntity? = saleDao.getSaleByReceipt(number)
 
     suspend fun getLinesForSale(saleId: String): List<SaleLineEntity> =
         saleDao.getLinesForSale(saleId)
@@ -1506,6 +1658,7 @@ class AppRepository @Inject constructor(
         stockCondition: String, // SELLABLE, DAMAGED, NONE
         voidReason: String
     ) = db.withTransaction {
+        requireOwner()
         val sale = saleDao.getSaleById(saleId) ?: throw IllegalArgumentException("Sale not found: $saleId")
         if (sale.isVoided) throw IllegalStateException("Sale $saleId is already voided")
 
@@ -1531,7 +1684,8 @@ class AppRepository @Inject constructor(
                         )
                     }
                     "DAMAGED" -> {
-                        productDao.moveToDamagedStock(pId, line.quantityBase)
+                        val product = productDao.getProductById(pId) ?: error("Return product missing")
+                        productDao.updateProduct(product.copy(currentDamagedStock = Math.addExact(product.currentDamagedStock, line.quantityBase)))
                         stockMovementDao.insertMovement(
                             StockMovementEntity(
                                 productId = pId,
@@ -1582,9 +1736,13 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun voidExpense(expenseId: String, reason: String) = db.withTransaction {
+        requireOwner()
         val refunds = expenseDao.getActiveRefundsForExpense(expenseId)
         if (refunds.isNotEmpty()) {
             throw IllegalStateException("Cannot cancel an expense with active linked refunds. Please cancel linked refunds first.")
+        }
+        pigmyDepositDao.getByExpense(expenseId)?.takeUnless { it.isVoided }?.let {
+            require(pigmyBalance(it.accountSchemeId) >= it.amountPaise) { "Deposit cancellation would make savings negative" }
         }
         expenseDao.voidExpense(expenseId, reason)
         pigmyDepositDao.voidByLinkedExpenseId(expenseId, reason)
@@ -1592,23 +1750,32 @@ class AppRepository @Inject constructor(
     }
 
     suspend fun deleteCashCategory(id: String) {
+        requireOwner()
         cashCategoryDao.deleteCategory(id)
     }
 
     suspend fun archiveCustomer(customerId: String) {
+        requireOwner()
+        require(customerDao.getCustomerById(customerId)?.currentBalancePaise == 0L) { "Settle outstanding balance before archiving" }
         customerDao.archiveCustomer(customerId)
     }
 
     suspend fun deleteCustomer(customerId: String) {
-        customerDao.deleteCustomer(customerId)
+        requireOwner()
+        require((customerDao.getCustomerById(customerId)?.currentBalancePaise ?: 0) == 0L) { "Settle account before archiving" }
+        customerDao.archiveCustomer(customerId)
     }
 
     suspend fun archiveSupplier(supplierId: String) {
+        requireOwner()
+        require(supplierDao.getSupplierById(supplierId)?.currentBalancePaise == 0L) { "Settle outstanding balance before archiving" }
         supplierDao.archiveSupplier(supplierId)
     }
 
     suspend fun deleteSupplier(supplierId: String) {
-        supplierDao.deleteSupplier(supplierId)
+        requireOwner()
+        require((supplierDao.getSupplierById(supplierId)?.currentBalancePaise ?: 0) == 0L) { "Settle account before archiving" }
+        supplierDao.archiveSupplier(supplierId)
     }
 
     fun getPurchasesForSupplier(supplierId: String): kotlinx.coroutines.flow.Flow<List<com.alieducational.app.data.local.entity.PurchaseEntity>> =

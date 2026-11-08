@@ -195,6 +195,7 @@ fun RecordDailyTotalScreen(
                             value = notes,
                             onValueChange = { notes = it },
                             label = { Text("Notes (Optional)") },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp)

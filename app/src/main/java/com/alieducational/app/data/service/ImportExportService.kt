@@ -3,6 +3,8 @@ package com.alieducational.app.data.service
 import com.alieducational.app.domain.calculation.CostCalculator
 
 import android.content.Context
+import androidx.room.withTransaction
+import kotlinx.coroutines.flow.first
 import android.net.Uri
 import com.alieducational.app.data.local.dao.ImportBatchDao
 import com.alieducational.app.data.local.dao.ProductDao
@@ -66,7 +68,9 @@ class ImportExportService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val productDao: ProductDao,
     private val movementDao: StockMovementDao,
-    private val importBatchDao: ImportBatchDao
+    private val importBatchDao: ImportBatchDao,
+    private val database: com.alieducational.app.data.local.AppDatabase? = null,
+    private val preferences: com.alieducational.app.data.preferences.AppPreferences? = null
 ) {
 
     suspend fun previewFile(
@@ -266,7 +270,15 @@ class ImportExportService @Inject constructor(
         )
     }
 
-    suspend fun importProducts(
+    suspend fun importProducts(uri: Uri, fileName: String, sheetIndex: Int, mapping: ColumnMapping, updateExisting: Boolean = false): ImportResult {
+        return try {
+            require(preferences == null || preferences.deviceRole.first() == "OWNER") { "Owner authorization required" }
+            if (database != null) database.withTransaction { importProductsInternal(uri, fileName, sheetIndex, mapping, updateExisting) }
+            else importProductsInternal(uri, fileName, sheetIndex, mapping, updateExisting)
+        } catch (e: Exception) { ImportResult(0, 0, 0, isSuccess = false, failureReason = "Import rolled back: ${e.message}") }
+    }
+
+    private suspend fun importProductsInternal(
         uri: Uri,
         fileName: String,
         sheetIndex: Int,
@@ -308,6 +320,8 @@ class ImportExportService @Inject constructor(
             }
         }
 
+        val batchKey = java.security.MessageDigest.getInstance("SHA-256").digest((rows.toString() + mapping.toString() + sheetIndex).toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        if (importBatchDao.getBatch(batchKey) != null) return@withContext ImportResult(rows.size - 1, 0, rows.size - 1, failureReason = "This exact import has already been applied")
         var imported = 0
         var updatedCount = 0
         var skippedDuplicates = 0
@@ -442,17 +456,19 @@ class ImportExportService @Inject constructor(
             }
         }
 
+        require(errors.isEmpty()) { errors.joinToString("; ") }
         // Record import batch history
         try {
             importBatchDao.insertBatch(
                 ImportBatchEntity(
+                    id = batchKey,
                     fileName = fileName,
                     totalRows = rows.size - 1,
                     importedCount = imported + updatedCount,
                     skippedCount = skippedDuplicates
                 )
             )
-        } catch (_: Exception) {}
+        } catch (e: Exception) { throw IllegalStateException("Could not record import history", e) }
 
         return@withContext ImportResult(
             totalRead = rows.size - 1,

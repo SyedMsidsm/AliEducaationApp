@@ -24,7 +24,7 @@ class BarcodeGeneratorService @Inject constructor() {
      * Format: AE-P{idPrefix}-PC for piece, AE-P{idPrefix}-PK{packQty} for pack.
      */
     fun createBarcodePayload(productId: String, unitType: String, packQty: Int): String {
-        val cleanId = productId.replace("-", "").take(6).uppercase()
+        val cleanId = productId.replace("-", "").uppercase()
         return if (unitType.equals("PACK", ignoreCase = true)) {
             val safePack = if (packQty > 1) packQty else 10
             "AE-P$cleanId-PK$safePack"

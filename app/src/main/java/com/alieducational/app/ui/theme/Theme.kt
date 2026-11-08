@@ -86,9 +86,10 @@ fun AliEducationalTheme(
         else -> 1.0f
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = getScaledTypography(scaleFactor),
-        content = content,
-    )
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, density.fontScale * scaleFactor)
+    ) {
+        MaterialTheme(colorScheme = colorScheme, typography = getScaledTypography(1f), content = content)
+    }
 }
