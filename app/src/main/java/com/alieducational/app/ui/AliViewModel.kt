@@ -32,12 +32,15 @@ import com.alieducational.app.data.service.CashTrackerImportPreview
 import com.alieducational.app.data.service.ColumnMapping
 import com.alieducational.app.data.service.ImportExportService
 import com.alieducational.app.data.service.ImportResult
+import com.alieducational.app.data.service.OwnerSyncService
 import com.alieducational.app.data.service.ReceiptService
 import com.alieducational.app.data.service.SpreadsheetPreview
 import com.alieducational.app.data.service.SyncConnectionState
 import com.alieducational.app.data.service.TwoPhoneSyncService
 import com.alieducational.app.util.StepUpAuth
+import android.content.Context
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -119,6 +122,7 @@ data class BillingState(
 
 @HiltViewModel
 class AliViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: AppRepository,
     private val preferences: AppPreferences,
     private val importExportService: ImportExportService,
@@ -132,11 +136,11 @@ class AliViewModel @Inject constructor(
     val syncConnectionState: StateFlow<SyncConnectionState> = twoPhoneSyncService.connectionState
 
     fun startSyncServer(port: Int = 8080) {
-        twoPhoneSyncService.startOwnerServer(port)
+        OwnerSyncService.start(context, port)
     }
 
     fun stopSyncServer() {
-        twoPhoneSyncService.stopOwnerServer()
+        OwnerSyncService.stop(context)
     }
 
     fun syncWithMainPhone(host: String, port: Int = 8080, onResult: (Boolean) -> Unit = {}) {
