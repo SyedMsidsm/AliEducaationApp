@@ -1,8 +1,12 @@
 package com.alieducational.app
 
+import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -16,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.fragment.app.FragmentActivity
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alieducational.app.ui.AliViewModel
@@ -34,19 +37,28 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var biometricAuthManager: BiometricAuthManager
 
+    private val viewModel: AliViewModel by viewModels()
+    fun getAppViewModel(): AliViewModel = viewModel
+
     private var lastPausedTime: Long = 0L
-    private var isAppLocked by mutableStateOf(true)
     private var configuredLockTimeout = 120
     private var pendingWidgetAction by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+        } else {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        }
         enableEdgeToEdge()
         extractWidgetAction(intent)
         com.alieducational.app.widget.AliSlimBarWidgetProvider.updateAllWidgets(this)
 
         setContent {
-            val viewModel: AliViewModel = hiltViewModel()
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
             val appTextSize by viewModel.appTextSize.collectAsState()
             val operationError by viewModel.operationError.collectAsState()
@@ -74,7 +86,7 @@ class MainActivity : FragmentActivity() {
 
                     val startDestination = when {
                         isFirstLaunch -> Screen.Setup.route
-                        isLockEnabled && isAppLocked -> Screen.Unlock.route
+                        isLockEnabled && viewModel.isAppLocked -> Screen.Unlock.route
                         else -> Screen.Home.route
                     }
 
@@ -87,11 +99,11 @@ class MainActivity : FragmentActivity() {
 
                     val showBottomBar = currentRoute in mainTabRoutes &&
                             !isFirstLaunch &&
-                            (!isLockEnabled || !isAppLocked)
+                            (!isLockEnabled || !viewModel.isAppLocked)
 
-                    androidx.compose.runtime.LaunchedEffect(pendingWidgetAction, isLockEnabled, isAppLocked, isFirstLaunch) {
+                    androidx.compose.runtime.LaunchedEffect(pendingWidgetAction, isLockEnabled, viewModel.isAppLocked, isFirstLaunch) {
                         val action = pendingWidgetAction
-                        if (action != null && !isFirstLaunch && (!isLockEnabled || !isAppLocked)) {
+                        if (action != null && !isFirstLaunch && (!isLockEnabled || !viewModel.isAppLocked)) {
                             when (action) {
                                 com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN -> {
                                     viewModel.triggerWidgetAction(com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN)
@@ -134,14 +146,14 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                     ) { innerPadding ->
-                        if (isLockEnabled && isAppLocked && !isFirstLaunch) {
-                            com.alieducational.app.ui.auth.UnlockScreen(biometricAuthManager = biometricAuthManager, onUnlocked = { isAppLocked = false })
+                        if (isLockEnabled && viewModel.isAppLocked && !isFirstLaunch) {
+                            com.alieducational.app.ui.auth.UnlockScreen(biometricAuthManager = biometricAuthManager, onUnlocked = { viewModel.isAppLocked = false })
                         } else AppNavigation(
                             navController = navController,
                             startDestination = startDestination,
                             viewModel = viewModel,
                             biometricAuthManager = biometricAuthManager,
-                            onUnlocked = { isAppLocked = false },
+                            onUnlocked = { viewModel.isAppLocked = false },
                             modifier = Modifier.padding(innerPadding)
                         )
                     }
@@ -152,7 +164,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onPause() {
         super.onPause()
-        lastPausedTime = System.currentTimeMillis()
+        lastPausedTime = SystemClock.elapsedRealtime()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -187,10 +199,10 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         com.alieducational.app.widget.AliSlimBarWidgetProvider.updateAllWidgets(this)
         if (lastPausedTime > 0L) {
-            val elapsedSeconds = (System.currentTimeMillis() - lastPausedTime) / 1000
+            val elapsedSeconds = (SystemClock.elapsedRealtime() - lastPausedTime) / 1000
             // If background timeout exceeded (default 120s), relock
             if (elapsedSeconds >= configuredLockTimeout) {
-                isAppLocked = true
+                viewModel.isAppLocked = true
             }
         }
     }

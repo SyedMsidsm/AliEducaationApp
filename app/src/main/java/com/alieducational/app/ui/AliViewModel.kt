@@ -2,6 +2,9 @@ package com.alieducational.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alieducational.app.data.local.entity.CustomerEntity
@@ -171,6 +174,8 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "en")
 
     val startupSettings = preferences.startupSettings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    var isAppLocked by mutableStateOf(true)
 
     val isLockEnabled: StateFlow<Boolean> = preferences.isLockEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
