@@ -94,9 +94,6 @@ fun ProfitScreen(
 
     val context = LocalContext.current
     val allProducts by viewModel.allProducts.collectAsState()
-    val allSales by viewModel.allSales.collectAsState()
-    val allSaleLines by viewModel.allSaleLines.collectAsState()
-    val allExpenses by viewModel.allExpenses.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
 
     val isOwner = deviceRole == "OWNER"
@@ -163,14 +160,14 @@ fun ProfitScreen(
     }
 
     // ── FINANCIAL AGGREGATIONS ──────────────────────────────────────
-    // 1. Sales & COGS in period (non-voided)
-    val periodSales = remember(allSales, startTime, endTime) {
-        allSales.filter { !it.isVoided && it.timestamp in startTime..endTime }
-    }
-    val periodSaleIds = remember(periodSales) { periodSales.map { it.id }.toSet() }
-    val periodSaleLines = remember(allSaleLines, periodSaleIds) {
-        allSaleLines.filter { it.saleId in periodSaleIds }
-    }
+    // 1. Sales & COGS in period (non-voided) - Range-bounded database query
+    val periodSales by remember(startTime, endTime) {
+        viewModel.getSalesByDateRange(startTime, endTime)
+    }.collectAsState(initial = emptyList())
+
+    val periodSaleLines by remember(startTime, endTime) {
+        viewModel.getSaleLinesInRange(startTime, endTime)
+    }.collectAsState(initial = emptyList())
 
     // Products (retail) lines
     val periodProductLines = remember(periodSaleLines) {
@@ -199,11 +196,10 @@ fun ProfitScreen(
         periodServiceLines.sumOf { it.lineNetPaise }
     }
 
-    // 2. Canonical Expenses & Refunds in period
-    // Non-voided, non-savings-transfer expenses
-    val periodActiveExpenses = remember(allExpenses, startTime, endTime) {
-        allExpenses.filter { !it.isVoided && !it.isSavingsTransfer && it.timestamp in startTime..endTime }
-    }
+    // 2. Canonical Expenses & Refunds in period - Range-bounded database query
+    val periodActiveExpenses by remember(startTime, endTime) {
+        viewModel.getOperatingExpensesInRange(startTime, endTime)
+    }.collectAsState(initial = emptyList())
 
     // Product expenses & refunds
     val productExpenses = remember(periodActiveExpenses) {

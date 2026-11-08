@@ -520,6 +520,15 @@ class AliViewModel @Inject constructor(
     val allSales = repository.allSales
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    fun getSalesByDateRange(startTime: Long, endTime: Long): kotlinx.coroutines.flow.Flow<List<SaleEntity>> =
+        repository.getSalesByDateRange(startTime, endTime)
+
+    fun getSaleLinesInRange(startTime: Long, endTime: Long): kotlinx.coroutines.flow.Flow<List<SaleLineEntity>> =
+        repository.getSaleLinesInRange(startTime, endTime)
+
+    fun getOperatingExpensesInRange(startTime: Long, endTime: Long): kotlinx.coroutines.flow.Flow<List<ShopExpenseEntity>> =
+        repository.getOperatingExpensesInRange(startTime, endTime)
+
     val unresolvedStockSales = repository.unresolvedStockSales
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

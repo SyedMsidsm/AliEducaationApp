@@ -255,6 +255,9 @@ interface SaleDao {
     @Query("SELECT sl.* FROM sale_lines sl INNER JOIN sales s ON sl.saleId = s.id WHERE s.isVoided = 0 AND sl.lineType = 'SERVICE' AND s.timestamp >= :startTime AND s.timestamp <= :endTime")
     fun getServiceLinesInRange(startTime: Long, endTime: Long): Flow<List<SaleLineEntity>>
 
+    @Query("SELECT sl.* FROM sale_lines sl INNER JOIN sales s ON sl.saleId = s.id WHERE s.isVoided = 0 AND s.timestamp >= :startTime AND s.timestamp <= :endTime")
+    fun getSaleLinesInRange(startTime: Long, endTime: Long): Flow<List<SaleLineEntity>>
+
     @Query("SELECT * FROM sales WHERE syncStatus = 'PENDING_SYNC' ORDER BY timestamp ASC")
     suspend fun getPendingSyncSales(): List<SaleEntity>
 

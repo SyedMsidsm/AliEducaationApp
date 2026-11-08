@@ -2,6 +2,7 @@ package com.alieducational.app.ui.billing
 
 import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -90,8 +91,8 @@ fun BillHistoryScreen(
 ) {
     val context = LocalContext.current
     val allSales by viewModel.allSales.collectAsState()
-    val allSaleLines by viewModel.allSaleLines.collectAsState()
     val selectedBillIds by viewModel.selectedBillIds.collectAsState()
+    var displayLimit by remember { mutableStateOf(100) }
     val deviceRole by viewModel.deviceRole.collectAsState()
     val isOwner = deviceRole == "OWNER"
 
@@ -190,6 +191,10 @@ fun BillHistoryScreen(
             }
             matchesTime && matchesSearch && matchesStatus
         }
+    }
+
+    val visibleSales = remember(filteredSales, displayLimit) {
+        filteredSales.take(displayLimit)
     }
 
     val completedBills = filteredSales.filter { !it.isVoided }
@@ -446,7 +451,7 @@ fun BillHistoryScreen(
                         }
                     }
                 } else {
-                    items(filteredSales, key = { it.id }) { sale ->
+                    items(visibleSales, key = { it.id }) { sale ->
                         val isSelected = selectedBillIds.contains(sale.id)
                         BillHistoryRow(
                             sale = sale,
@@ -465,6 +470,23 @@ fun BillHistoryScreen(
                             }
                         )
                     }
+
+                    if (filteredSales.size > displayLimit) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                OutlinedButton(
+                                    onClick = { displayLimit += 100 }
+                                ) {
+                                    Text("Load More (${filteredSales.size - displayLimit} remaining)")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -476,8 +498,9 @@ fun BillHistoryScreen(
 
     // Bill Detail Dialog
     selectedSaleForDetail?.let { sale ->
-        val saleLines = remember(sale.id, allSaleLines) {
-            allSaleLines.filter { it.saleId == sale.id }
+        var saleLines by remember(sale.id) { mutableStateOf<List<SaleLineEntity>>(emptyList()) }
+        LaunchedEffect(sale.id) {
+            saleLines = viewModel.getSaleLines(sale.id)
         }
 
         AlertDialog(

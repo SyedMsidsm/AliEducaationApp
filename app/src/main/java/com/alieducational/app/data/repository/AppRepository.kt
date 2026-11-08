@@ -1652,6 +1652,12 @@ class AppRepository @Inject constructor(
     fun getSalesByDateRange(startTime: Long, endTime: Long): Flow<List<SaleEntity>> =
         saleDao.getSalesByDateRange(startTime, endTime)
 
+    fun getSaleLinesInRange(startTime: Long, endTime: Long): Flow<List<SaleLineEntity>> =
+        saleDao.getSaleLinesInRange(startTime, endTime)
+
+    fun getOperatingExpensesInRange(startTime: Long, endTime: Long): Flow<List<ShopExpenseEntity>> =
+        expenseDao.getOperatingExpensesInRange(startTime, endTime)
+
     suspend fun getSaleByReceipt(number: String): SaleEntity? = saleDao.getSaleByReceipt(number)
 
     suspend fun getLinesForSale(saleId: String): List<SaleLineEntity> =
