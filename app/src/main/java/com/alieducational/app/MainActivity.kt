@@ -3,6 +3,8 @@ package com.alieducational.app
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.alieducational.app.ui.landing.AliLandingScreen
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -45,7 +47,9 @@ class MainActivity : FragmentActivity() {
     private var pendingWidgetAction by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splashScreen.setKeepOnScreenCondition { viewModel.startupSettings.value == null }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             setRecentsScreenshotEnabled(false)
         } else {
@@ -138,16 +142,28 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
+                    val isShowingLanding = !isFirstLaunch && !isLockEnabled && !viewModel.landingShown
+                    val isShowingUnlock = isLockEnabled && viewModel.isAppLocked && !isFirstLaunch
+
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         bottomBar = {
-                            if (showBottomBar) {
+                            if (showBottomBar && !isShowingLanding && !isShowingUnlock) {
                                 BottomNavBar(navController = navController)
                             }
                         }
                     ) { innerPadding ->
-                        if (isLockEnabled && viewModel.isAppLocked && !isFirstLaunch) {
-                            com.alieducational.app.ui.auth.UnlockScreen(biometricAuthManager = biometricAuthManager, onUnlocked = { viewModel.isAppLocked = false })
+                        if (isShowingUnlock) {
+                            com.alieducational.app.ui.auth.UnlockScreen(
+                                biometricAuthManager = biometricAuthManager,
+                                isDark = isDarkTheme,
+                                onUnlocked = { viewModel.isAppLocked = false }
+                            )
+                        } else if (isShowingLanding) {
+                            AliLandingScreen(
+                                isDark = isDarkTheme,
+                                onFinished = { viewModel.landingShown = true }
+                            )
                         } else AppNavigation(
                             navController = navController,
                             startDestination = startDestination,

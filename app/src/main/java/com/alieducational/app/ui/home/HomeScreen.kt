@@ -1,6 +1,7 @@
 package com.alieducational.app.ui.home
 
 import androidx.compose.foundation.Image
+import com.alieducational.app.ui.components.AliLogo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -106,12 +107,8 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Image(
-                        painter = painterResource(
-                            id = if (isDarkTheme) R.drawable.ali_logo_dark else R.drawable.ali_logo_light
-                        ),
-                        contentDescription = "Ali Educational Monogram",
-                        contentScale = ContentScale.Fit,
+                    AliLogo(
+                        isDark = isDarkTheme,
                         modifier = Modifier
                             .height(42.dp)
                             .width(80.dp)

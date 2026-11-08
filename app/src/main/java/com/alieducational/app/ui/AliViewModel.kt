@@ -194,6 +194,8 @@ class AliViewModel @Inject constructor(
             }
         }
 
+    var landingShown by mutableStateOf(false)
+
     val isLockEnabled: StateFlow<Boolean> = preferences.isLockEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 

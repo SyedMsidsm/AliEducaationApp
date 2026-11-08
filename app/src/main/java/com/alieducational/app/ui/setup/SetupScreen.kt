@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alieducational.app.R
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.ui.components.AliLogo
+import androidx.compose.runtime.collectAsState
 
 @Composable
 fun SetupScreen(
@@ -73,10 +75,9 @@ fun SetupScreen(
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            Image(
-                painter = painterResource(id = R.drawable.ali_logo_dark),
-                contentDescription = "Ali Educational Logo",
-                contentScale = ContentScale.Fit,
+            val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+            AliLogo(
+                isDark = isDarkTheme,
                 modifier = Modifier
                     .width(180.dp)
                     .height(95.dp)

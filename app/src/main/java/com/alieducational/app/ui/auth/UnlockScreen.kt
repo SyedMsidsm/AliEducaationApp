@@ -2,7 +2,9 @@ package com.alieducational.app.ui.auth
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -30,9 +32,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,17 +41,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import com.alieducational.app.R
+import com.alieducational.app.ui.components.AliLogo
 import com.alieducational.app.util.BiometricAuthManager
 
 @Composable
 fun UnlockScreen(
     biometricAuthManager: BiometricAuthManager,
     onUnlocked: () -> Unit,
+    isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     var noCredential by remember { mutableStateOf(false) }
+
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+        )
+    }
 
     fun triggerUnlock() {
         if (activity != null && biometricAuthManager.canAuthenticate()) {
@@ -63,7 +74,7 @@ fun UnlockScreen(
                 onError = { /* Keep on unlock screen */ }
             )
         } else {
-            // FAIL CLOSED — never call onUnlocked() when screen lock / credentials unavailable
+            // FAIL CLOSED - never call onUnlocked() when screen lock / credentials unavailable
             noCredential = true
         }
     }
@@ -83,13 +94,16 @@ fun UnlockScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.ali_logo_dark),
-                contentDescription = "Ali Educational Logo",
-                contentScale = ContentScale.Fit,
+            AliLogo(
+                isDark = isDark,
                 modifier = Modifier
                     .width(190.dp)
                     .height(100.dp)
+                    .graphicsLayer {
+                        alpha = animProgress.value
+                        scaleX = 0.92f + 0.08f * animProgress.value
+                        scaleY = 0.92f + 0.08f * animProgress.value
+                    }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -100,7 +114,10 @@ fun UnlockScreen(
                     fontWeight = FontWeight.Bold,
                     fontSize = 28.sp
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.graphicsLayer {
+                    alpha = (animProgress.value - 0.15f).coerceIn(0f, 1f) / 0.85f
+                }
             )
 
             Spacer(modifier = Modifier.height(8.dp))

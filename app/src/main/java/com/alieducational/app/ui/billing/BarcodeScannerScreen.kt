@@ -1,5 +1,7 @@
 package com.alieducational.app.ui.billing
 
+import com.alieducational.app.ui.components.AliLogo
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -144,14 +146,11 @@ fun BarcodeScannerScreen(
                 IconButton(onClick = onNavigateBack) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
                 }
-                val logoRes = if (isDarkTheme) R.drawable.ali_logo_dark else R.drawable.ali_logo_light
-                Image(
-                    painter = painterResource(id = logoRes),
-                    contentDescription = null,
+                AliLogo(
+                    isDark = isDarkTheme,
                     modifier = Modifier
                         .height(38.dp)
-                        .width(72.dp),
-                    contentScale = ContentScale.Fit
+                        .width(72.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {

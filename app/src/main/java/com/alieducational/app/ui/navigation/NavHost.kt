@@ -245,8 +245,10 @@ fun AppNavigation(
 
         // Auth & Setup
         composable(Screen.Unlock.route) {
+            val isDarkTheme by viewModel.isDarkTheme.collectAsState()
             UnlockScreen(
                 biometricAuthManager = biometricAuthManager,
+                isDark = isDarkTheme,
                 onUnlocked = {
                     onUnlocked()
                     navController.navigate(Screen.Home.route) {

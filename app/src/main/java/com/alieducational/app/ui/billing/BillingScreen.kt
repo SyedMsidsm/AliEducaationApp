@@ -1,5 +1,7 @@
 package com.alieducational.app.ui.billing
 
+import com.alieducational.app.ui.components.AliLogo
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -150,14 +152,11 @@ fun BillingScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            val logoRes = if (isDarkTheme) R.drawable.ali_logo_dark else R.drawable.ali_logo_light
-                            Image(
-                                painter = painterResource(id = logoRes),
-                                contentDescription = "Ali Educational Logo",
+                            AliLogo(
+                                isDark = isDarkTheme,
                                 modifier = Modifier
                                     .height(42.dp)
-                                    .width(80.dp),
-                                contentScale = ContentScale.Fit
+                                    .width(80.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
