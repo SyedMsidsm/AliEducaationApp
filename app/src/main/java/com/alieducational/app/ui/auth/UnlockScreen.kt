@@ -1,5 +1,7 @@
 package com.alieducational.app.ui.auth
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -44,9 +50,11 @@ fun UnlockScreen(
 ) {
     val context = LocalContext.current
     val activity = context as? FragmentActivity
+    var noCredential by remember { mutableStateOf(false) }
 
     fun triggerUnlock() {
         if (activity != null && biometricAuthManager.canAuthenticate()) {
+            noCredential = false
             biometricAuthManager.promptBiometric(
                 activity = activity,
                 title = context.getString(R.string.unlock_title),
@@ -55,8 +63,8 @@ fun UnlockScreen(
                 onError = { /* Keep on unlock screen */ }
             )
         } else {
-            // If device has no screen lock, allow proceed
-            onUnlocked()
+            // FAIL CLOSED — never call onUnlocked() when screen lock / credentials unavailable
+            noCredential = true
         }
     }
 
@@ -139,16 +147,32 @@ fun UnlockScreen(
                 Text(text = "Use Device PIN / Password")
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            androidx.compose.material3.TextButton(
-                onClick = onUnlocked
-            ) {
+            if (noCredential) {
+                Spacer(modifier = Modifier.height(20.dp))
                 Text(
-                    text = "Enter Shop Directly",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "Set up a screen lock (PIN, pattern, or password) in Android Settings to protect Ali Educational.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        val intent = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            context.startActivity(Intent(Settings.ACTION_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            })
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Open Settings")
+                }
             }
         }
     }
