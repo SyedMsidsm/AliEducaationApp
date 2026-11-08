@@ -22,7 +22,11 @@ class AuditUiSmokeTest {
     private fun start(action: String? = null) {
         val intent = Intent(ctx, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (action != null) putExtra(AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION, action)
+            if (action != null) {
+                this.action = AliSlimBarWidgetProvider.ACTION_WIDGET_CLICK
+                data = android.net.Uri.parse("aliedu://widget/${action.lowercase()}")
+                putExtra(AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION, action)
+            }
         }
         scenario = ActivityScenario.launch(intent)
     }

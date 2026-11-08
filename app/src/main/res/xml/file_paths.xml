@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="external_storage" path="." />
-    <external-files-path name="external_files" path="." />
-    <files-path name="internal_files" path="." />
-    <cache-path name="cache_files" path="." />
+    <cache-path name="exports" path="exports/" />
+    <cache-path name="barcode_exports" path="barcode_exports/" />
+    <cache-path name="receipts" path="receipts/" />
+    <cache-path name="camera" path="camera_temp/" />
+    <files-path name="receipts" path="receipts/" />
+    <files-path name="backups" path="backups/" />
+    <external-files-path name="exports_ext" path="exports/" />
+    <external-files-path name="backups_ext" path="backups/" />
 </paths>

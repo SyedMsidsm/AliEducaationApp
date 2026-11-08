@@ -572,7 +572,8 @@ class CashTrackerExcelService @Inject constructor(
         }
 
         val ctx = context ?: throw IllegalStateException("Context required for export")
-        val cacheFile = File(ctx.cacheDir, fileName)
+        val exportDir = File(ctx.cacheDir, "exports").apply { if (!exists()) mkdirs() }
+        val cacheFile = File(exportDir, fileName)
         exportFile.copyTo(cacheFile, overwrite = true)
         workbook.close()
 

@@ -173,14 +173,23 @@ class MainActivity : FragmentActivity() {
         extractWidgetAction(intent)
     }
 
+    companion object {
+        fun isValidWidgetClick(action: String?, dataScheme: String?): Boolean {
+            return action == com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_WIDGET_CLICK &&
+                    (dataScheme == "aliedu" || dataScheme == null)
+        }
+    }
+
     private fun extractWidgetAction(intent: android.content.Intent?) {
         if (intent?.action == "com.alieducational.app.action.PIN_WIDGET" || intent?.getStringExtra("action") == "PIN_WIDGET") {
             requestPinWidget()
             return
         }
-        val action = intent?.getStringExtra(com.alieducational.app.widget.AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION)
-        if (action != null) {
-            pendingWidgetAction = action
+        if (isValidWidgetClick(intent?.action, intent?.data?.scheme)) {
+            val action = intent?.getStringExtra(com.alieducational.app.widget.AliSlimBarWidgetProvider.EXTRA_WIDGET_ACTION)
+            if (action != null) {
+                pendingWidgetAction = action
+            }
         }
     }
 
