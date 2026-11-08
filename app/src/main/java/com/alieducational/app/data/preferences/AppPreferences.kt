@@ -25,6 +25,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class AppPreferences @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+    constructor(context: Context, clock: () -> Long) : this(context) {
+        this.clock = clock
+    }
     private object Keys {
         val IS_FIRST_LAUNCH = booleanPreferencesKey("is_first_launch")
         val IS_LOCK_ENABLED = booleanPreferencesKey("is_lock_enabled")
@@ -48,6 +52,7 @@ class AppPreferences @Inject constructor(
         val GOOGLE_DRIVE_FOLDER_NAME = stringPreferencesKey("google_drive_folder_name")
         val OWNER_PIN = stringPreferencesKey("owner_pin")
         val PIN_FAILED_ATTEMPTS = intPreferencesKey("pin_failed_attempts")
+        val PIN_FAILURE_ROUNDS = intPreferencesKey("pin_failure_rounds")
         val PIN_BLOCKED_UNTIL = longPreferencesKey("pin_blocked_until")
         val OWNER_CERT_PIN = stringPreferencesKey("owner_cert_pin")
     }
@@ -192,6 +197,7 @@ class AppPreferences @Inject constructor(
         }
         return token
     }
+    // TODO [SEC-04]: Rotate recovery secret and store HMAC with Android Keystore key instead of fixed SHA-256 constant. (Owner step)
     fun recoverOwnerOnTrustedDevice(activity: androidx.fragment.app.FragmentActivity, done: (String?) -> Unit) {
         val proof = java.io.File(context.getExternalFilesDir(null), "owner-recovery-once.txt")
         fun authorized(): Boolean = runCatching {
@@ -209,6 +215,7 @@ class AppPreferences @Inject constructor(
                         p[Keys.DEVICE_ROLE] = "OWNER"
                         p.remove(Keys.OWNER_PIN)
                         p[Keys.PIN_FAILED_ATTEMPTS] = 0
+                        p[Keys.PIN_FAILURE_ROUNDS] = 0
                         p[Keys.PIN_BLOCKED_UNTIL] = 0L
                     }
                     proof.delete()
@@ -227,7 +234,15 @@ class AppPreferences @Inject constructor(
     private val pinMutex = kotlinx.coroutines.sync.Mutex()
     suspend fun authorizeOwner(pin: String): Boolean = pinMutex.withLock {
         val settings = context.dataStore.data.first()
-        if (System.currentTimeMillis() < (settings[Keys.PIN_BLOCKED_UNTIL] ?: 0L)) return@withLock false
+        val now = clock()
+        val currentState = PinThrottlePolicy.State(
+            failedAttempts = settings[Keys.PIN_FAILED_ATTEMPTS] ?: 0,
+            failureRounds = settings[Keys.PIN_FAILURE_ROUNDS] ?: 0,
+            blockedUntil = settings[Keys.PIN_BLOCKED_UNTIL] ?: 0L
+        )
+
+        if (PinThrottlePolicy.isBlocked(currentState, now)) return@withLock false
+
         val stored = ownerPin.first().split(":")
         if (stored.size != 3) return@withLock false
         val valid = if (pin.matches(Regex("[0-9]{6,12}"))) {
@@ -238,18 +253,21 @@ class AppPreferences @Inject constructor(
             }
             java.security.MessageDigest.isEqual(expected, actual)
         } else false
+
+        val (newState, success) = PinThrottlePolicy.onAttempt(currentState, valid, now)
         context.dataStore.edit { p ->
-            if (valid) {
+            if (success) {
                 p[Keys.DEVICE_ROLE] = "OWNER"
                 p[Keys.PIN_FAILED_ATTEMPTS] = 0
+                p[Keys.PIN_FAILURE_ROUNDS] = 0
                 p[Keys.PIN_BLOCKED_UNTIL] = 0L
             } else {
-                val count = (p[Keys.PIN_FAILED_ATTEMPTS] ?: 0) + 1
-                p[Keys.PIN_FAILED_ATTEMPTS] = if (count >= 5) 0 else count
-                if (count >= 5) p[Keys.PIN_BLOCKED_UNTIL] = System.currentTimeMillis() + 60000
+                p[Keys.PIN_FAILED_ATTEMPTS] = newState.failedAttempts
+                p[Keys.PIN_FAILURE_ROUNDS] = newState.failureRounds
+                p[Keys.PIN_BLOCKED_UNTIL] = newState.blockedUntil
             }
         }
-        valid
+        success
     }
 
     suspend fun setPigmyUsualAmountPaise(amountPaise: Long) {
