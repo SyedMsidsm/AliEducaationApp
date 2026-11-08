@@ -30,7 +30,6 @@ hiltNavigationCompose = "1.2.0"
 poi = "5.2.5"
 
 # Accompanist
-accompanistSystemUiController = "0.34.0"
 
 # Camera & Barcode
 camerax = "1.4.1"
@@ -81,7 +80,6 @@ poi = { group = "org.apache.poi", name = "poi", version.ref = "poi" }
 poi-ooxml = { group = "org.apache.poi", name = "poi-ooxml", version.ref = "poi" }
 
 # Accompanist
-accompanist-systemuicontroller = { group = "com.google.accompanist", name = "accompanist-systemuicontroller", version.ref = "accompanistSystemUiController" }
 
 # Camera & Barcode
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }

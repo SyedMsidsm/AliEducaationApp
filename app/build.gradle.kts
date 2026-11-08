@@ -142,7 +142,6 @@ dependencies {
     implementation(libs.poi.ooxml)
 
     // ── Accompanist ────────────────────────────────────────────
-    implementation(libs.accompanist.systemuicontroller)
 
     // ── CameraX & Barcode (100% Offline) ───────────────────────
     implementation(libs.androidx.camera.core)
