@@ -28,7 +28,9 @@ import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
@@ -724,18 +726,38 @@ class ReceiptService @Inject constructor(
                     cancellationSignal: CancellationSignal?,
                     callback: WriteResultCallback?
                 ) {
-                    try {
-                        kotlinx.coroutines.runBlocking {
-                            pdfFile = createReceiptPdf(sale, lines)
+                    if (cancellationSignal?.isCanceled == true) {
+                        callback?.onWriteCancelled()
+                        return
+                    }
+                    val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        try {
+                            if (cancellationSignal?.isCanceled == true) {
+                                callback?.onWriteCancelled()
+                                return@launch
+                            }
+                            val generatedPdf = createReceiptPdf(sale, lines)
+                            pdfFile = generatedPdf
+                            if (cancellationSignal?.isCanceled == true) {
+                                callback?.onWriteCancelled()
+                                return@launch
+                            }
+                            FileInputStream(generatedPdf).use { input ->
+                                FileOutputStream(destination?.fileDescriptor).use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                        } catch (e: Exception) {
+                            if (cancellationSignal?.isCanceled == true) {
+                                callback?.onWriteCancelled()
+                            } else {
+                                callback?.onWriteFailed(e.message)
+                            }
                         }
-                        val input = FileInputStream(pdfFile)
-                        val output = FileOutputStream(destination?.fileDescriptor)
-                        input.copyTo(output)
-                        input.close()
-                        output.close()
-                        callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
-                    } catch (e: Exception) {
-                        callback?.onWriteFailed(e.message)
+                    }
+                    cancellationSignal?.setOnCancelListener {
+                        job.cancel()
                     }
                 }
             },

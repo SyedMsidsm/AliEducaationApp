@@ -63,6 +63,16 @@ class CashTrackerExcelService @Inject constructor(
      */
     suspend fun parseExcelFile(uri: Uri, fileName: String): CashTrackerImportPreview = withContext(Dispatchers.IO) {
         try {
+            val pfd = context?.contentResolver?.openFileDescriptor(uri, "r")
+            val fileSize = pfd?.statSize ?: 0L
+            pfd?.close()
+            if (fileSize > 10 * 1024 * 1024) {
+                return@withContext CashTrackerImportPreview(
+                    fileName = fileName,
+                    errorMessage = "Excel file exceeds the 10 MB limit (${fileSize / (1024 * 1024)} MB). Please split into smaller files."
+                )
+            }
+
             val inputStream: InputStream = context?.contentResolver?.openInputStream(uri)
                 ?: return@withContext CashTrackerImportPreview(
                     fileName = fileName,
@@ -99,6 +109,14 @@ class CashTrackerExcelService @Inject constructor(
             return CashTrackerImportPreview(
                 fileName = fileName,
                 errorMessage = "The sheet does not contain enough data rows (headers + entries)."
+            )
+        }
+
+        if (sheet.physicalNumberOfRows > 20000 || sheet.lastRowNum > 20000) {
+            val count = maxOf(sheet.physicalNumberOfRows, sheet.lastRowNum)
+            return CashTrackerImportPreview(
+                fileName = fileName,
+                errorMessage = "Excel sheet exceeds the 20,000 row limit ($count rows). Please split into smaller files."
             )
         }
 

@@ -65,13 +65,14 @@ data class ImportResult(
 
 @Singleton
 class ImportExportService @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val productDao: ProductDao,
-    private val movementDao: StockMovementDao,
-    private val importBatchDao: ImportBatchDao,
+    @ApplicationContext private val context: Context?,
+    private val productDao: ProductDao?,
+    private val movementDao: StockMovementDao?,
+    private val importBatchDao: ImportBatchDao?,
     private val database: com.alieducational.app.data.local.AppDatabase? = null,
     private val preferences: com.alieducational.app.data.preferences.AppPreferences? = null
 ) {
+    constructor() : this(null, null, null, null, null, null)
 
     suspend fun previewFile(
         uri: Uri,
@@ -79,7 +80,17 @@ class ImportExportService @Inject constructor(
         selectedSheetIndex: Int = 0
     ): SpreadsheetPreview = withContext(Dispatchers.IO) {
         try {
-            val stream = context.contentResolver.openInputStream(uri)
+            val pfd = try { context?.contentResolver?.openFileDescriptor(uri, "r") } catch (_: Exception) { null }
+            val fileSize = pfd?.statSize ?: 0L
+            pfd?.close()
+            if (fileSize > 10 * 1024 * 1024) {
+                return@withContext SpreadsheetPreview(
+                    fileName = fileName,
+                    errorMessage = "File exceeds the 10 MB limit (${fileSize / (1024 * 1024)} MB). Please split into smaller files."
+                )
+            }
+
+            val stream = context?.contentResolver?.openInputStream(uri)
                 ?: return@withContext SpreadsheetPreview(
                     fileName = fileName,
                     errorMessage = "Cannot access the selected file. Please select the file again."
@@ -185,7 +196,7 @@ class ImportExportService @Inject constructor(
         )
     }
 
-    private fun previewExcel(stream: InputStream, fileName: String, sheetIndex: Int): SpreadsheetPreview {
+    internal fun previewExcel(stream: InputStream, fileName: String, sheetIndex: Int): SpreadsheetPreview {
         val workbook = WorkbookFactory.create(stream)
         val numSheets = workbook.numberOfSheets
         if (numSheets == 0) {
@@ -197,6 +208,18 @@ class ImportExportService @Inject constructor(
         val sheetNames = (0 until numSheets).map { workbook.getSheetName(it) }
         val activeSheetIndex = if (sheetIndex in 0 until numSheets) sheetIndex else 0
         val sheet = workbook.getSheetAt(activeSheetIndex)
+
+        if (sheet.physicalNumberOfRows > 20000 || sheet.lastRowNum > 20000) {
+            val rowCount = maxOf(sheet.physicalNumberOfRows, sheet.lastRowNum)
+            workbook.close()
+            stream.close()
+            return SpreadsheetPreview(
+                fileName = fileName,
+                sheetNames = sheetNames,
+                selectedSheetIndex = activeSheetIndex,
+                errorMessage = "Excel sheet exceeds the 20,000 row limit ($rowCount rows). Please split into smaller files."
+            )
+        }
 
         val allRows = mutableListOf<Pair<Int, List<String>>>()
         val lastRow = sheet.lastRowNum
@@ -285,8 +308,23 @@ class ImportExportService @Inject constructor(
         mapping: ColumnMapping,
         updateExisting: Boolean = false
     ): ImportResult = withContext(Dispatchers.IO) {
+        val pfd = try { context?.contentResolver?.openFileDescriptor(uri, "r") } catch (_: Exception) { null }
+        val fileSize = pfd?.statSize ?: 0L
+        pfd?.close()
+        if (fileSize > 10 * 1024 * 1024) {
+            return@withContext ImportResult(
+                0, 0, 0,
+                isSuccess = false,
+                failureReason = "File exceeds the 10 MB limit (${fileSize / (1024 * 1024)} MB). Please split into smaller files."
+            )
+        }
+
+        val pDao = productDao ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Database not initialized")
+        val mDao = movementDao ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Database not initialized")
+        val bDao = importBatchDao ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Database not initialized")
+
         val stream = try {
-            context.contentResolver.openInputStream(uri)
+            context?.contentResolver?.openInputStream(uri)
                 ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Cannot open file stream")
         } catch (e: Exception) {
             return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = mapExceptionToMessage(e))
@@ -321,7 +359,7 @@ class ImportExportService @Inject constructor(
         }
 
         val batchKey = java.security.MessageDigest.getInstance("SHA-256").digest((rows.toString() + mapping.toString() + sheetIndex).toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-        if (importBatchDao.getBatch(batchKey) != null) return@withContext ImportResult(rows.size - 1, 0, rows.size - 1, failureReason = "This exact import has already been applied")
+        if (bDao.getBatch(batchKey) != null) return@withContext ImportResult(rows.size - 1, 0, rows.size - 1, failureReason = "This exact import has already been applied")
         var imported = 0
         var updatedCount = 0
         var skippedDuplicates = 0
@@ -346,9 +384,9 @@ class ImportExportService @Inject constructor(
             val barcode = if (mapping.barcodeIndex in row.indices) row[mapping.barcodeIndex].trim().ifBlank { null } else null
 
             // Detect existing product by SKU, Barcode, or exact Name
-            val existing = (if (sku != null) productDao.getProductBySku(sku) else null)
-                ?: (if (barcode != null) productDao.getProductByBarcode(barcode) else null)
-                ?: productDao.getProductByName(name)
+            val existing = (if (sku != null) pDao.getProductBySku(sku) else null)
+                ?: (if (barcode != null) pDao.getProductByBarcode(barcode) else null)
+                ?: pDao.getProductByName(name)
 
             val category = if (mapping.categoryIndex in row.indices) row[mapping.categoryIndex].trim().ifBlank { "General" } else "General"
             val brand = if (mapping.brandIndex in row.indices) row[mapping.brandIndex].trim().ifBlank { null } else null
@@ -397,10 +435,10 @@ class ImportExportService @Inject constructor(
                             brand = existing.brand ?: brand,
                             updatedAt = System.currentTimeMillis()
                         )
-                        productDao.updateProduct(updatedProduct)
+                        pDao.updateProduct(updatedProduct)
 
                         if (openingQty > 0) {
-                            movementDao.insertMovement(
+                            mDao.insertMovement(
                                 StockMovementEntity(
                                     productId = existing.id,
                                     type = "STOCK_ADJUSTMENT",
@@ -438,9 +476,9 @@ class ImportExportService @Inject constructor(
             )
 
             try {
-                productDao.insertProduct(product)
+                pDao.insertProduct(product)
                 if (openingQty > 0) {
-                    movementDao.insertMovement(
+                    mDao.insertMovement(
                         StockMovementEntity(
                             productId = product.id,
                             type = "OPENING_STOCK",
@@ -459,7 +497,7 @@ class ImportExportService @Inject constructor(
         require(errors.isEmpty()) { errors.joinToString("; ") }
         // Record import batch history
         try {
-            importBatchDao.insertBatch(
+            bDao.insertBatch(
                 ImportBatchEntity(
                     id = batchKey,
                     fileName = fileName,
@@ -482,7 +520,7 @@ class ImportExportService @Inject constructor(
         )
     }
 
-    private fun readAllCsv(stream: InputStream): List<List<String>> {
+    internal fun readAllCsv(stream: InputStream): List<List<String>> {
         val reader = BufferedReader(InputStreamReader(stream))
         val rows = mutableListOf<List<String>>()
         var line: String?
@@ -491,15 +529,27 @@ class ImportExportService @Inject constructor(
             if (parts.any { it.isNotBlank() }) {
                 rows.add(parts)
             }
+            if (rows.size > 20000) {
+                reader.close()
+                throw IllegalArgumentException("CSV file exceeds the 20,000 row limit (20,000+ rows). Please split into smaller files.")
+            }
         }
         reader.close()
         return rows
     }
 
-    private fun readAllExcel(stream: InputStream, sheetIndex: Int): List<List<String>> {
+    internal fun readAllExcel(stream: InputStream, sheetIndex: Int): List<List<String>> {
         val workbook = WorkbookFactory.create(stream)
         val activeSheetIndex = if (sheetIndex in 0 until workbook.numberOfSheets) sheetIndex else 0
         val sheet = workbook.getSheetAt(activeSheetIndex)
+
+        if (sheet.physicalNumberOfRows > 20000 || sheet.lastRowNum > 20000) {
+            val count = maxOf(sheet.physicalNumberOfRows, sheet.lastRowNum)
+            workbook.close()
+            stream.close()
+            throw IllegalArgumentException("Excel sheet exceeds the 20,000 row limit ($count rows). Please split into smaller files.")
+        }
+
         val rows = mutableListOf<List<String>>()
 
         for (i in 0..sheet.lastRowNum) {
