@@ -251,166 +251,24 @@ class TwoPhoneSyncService @Inject constructor(
                 val billsArray = JSONArray(body)
                 require(billsArray.length() <= 1000) { "Too many bills" }
 
-                val acknowledgedIds = JSONArray()
-
-                // A03: Atomically commit incoming sales, stock, and customer ledgers in one Room transaction
-                db.withTransaction {
-                    for (i in 0 until billsArray.length()) {
-                        val billObj = billsArray.getJSONObject(i)
-                        val saleId = billObj.getString("id")
-
-                        // Deduplicate: check if already committed
-                        val existingSale = saleDao.getSaleById(saleId)
-                        if (existingSale != null) {
-                            val original = syncEventDao.getEventByEntityId(saleId)
-                            require(original?.eventType == "SYNC_BILL_INGESTION" && original.payloadJson == billObj.toString()) { "Conflicting replay of bill identity" }
+                val results = mutableListOf<IngestResult>()
+                for (i in 0 until billsArray.length()) {
+                    val billObj = billsArray.getJSONObject(i)
+                    val saleId = billObj.optString("id", "")
+                    try {
+                        val result = db.withTransaction {
+                            ingestBill(billObj)
                         }
-                        if (existingSale == null) {
-                            val receiptNumber = billObj.getString("receiptNumber")
-                            val customerId = billObj.optString("customerId").ifBlank { null }
-                            val customerName = billObj.optString("customerName").ifBlank { null }
-                            val grossTotal = billObj.getLong("grossTotalPaise")
-                            val discountType = billObj.getString("discountType")
-                            val discountValue = billObj.getLong("discountValuePaise")
-                            val discountPercent = billObj.optDouble("discountPercent", 0.0)
-                            val netTotal = billObj.getLong("netTotalPaise")
-                            val amountReceived = billObj.getLong("amountReceivedPaise")
-                            val changeGiven = billObj.optLong("changeGivenPaise", 0L)
-                            val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
-                            val paymentMethod = billObj.getString("paymentMethod")
-                            val timestamp = billObj.getLong("timestamp")
-                            val originDevice = billObj.optString("originDeviceId", "device-billing")
-
-                            require(grossTotal >= 0 && discountValue in 0..grossTotal && netTotal == grossTotal - discountValue && amountReceived >= 0 && remainingCredit == (netTotal - amountReceived).coerceAtLeast(0)) { "Invalid bill totals" }
-                            if (customerId != null && customerDao.getCustomerById(customerId) == null) {
-                                val customer = billObj.optJSONObject("customer") ?: error("Missing customer details")
-                                require(customer.getString("id") == customerId && customer.getString("name").isNotBlank()) { "Invalid customer identity" }
-                                customerDao.insertCustomer(com.alieducational.app.data.local.entity.CustomerEntity(id=customerId, name=customer.getString("name"), phone=customer.optString("phone").ifBlank { null }))
-                            }
-                            if (remainingCredit > 0) require(customerId != null) { "Credit needs a customer" }
-                            val sale = SaleEntity(
-                                id = saleId,
-                                receiptNumber = receiptNumber,
-                                customerId = customerId,
-                                customerName = customerName,
-                                grossTotalPaise = grossTotal,
-                                discountType = discountType,
-                                discountValuePaise = discountValue,
-                                discountPercent = discountPercent,
-                                netTotalPaise = netTotal,
-                                amountReceivedPaise = amountReceived,
-                                changeGivenPaise = changeGiven,
-                                remainingCreditPaise = remainingCredit,
-                                paymentMethod = paymentMethod,
-                                isSummaryEntry = false,
-                                unresolvedStockDetails = false,
-                                originDeviceId = originDevice,
-                                syncStatus = "SYNCED",
-                                timestamp = timestamp
-                            )
-                            saleDao.insertSale(sale)
-
-                            // Insert lines and adjust stock
-                            val linesArray = billObj.getJSONArray("lines")
-                            val saleLines = mutableListOf<SaleLineEntity>()
-                            for (j in 0 until linesArray.length()) {
-                                val lineObj = linesArray.getJSONObject(j)
-                                val lineType = lineObj.optString("lineType", "PRODUCT")
-                                val productId = lineObj.optString("productId").ifBlank { null }
-                                val productName = lineObj.getString("productName")
-                                val qtyBase = lineObj.getInt("quantityBase")
-                                val isPack = lineObj.optBoolean("isPack", false)
-                                val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
-                                val lineGross = lineObj.getLong("lineGrossPaise")
-                                val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
-                                val lineNet = lineObj.getLong("lineNetPaise")
-
-                                require(lineType in setOf("PRODUCT", "SERVICE") && (lineType != "PRODUCT" || productId != null)) { "Invalid line type or product" }
-                                require(qtyBase > 0 && unitSellingPrice >= 0 && lineGross >= 0 && lineDiscount in 0..lineGross && lineNet == lineGross - lineDiscount) { "Invalid sale line" }
-                                // Missing cost stays unresolved; never silently price historic sales at today's cost.
-                                // Preserve valid sale-time cost snapshot if present; otherwise resolve from Owner DB (A07)
-                                val costSnapshot = if (lineType == "PRODUCT" && productId != null) {
-                                    CostQuote.resolve(lineObj.optString("costQuote"), productId)
-                                } else null
-
-                                val lineProfit = if (costSnapshot != null) {
-                                    lineNet - (qtyBase * costSnapshot)
-                                } else null
-
-                                val line = SaleLineEntity(
-                                    id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                    saleId = saleId,
-                                    productId = productId,
-                                    productName = productName,
-                                    quantityBase = qtyBase,
-                                    isPack = isPack,
-                                    unitSellingPricePaise = unitSellingPrice,
-                                    unitCostSnapshotPaise = costSnapshot,
-                                    lineGrossPaise = lineGross,
-                                    lineDiscountAllocatedPaise = lineDiscount,
-                                    lineNetPaise = lineNet,
-                                    lineProfitPaise = lineProfit,
-                                    lineType = lineType,
-                                    serviceId = lineObj.optString("serviceId").ifBlank { null },
-                                    serviceName = lineObj.optString("serviceName").ifBlank { null },
-                                    serviceOption = lineObj.optString("serviceOption").ifBlank { null },
-                                    unitLabel = lineObj.optString("unitLabel").ifBlank { null }
-                                )
-                                require(saleDao.getLineById(line.id) == null) { "Sale line identity already used" }
-                                saleLines.add(line)
-
-                                // Deduct stock for product lines
-                                if (lineType == "PRODUCT" && productId != null) {
-                                    require(productDao.getProductById(productId) != null) { "Unknown product" }
-                                    productDao.adjustSellableStock(productId, -qtyBase)
-                                    val product = productDao.getProductById(productId)
-                                    stockMovementDao.insertMovement(
-                                        StockMovementEntity(
-                                            productId = productId,
-                                            type = "SALE",
-                                            quantityChangeBase = -qtyBase,
-                                            unitCostPaise = costSnapshot ?: 0L,
-                                            reason = "Synced Bill $receiptNumber",
-                                            referenceId = saleId
-                                        )
-                                    )
-                                }
-                            }
-                            require(saleLines.sumOf { it.lineGrossPaise } == grossTotal && saleLines.sumOf { it.lineNetPaise } == netTotal) { "Bill and line totals differ" }
-                            require(saleLines.map { it.id }.distinct().size == saleLines.size) { "Duplicate line identity" }
-                            saleDao.insertSaleLines(saleLines)
-                            if (saleLines.any { it.lineType == "PRODUCT" && (it.unitCostSnapshotPaise == null || (it.productId?.let { id -> productDao.getProductById(id)?.currentSellableStock } ?: 0) < 0) }) {
-                                saleDao.updateSale(sale.copy(unresolvedStockDetails = true))
-                            }
-
-                            // Customer debt adjustment if credit
-                            if (customerId != null && remainingCredit > 0) {
-                                customerDao.adjustBalance(customerId, remainingCredit)
-                            }
-
-                            // Durable sync event entry (A03 / A09)
-                            syncEventDao.insertEvent(
-                                SyncEventEntity(
-                                    id = UUID.randomUUID().toString(),
-                                    eventType = "SYNC_BILL_INGESTION",
-                                    entityId = saleId,
-                                    payloadJson = billObj.toString(),
-                                    originDeviceId = originDevice,
-                                    status = "ACKNOWLEDGED",
-                                    timestamp = System.currentTimeMillis()
-                                )
-                            )
-                        }
-
-                        acknowledgedIds.put(saleId)
+                        results.add(result)
+                    } catch (e: Exception) {
+                        val reason = e.message ?: "Validation failed"
+                        android.util.Log.w("AliSync", "Bill $saleId rejected during ingestion: $reason")
+                        results.add(IngestResult.Rejected(saleId, reason))
                     }
                 }
 
-                val responseRoot = JSONObject()
-                responseRoot.put("status", "SUCCESS")
-                responseRoot.put("acknowledgedIds", acknowledgedIds)
-
-                val responseBytes = responseRoot.toString().toByteArray(Charsets.UTF_8)
+                val responseJson = formatIngestResponseJson(results)
+                val responseBytes = responseJson.toByteArray(Charsets.UTF_8)
                 writer.write("HTTP/1.1 200 OK\r\n")
                 writer.write("Content-Type: application/json; charset=utf-8\r\n")
                 writer.write("Content-Length: ${responseBytes.size}\r\n")
@@ -581,11 +439,45 @@ class TwoPhoneSyncService @Inject constructor(
                 if (billsConn.responseCode == 200) {
                     val respStr = billsConn.inputStream.bufferedReader().use { it.readText() }
                     val respObj = JSONObject(respStr)
-                    val ackIds = respObj.getJSONArray("acknowledgedIds")
-                    require((0 until ackIds.length()).map { ackIds.getString(it) }.toSet() == pendingSales.map { it.id }.toSet() && ackIds.length() == pendingSales.size) { "Invalid acknowledgement; pending bills retained" }
-                    for (i in 0 until ackIds.length()) {
-                        val ackId = ackIds.getString(i)
-                        saleDao.updateSaleSyncStatus(ackId, "SYNCED")
+                    val protocolVersion = respObj.optInt("protocolVersion", 1)
+                    if (protocolVersion >= 2 && respObj.has("results")) {
+                        val resultsArray = respObj.getJSONArray("results")
+                        val returnedIds = mutableSetOf<String>()
+                        for (i in 0 until resultsArray.length()) {
+                            val r = resultsArray.getJSONObject(i)
+                            val id = r.getString("id")
+                            val status = r.getString("status")
+                            val reason = r.optString("reason", "")
+                            returnedIds.add(id)
+                            when (status) {
+                                "ACCEPTED", "DUPLICATE" -> {
+                                    saleDao.updateSaleSyncStatus(id, "SYNCED")
+                                }
+                                "REJECTED" -> {
+                                    saleDao.updateSaleSyncStatus(id, "SYNC_REJECTED")
+                                    syncEventDao.insertEvent(
+                                        SyncEventEntity(
+                                            id = UUID.randomUUID().toString(),
+                                            eventType = "SYNC_BILL_REJECTED",
+                                            entityId = id,
+                                            payloadJson = reason,
+                                            originDeviceId = preferences.deviceRole.first(),
+                                            status = "REJECTED",
+                                            timestamp = System.currentTimeMillis()
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        val pendingIds = pendingSales.map { it.id }.toSet()
+                        require(returnedIds == pendingIds) { "Invalid acknowledgement; pending bills retained" }
+                    } else {
+                        val ackIds = respObj.getJSONArray("acknowledgedIds")
+                        require((0 until ackIds.length()).map { ackIds.getString(it) }.toSet() == pendingSales.map { it.id }.toSet() && ackIds.length() == pendingSales.size) { "Invalid acknowledgement; pending bills retained" }
+                        for (i in 0 until ackIds.length()) {
+                            val ackId = ackIds.getString(i)
+                            saleDao.updateSaleSyncStatus(ackId, "SYNCED")
+                        }
                     }
                 } else {
                     _connectionState.value = SyncConnectionState.Error("Sync delivery failed (Code ${billsConn.responseCode})")
@@ -603,4 +495,267 @@ class TwoPhoneSyncService @Inject constructor(
             false
         }
     }
+
+    private suspend fun ingestBill(billObj: JSONObject): IngestResult {
+        val saleId = billObj.getString("id")
+
+        // Sanity checks: non-empty lines and no future timestamp > 1 day
+        require(billObj.has("lines") && billObj.getJSONArray("lines").length() > 0) { "Empty lines array" }
+        val timestamp = billObj.getLong("timestamp")
+        require(timestamp <= System.currentTimeMillis() + 86_400_000L) { "Bill timestamp is in the future" }
+
+        // Deduplicate: check if already committed
+        val existingSale = saleDao.getSaleById(saleId)
+        if (existingSale != null) {
+            val original = syncEventDao.getEventByEntityId(saleId)
+            require(original?.eventType == "SYNC_BILL_INGESTION" && canon(JSONObject(original.payloadJson)) == canon(billObj)) {
+                "Conflicting replay of bill identity"
+            }
+            return IngestResult.Duplicate(saleId)
+        }
+
+        val receiptNumber = billObj.getString("receiptNumber")
+        val customerId = billObj.optString("customerId").ifBlank { null }
+        val customerName = billObj.optString("customerName").ifBlank { null }
+        val grossTotal = billObj.getLong("grossTotalPaise")
+        val discountType = billObj.getString("discountType")
+        val discountValue = billObj.getLong("discountValuePaise")
+        val discountPercent = billObj.optDouble("discountPercent", 0.0)
+        val netTotal = billObj.getLong("netTotalPaise")
+        val amountReceived = billObj.getLong("amountReceivedPaise")
+        val changeGiven = billObj.optLong("changeGivenPaise", 0L)
+        val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
+        val paymentMethod = billObj.getString("paymentMethod")
+        val originDevice = billObj.optString("originDeviceId", "device-billing")
+
+        require(grossTotal >= 0 && discountValue in 0..grossTotal && netTotal == grossTotal - discountValue && amountReceived >= 0 && remainingCredit == (netTotal - amountReceived).coerceAtLeast(0)) { "Invalid bill totals" }
+        if (customerId != null && customerDao.getCustomerById(customerId) == null) {
+            val customer = billObj.optJSONObject("customer") ?: error("Missing customer details")
+            require(customer.getString("id") == customerId && customer.getString("name").isNotBlank()) { "Invalid customer identity" }
+            customerDao.insertCustomer(com.alieducational.app.data.local.entity.CustomerEntity(id=customerId, name=customer.getString("name"), phone=customer.optString("phone").ifBlank { null }))
+        }
+        if (remainingCredit > 0) require(customerId != null) { "Credit needs a customer" }
+        val sale = SaleEntity(
+            id = saleId,
+            receiptNumber = receiptNumber,
+            customerId = customerId,
+            customerName = customerName,
+            grossTotalPaise = grossTotal,
+            discountType = discountType,
+            discountValuePaise = discountValue,
+            discountPercent = discountPercent,
+            netTotalPaise = netTotal,
+            amountReceivedPaise = amountReceived,
+            changeGivenPaise = changeGiven,
+            remainingCreditPaise = remainingCredit,
+            paymentMethod = paymentMethod,
+            isSummaryEntry = false,
+            unresolvedStockDetails = false,
+            originDeviceId = originDevice,
+            syncStatus = "SYNCED",
+            timestamp = timestamp
+        )
+        saleDao.insertSale(sale)
+
+        // Insert lines and adjust stock
+        val linesArray = billObj.getJSONArray("lines")
+        val saleLines = mutableListOf<SaleLineEntity>()
+        for (j in 0 until linesArray.length()) {
+            val lineObj = linesArray.getJSONObject(j)
+            val lineType = lineObj.optString("lineType", "PRODUCT")
+            val productId = lineObj.optString("productId").ifBlank { null }
+            val productName = lineObj.getString("productName")
+            val qtyBase = lineObj.getInt("quantityBase")
+            val isPack = lineObj.optBoolean("isPack", false)
+            val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
+            val lineGross = lineObj.getLong("lineGrossPaise")
+            val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
+            val lineNet = lineObj.getLong("lineNetPaise")
+
+            require(lineType in setOf("PRODUCT", "SERVICE") && (lineType != "PRODUCT" || productId != null)) { "Invalid line type or product" }
+            require(qtyBase > 0 && unitSellingPrice >= 0 && lineGross >= 0 && lineDiscount in 0..lineGross && lineNet == lineGross - lineDiscount) { "Invalid sale line" }
+            val costSnapshot = if (lineType == "PRODUCT" && productId != null) {
+                CostQuote.resolve(lineObj.optString("costQuote"), productId)
+            } else null
+
+            val lineProfit = if (costSnapshot != null) {
+                lineNet - (qtyBase * costSnapshot)
+            } else null
+
+            val line = SaleLineEntity(
+                id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
+                saleId = saleId,
+                productId = productId,
+                productName = productName,
+                quantityBase = qtyBase,
+                isPack = isPack,
+                unitSellingPricePaise = unitSellingPrice,
+                unitCostSnapshotPaise = costSnapshot,
+                lineGrossPaise = lineGross,
+                lineDiscountAllocatedPaise = lineDiscount,
+                lineNetPaise = lineNet,
+                lineProfitPaise = lineProfit,
+                lineType = lineType,
+                serviceId = lineObj.optString("serviceId").ifBlank { null },
+                serviceName = lineObj.optString("serviceName").ifBlank { null },
+                serviceOption = lineObj.optString("serviceOption").ifBlank { null },
+                unitLabel = lineObj.optString("unitLabel").ifBlank { null }
+            )
+            require(saleDao.getLineById(line.id) == null) { "Sale line identity already used" }
+            saleLines.add(line)
+
+            // Deduct stock for product lines
+            if (lineType == "PRODUCT" && productId != null) {
+                require(productDao.getProductById(productId) != null) { "Unknown product" }
+                productDao.adjustSellableStock(productId, -qtyBase)
+                stockMovementDao.insertMovement(
+                    StockMovementEntity(
+                        productId = productId,
+                        type = "SALE",
+                        quantityChangeBase = -qtyBase,
+                        unitCostPaise = costSnapshot ?: 0L,
+                        reason = "Synced Bill $receiptNumber",
+                        referenceId = saleId
+                    )
+                )
+            }
+        }
+        require(saleLines.sumOf { it.lineGrossPaise } == grossTotal && saleLines.sumOf { it.lineNetPaise } == netTotal) { "Bill and line totals differ" }
+        require(saleLines.map { it.id }.distinct().size == saleLines.size) { "Duplicate line identity" }
+        saleDao.insertSaleLines(saleLines)
+        if (saleLines.any { it.lineType == "PRODUCT" && (it.unitCostSnapshotPaise == null || (it.productId?.let { id -> productDao.getProductById(id)?.currentSellableStock } ?: 0) < 0) }) {
+            saleDao.updateSale(sale.copy(unresolvedStockDetails = true))
+        }
+
+        // Customer debt adjustment if credit
+        if (customerId != null && remainingCredit > 0) {
+            customerDao.adjustBalance(customerId, remainingCredit)
+        }
+
+        // Durable sync event entry (A03 / A09)
+        syncEventDao.insertEvent(
+            SyncEventEntity(
+                id = UUID.randomUUID().toString(),
+                eventType = "SYNC_BILL_INGESTION",
+                entityId = saleId,
+                payloadJson = billObj.toString(),
+                originDeviceId = originDevice,
+                status = "ACKNOWLEDGED",
+                timestamp = System.currentTimeMillis()
+            )
+        )
+        return IngestResult.Accepted(saleId)
+    }
 }
+
+sealed class IngestResult {
+    abstract val id: String
+    data class Accepted(override val id: String) : IngestResult()
+    data class Duplicate(override val id: String) : IngestResult()
+    data class Rejected(override val id: String, val reason: String) : IngestResult()
+}
+
+internal fun canon(json: String): String {
+    val trimmed = json.trim()
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return trimmed
+    val inner = trimmed.substring(1, trimmed.length - 1)
+    val map = sortedMapOf<String, String>()
+    var i = 0
+    val n = inner.length
+
+    fun skipWs() {
+        while (i < n && inner[i].isWhitespace()) i++
+    }
+
+    while (i < n) {
+        skipWs()
+        if (i >= n) break
+        if (inner[i] == ',') { i++; continue }
+        if (inner[i] != '"') break
+        i++
+        val keyStart = i
+        while (i < n && inner[i] != '"') {
+            if (inner[i] == '\\') i++
+            i++
+        }
+        val key = inner.substring(keyStart, i)
+        if (i < n) i++
+        skipWs()
+        if (i < n && inner[i] == ':') i++
+        skipWs()
+        if (i >= n) break
+
+        val valueStart = i
+        when (inner[i]) {
+            '"' -> {
+                i++
+                while (i < n && inner[i] != '"') {
+                    if (inner[i] == '\\') i++
+                    i++
+                }
+                if (i < n) i++
+            }
+            '{' -> {
+                var depth = 1
+                i++
+                var inStr = false
+                while (i < n && depth > 0) {
+                    val c = inner[i]
+                    if (c == '\\' && inStr) { i += 2; continue }
+                    if (c == '"') inStr = !inStr
+                    else if (!inStr) {
+                        if (c == '{') depth++
+                        else if (c == '}') depth--
+                    }
+                    i++
+                }
+            }
+            '[' -> {
+                var depth = 1
+                i++
+                var inStr = false
+                while (i < n && depth > 0) {
+                    val c = inner[i]
+                    if (c == '\\' && inStr) { i += 2; continue }
+                    if (c == '"') inStr = !inStr
+                    else if (!inStr) {
+                        if (c == '[') depth++
+                        else if (c == ']') depth--
+                    }
+                    i++
+                }
+            }
+            else -> {
+                while (i < n && inner[i] != ',' && inner[i] != '}') i++
+            }
+        }
+        val value = inner.substring(valueStart, i).trim()
+        if (key != "customer") {
+            map[key] = value
+        }
+    }
+
+    return map.entries.joinToString(separator = ",", prefix = "{", postfix = "}") { (k, v) ->
+        "\"${k}\":$v"
+    }
+}
+
+internal fun canon(o: JSONObject): String = canon(o.toString())
+
+internal fun formatIngestResponseJson(results: List<IngestResult>): String {
+    val ackIds = results.filter { it is IngestResult.Accepted || it is IngestResult.Duplicate }.map { "\"${it.id}\"" }
+    val resList = results.map { r ->
+        when (r) {
+            is IngestResult.Accepted -> "{\"id\":\"${r.id}\",\"status\":\"ACCEPTED\"}"
+            is IngestResult.Duplicate -> "{\"id\":\"${r.id}\",\"status\":\"DUPLICATE\"}"
+            is IngestResult.Rejected -> {
+                val escapedReason = r.reason.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
+                "{\"id\":\"${r.id}\",\"status\":\"REJECTED\",\"reason\":\"$escapedReason\"}"
+            }
+        }
+    }
+    return "{\"status\":\"SUCCESS\",\"protocolVersion\":2,\"acknowledgedIds\":[${ackIds.joinToString(",")}],\"results\":[${resList.joinToString(",")}]}"
+}
+
+internal fun formatIngestResponse(results: List<IngestResult>): JSONObject =
+    JSONObject(formatIngestResponseJson(results))

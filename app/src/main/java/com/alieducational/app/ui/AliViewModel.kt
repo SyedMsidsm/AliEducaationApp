@@ -295,6 +295,15 @@ class AliViewModel @Inject constructor(
     val pendingSyncCount = repository.pendingSyncCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    val rejectedSyncCount = repository.rejectedSyncCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    fun retryRejectedSyncBills() {
+        viewModelScope.launch(operationHandler) {
+            repository.retryRejectedSyncSales()
+        }
+    }
+
     init {
         viewModelScope.launch(operationHandler) {
             repository.ensureDefaultPigmySchemes()

@@ -261,6 +261,12 @@ interface SaleDao {
     @Query("SELECT COUNT(*) FROM sales WHERE syncStatus = 'PENDING_SYNC'")
     fun getPendingSyncSalesCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM sales WHERE syncStatus = 'SYNC_REJECTED'")
+    fun getRejectedSyncSalesCount(): Flow<Int>
+
+    @Query("UPDATE sales SET syncStatus = 'PENDING_SYNC' WHERE syncStatus = 'SYNC_REJECTED'")
+    suspend fun retryRejectedSyncSales()
+
     @Query("UPDATE sales SET syncStatus = :status WHERE id = :saleId")
     suspend fun updateSaleSyncStatus(saleId: String, status: String)
 

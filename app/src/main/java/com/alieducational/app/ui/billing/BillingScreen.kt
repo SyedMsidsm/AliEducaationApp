@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -97,6 +98,7 @@ fun BillingScreen(
     val activeServices by viewModel.activeServices.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
+    val rejectedSyncCount by viewModel.rejectedSyncCount.collectAsState()
     val pairedOwnerHost by viewModel.pairedOwnerHost.collectAsState()
 
     var activeTab by remember { mutableStateOf("PRODUCTS") } // PRODUCTS or SERVICES
@@ -288,6 +290,52 @@ fun BillingScreen(
                 }
 
                 // Status Badge: Saved on this phone - Offline ready
+                if (deviceRole == "BILLING" && rejectedSyncCount > 0) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "$rejectedSyncCount bills need attention",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { viewModel.retryRejectedSyncBills() }
+                                ) {
+                                    Text(
+                                        "Retry",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(

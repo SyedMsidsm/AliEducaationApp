@@ -1369,6 +1369,8 @@ class AppRepository @Inject constructor(
     // ── Two-Phone Sync Foundations ─────────────────────────────────────
 
     val pendingSyncCount: Flow<Int> = syncEventDao.getPendingCount()
+    val rejectedSyncCount: Flow<Int> = saleDao.getRejectedSyncSalesCount()
+    suspend fun retryRejectedSyncSales() = saleDao.retryRejectedSyncSales()
 
     suspend fun getPendingSyncEvents(): List<SyncEventEntity> =
         syncEventDao.getPendingEvents()
