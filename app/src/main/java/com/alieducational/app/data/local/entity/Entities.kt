@@ -47,7 +47,10 @@ data class ProductBarcodeEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "stock_movements")
+@Entity(
+    tableName = "stock_movements",
+    indices = [Index(value = ["productId", "timestamp"])]
+)
 data class StockMovementEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -106,7 +109,10 @@ data class PurchaseEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "purchase_lines")
+@Entity(
+    tableName = "purchase_lines",
+    indices = [Index(value = ["purchaseId"])]
+)
 data class PurchaseLineEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -118,7 +124,15 @@ data class PurchaseLineEntity(
     val effectiveUnitCostPaise: Long
 )
 
-@Entity(tableName = "sales")
+@Entity(
+    tableName = "sales",
+    indices = [
+        Index(value = ["timestamp"]),
+        Index(value = ["customerId"]),
+        Index(value = ["syncStatus"]),
+        Index(value = ["receiptNumber"])
+    ]
+)
 data class SaleEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -147,7 +161,13 @@ data class SaleEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "sale_lines")
+@Entity(
+    tableName = "sale_lines",
+    indices = [
+        Index(value = ["saleId"]),
+        Index(value = ["productId"])
+    ]
+)
 data class SaleLineEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -169,7 +189,10 @@ data class SaleLineEntity(
     val unitLabel: String? = null // e.g. "sides", "copies", "sheets"
 )
 
-@Entity(tableName = "account_payments")
+@Entity(
+    tableName = "account_payments",
+    indices = [Index(value = ["accountType", "accountId", "timestamp"])]
+)
 data class AccountPaymentEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -182,7 +205,13 @@ data class AccountPaymentEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "shop_expenses")
+@Entity(
+    tableName = "shop_expenses",
+    indices = [
+        Index(value = ["timestamp"]),
+        Index(value = ["isVoided"])
+    ]
+)
 data class ShopExpenseEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -315,7 +344,10 @@ data class ServiceDefinitionEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "sync_events")
+@Entity(
+    tableName = "sync_events",
+    indices = [Index(value = ["entityId"])]
+)
 data class SyncEventEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),

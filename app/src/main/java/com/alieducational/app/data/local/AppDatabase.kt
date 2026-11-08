@@ -66,7 +66,7 @@ import com.alieducational.app.data.local.entity.SyncEventEntity
         ServiceDefinitionEntity::class,
         SyncEventEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -316,6 +316,29 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE shop_expenses ADD COLUMN classification TEXT NOT NULL DEFAULT 'SHARED'")
                 db.execSQL("ALTER TABLE shop_expenses ADD COLUMN paymentMethod TEXT NOT NULL DEFAULT 'CASH'")
                 db.execSQL("UPDATE shop_expenses SET classification = 'SERVICES' WHERE category = 'SERVICE_EXPENSE' OR serviceTarget IS NOT NULL")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sales_timestamp` ON `sales` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sales_customerId` ON `sales` (`customerId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sales_syncStatus` ON `sales` (`syncStatus`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sales_receiptNumber` ON `sales` (`receiptNumber`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sale_lines_saleId` ON `sale_lines` (`saleId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sale_lines_productId` ON `sale_lines` (`productId`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_stock_movements_productId_timestamp` ON `stock_movements` (`productId`, `timestamp`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_account_payments_accountType_accountId_timestamp` ON `account_payments` (`accountType`, `accountId`, `timestamp`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_purchase_lines_purchaseId` ON `purchase_lines` (`purchaseId`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_events_entityId` ON `sync_events` (`entityId`)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_shop_expenses_timestamp` ON `shop_expenses` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_shop_expenses_isVoided` ON `shop_expenses` (`isVoided`)")
             }
         }
 

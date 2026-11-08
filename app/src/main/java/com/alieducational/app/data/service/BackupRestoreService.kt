@@ -477,7 +477,7 @@ class BackupRestoreService @Inject constructor(
         // Room validates every table when its identity marker is absent, and migrates older schemas.
         val staged = Room.databaseBuilder(context, AppDatabase::class.java, file.absolutePath)
             .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4,
-                AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+                AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
             .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE).build()
         try { staged.openHelper.writableDatabase.query("SELECT COUNT(*) FROM products").use { it.moveToFirst() } }
         finally { staged.close() }
