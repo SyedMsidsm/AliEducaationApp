@@ -1209,7 +1209,8 @@ class AliViewModel @Inject constructor(
                 loadBackups()
                 onDone()
             } catch (e: Exception) {
-                _backupStatus.value = "Backup failed: ${e.localizedMessage ?: "Unknown error"}"
+                android.util.Log.w("AliViewModel", "Backup failed", e)
+                _backupStatus.value = "Backup failed. Please check storage and retry."
             } finally {
                 _isCreatingBackup.value = false
             }

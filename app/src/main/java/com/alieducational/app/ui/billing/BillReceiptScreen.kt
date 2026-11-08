@@ -568,7 +568,8 @@ fun BillReceiptScreen(
                                     context.startActivity(intent)
                                     Toast.makeText(context, "Opened in WhatsApp", Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Failed to share: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    android.util.Log.w("BillReceipt", "Failed to share receipt", e)
+                                    Toast.makeText(context, "Failed to share receipt. Please retry.", Toast.LENGTH_SHORT).show()
                                 } finally {
                                     isSharingPdf = false
                                 }
@@ -649,7 +650,8 @@ fun BillReceiptScreen(
                                         }
                                         context.startActivity(Intent.createChooser(sendIntent, "Share Receipt PDF"))
                                     } catch (e: Exception) {
-                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        android.util.Log.w("BillReceipt", "Failed to share receipt PDF", e)
+                                        Toast.makeText(context, "Failed to share receipt PDF. Please retry.", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },

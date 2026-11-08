@@ -352,7 +352,8 @@ fun CashTrackerScreen(
                                     }
                                     context.startActivity(chooser)
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Failed to share: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    android.util.Log.w("CashTracker", "Failed to share cash records", e)
+                                    Toast.makeText(context, "Failed to share cash records. Please retry.", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }

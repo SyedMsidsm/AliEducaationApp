@@ -429,7 +429,8 @@ fun StockScreen(
                             exportContext.startActivity(Intent.createChooser(shareIntent, "Share Barcode Labels PDF"))
                             showBarcodeLabelExport = null
                         } catch (e: Exception) {
-                            android.widget.Toast.makeText(exportContext, "Error creating PDF: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                            android.util.Log.w("StockScreen", "Error creating barcode label PDF", e)
+                            android.widget.Toast.makeText(exportContext, "Failed to create barcode label PDF. Please retry.", android.widget.Toast.LENGTH_LONG).show()
                         }
                     }
                 ) {

@@ -54,3 +54,12 @@
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+
+# ── Release Hardening (SEC-10) ────────────────────────────────
+# Strip verbose debug and info logging from release builds while keeping warnings and errors
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+}
