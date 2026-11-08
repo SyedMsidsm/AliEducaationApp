@@ -4,7 +4,7 @@ Android shop-management application and its design, requirements and testing doc
 
 ## Current application
 
-The root Gradle project is the current application copied from the working Antigravity project on 7 November 2026. Its configuration declares version **1.0.12 (12)**, Room schema **8**, minimum SDK **26**, target/compile SDK **36**, and JVM target **17**.
+The root Gradle project is the current application copied from the working Antigravity project on 7 November 2026. Its configuration declares version **1.0.15 (15)**, Room schema **9**, minimum SDK **26**, target/compile SDK **36**, and JVM target **17**.
 
 Source includes inventory and purchasing, billing and held bills, customer/supplier accounts, cash and expenses, service billing, Pigmy savings, reports, receipts, spreadsheet import/export, backup/recovery, local two-phone synchronization and a slim launcher widget.
 
@@ -15,6 +15,7 @@ Presence in source is not certification that every workflow is correct or verifi
 - `app/`: current Kotlin/Compose application, resources and tests.
 - `gradle/`, wrapper and build scripts: current build configuration.
 - `docs/`: requirements, reviews, implementation handoffs and acceptance plans. Historical proposals can conflict; later explicit decisions supersede earlier ones.
+- `docs/SECURITY.md`: security architecture, RBAC, PIN lockout policy, keystore-sealed secrets, ALIBK1 streaming encrypted backups, and two-phone TLS synchronization.
 - `docs/artifacts/pdf/`: PDF reports, including the complete system reference and code appendix.
 - `docs/artifacts/widget-reference/`: approved widget design board (middle slim-bar concept).
 - `docs/artifacts/stock-test/`: synthetic stock workbook and associated previews/generator.
@@ -35,7 +36,7 @@ On macOS/Linux use `./gradlew` for the equivalent commands. Dependency downloads
 
 Release signing is intentionally not included. The current build reads a local `keystore.properties` containing `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. Obtain the existing signing material securely from the owner to produce compatible updates; never commit it. Never uninstall or clear a live installation to bypass signing or migration failures.
 
-Inspect the supplied Room schema artifacts before relying on them for migration tests: some existing schema files are placeholder-sized. Run the actual migration/recovery tests and generate valid schema evidence as required.
+All Room schema artifacts (schemas 1 through 9, each 26–55 KB) are fully exported and validated in `app/schemas/com.alieducational.app.data.local.AppDatabase/`. Automated migration tests (`MigrationSqlTest`, `RoomMigrationTest`) and data integrity audits verify schema migrations up to version 9.
 
 ## Architecture
 
