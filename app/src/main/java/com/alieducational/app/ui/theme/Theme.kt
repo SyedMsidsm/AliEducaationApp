@@ -64,12 +64,13 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun AliEducationalTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    appTextSize: String = "Default",
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
     val view = LocalView.current
-    if (!view.isInEditMode) {
+    if (!view.isInEditMode && view.context is Activity) {
         SideEffect {
             val window = (view.context as Activity).window
             @Suppress("DEPRECATION")
@@ -78,9 +79,17 @@ fun AliEducationalTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = AliTypography,
-        content = content,
-    )
+    val scaleFactor = when (appTextSize) {
+        "Small" -> 0.85f
+        "Large" -> 1.15f
+        "Extra Large" -> 1.30f
+        else -> 1.0f
+    }
+
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, density.fontScale * scaleFactor)
+    ) {
+        MaterialTheme(colorScheme = colorScheme, typography = getScaledTypography(1f), content = content)
+    }
 }

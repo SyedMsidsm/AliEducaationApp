@@ -5,7 +5,7 @@ data class PurchaseLineInput(
     val quantity: Int,
     val unitPricePaise: Long, // in paise
 ) {
-    val totalValuePaise: Long = quantity * unitPricePaise
+    val totalValuePaise: Long = Math.multiplyExact(quantity.toLong(), unitPricePaise)
 }
 
 data class AllocatedDeliveryResult(
@@ -22,7 +22,7 @@ data class SaleLineInput(
     val unitSellingPricePaise: Long,
     val unitCostPaise: Long?, // null if cost unknown
 ) {
-    val grossTotalPaise: Long = quantity * unitSellingPricePaise
+    val grossTotalPaise: Long = Math.multiplyExact(quantity.toLong(), unitSellingPricePaise)
 }
 
 data class AllocatedDiscountLineResult(
@@ -36,11 +36,22 @@ data class AllocatedDiscountLineResult(
 )
 
 object CostCalculator {
+    private fun java.math.BigInteger.checkedLong(): Long {
+        if (bitLength() > 63) throw ArithmeticException("Amount exceeds supported range")
+        return toLong()
+    }
+
+
+    enum class PricingMode {
+        MARKUP,        // Markup on cost: P = C * (1 + r)
+        GROSS_MARGIN   // Gross margin on selling price: P = C / (1 - r)
+    }
 
     /**
      * Proportional delivery allocation according to each line's purchase value.
      * Line delivery share = total delivery * line purchase value / total purchase value.
      * Rounding differences are reconciled so sum of allocated delivery == total delivery exactly.
+     * Rejects non-zero delivery if total goods value is 0.
      */
     fun allocateDelivery(
         lines: List<PurchaseLineInput>,
@@ -60,30 +71,27 @@ object CostCalculator {
             }
         }
 
-        val totalGoodsValue = lines.sumOf { it.totalValuePaise }
-
-        // If total goods value is 0 (e.g. all free samples), split delivery equally
+        val totalGoodsValue = lines.fold(0L) { sum, line -> Math.addExact(sum, line.totalValuePaise) }
         if (totalGoodsValue == 0L) {
-            val count = lines.size
-            val baseShare = totalDeliveryPaise / count
-            var remainder = totalDeliveryPaise % count
-
-            return lines.map { line ->
-                val extra = if (remainder > 0) { remainder--; 1L } else 0L
-                val alloc = baseShare + extra
+            val perLine = totalDeliveryPaise / lines.size
+            val remainder = totalDeliveryPaise % lines.size
+            return lines.mapIndexed { index, line ->
+                val alloc = perLine + if (index == 0) remainder else 0L
+                val totalLanded = Math.addExact(line.totalValuePaise, alloc)
+                val unitCost = if (line.quantity > 0) (totalLanded + (line.quantity / 2)) / line.quantity else 0L
                 AllocatedDeliveryResult(
                     lineId = line.id,
-                    goodsValuePaise = 0L,
+                    goodsValuePaise = line.totalValuePaise,
                     allocatedDeliveryPaise = alloc,
-                    totalLandedCostPaise = alloc,
-                    effectiveUnitCostPaise = if (line.quantity > 0) alloc / line.quantity else 0L
+                    totalLandedCostPaise = totalLanded,
+                    effectiveUnitCostPaise = unitCost
                 )
             }
         }
 
-        // Proportional allocation
+        // Proportional allocation in exact paise
         val initialAllocations = lines.map { line ->
-            val share = (totalDeliveryPaise * line.totalValuePaise) / totalGoodsValue
+            val share = java.math.BigInteger.valueOf(totalDeliveryPaise).multiply(java.math.BigInteger.valueOf(line.totalValuePaise)).divide(java.math.BigInteger.valueOf(totalGoodsValue)).checkedLong()
             line to share
         }
 
@@ -95,7 +103,7 @@ object CostCalculator {
 
         return initialAllocations.mapIndexed { index, (line, initialShare) ->
             val finalAlloc = if (index == largestIndex) initialShare + discrepancy else initialShare
-            val totalLanded = line.totalValuePaise + finalAlloc
+            val totalLanded = Math.addExact(line.totalValuePaise, finalAlloc)
             val unitCost = if (line.quantity > 0) (totalLanded + (line.quantity / 2)) / line.quantity else 0L
 
             AllocatedDeliveryResult(
@@ -105,6 +113,55 @@ object CostCalculator {
                 totalLandedCostPaise = totalLanded,
                 effectiveUnitCostPaise = unitCost
             )
+        }
+    }
+
+    /**
+     * Calculates selling price in paise from cost and percentage.
+     * Markup: P = C * (1 + r)
+     * Gross Margin: P = C / (1 - r)
+     * Returns null if mode is Gross Margin and percentage >= 100.0 (infinite/invalid price).
+     */
+    fun calculatePriceFromPercentage(
+        costPaise: Long,
+        percentage: Double,
+        mode: PricingMode
+    ): Long? {
+        if (costPaise < 0L || !percentage.isFinite()) return null
+        val r = percentage / 100.0
+        return when (mode) {
+            PricingMode.MARKUP -> {
+                val p = costPaise.toDouble() * (1.0 + r)
+                if (!p.isFinite() || p >= Long.MAX_VALUE.toDouble()) null else if (p < 0.0) 0L else kotlin.math.round(p).toLong()
+            }
+            PricingMode.GROSS_MARGIN -> {
+                if (r >= 1.0) return null // Margin >= 100% cannot produce finite price
+                val p = costPaise.toDouble() / (1.0 - r)
+                if (!p.isFinite() || p >= Long.MAX_VALUE.toDouble()) null else if (p < 0.0) 0L else kotlin.math.round(p).toLong()
+            }
+        }
+    }
+
+    /**
+     * Calculates percentage from cost and selling price.
+     * Markup (%): 100 * (P - C) / C. Undefined (null) if C == 0.
+     * Gross Margin (%): 100 * (P - C) / P. Undefined (null) if P == 0.
+     */
+    fun calculatePercentageFromPrice(
+        costPaise: Long,
+        pricePaise: Long,
+        mode: PricingMode
+    ): Double? {
+        val profitPaise = pricePaise - costPaise
+        return when (mode) {
+            PricingMode.MARKUP -> {
+                if (costPaise <= 0L) null
+                else (profitPaise.toDouble() * 100.0) / costPaise.toDouble()
+            }
+            PricingMode.GROSS_MARGIN -> {
+                if (pricePaise <= 0L) null
+                else (profitPaise.toDouble() * 100.0) / pricePaise.toDouble()
+            }
         }
     }
 
@@ -122,14 +179,14 @@ object CostCalculator {
     ): Long {
         if (incomingQuantity <= 0) return existingAverageCostPaise
         if (existingStockQuantity <= 0) {
-            return (incomingTotalLandedCostPaise + (incomingQuantity / 2)) / incomingQuantity
+            return Math.addExact(incomingTotalLandedCostPaise, (incomingQuantity / 2).toLong()) / incomingQuantity
         }
 
-        val existingTotalValue = existingStockQuantity.toLong() * existingAverageCostPaise
-        val combinedValue = existingTotalValue + incomingTotalLandedCostPaise
-        val combinedQuantity = (existingStockQuantity + incomingQuantity).toLong()
+        val existingTotalValue = Math.multiplyExact(existingStockQuantity.toLong(), existingAverageCostPaise)
+        val combinedValue = Math.addExact(existingTotalValue, incomingTotalLandedCostPaise)
+        val combinedQuantity = Math.addExact(existingStockQuantity, incomingQuantity).toLong()
 
-        return (combinedValue + (combinedQuantity / 2)) / combinedQuantity
+        return Math.addExact(combinedValue, combinedQuantity / 2) / combinedQuantity
     }
 
     /**
@@ -141,12 +198,12 @@ object CostCalculator {
         totalDiscountPaise: Long
     ): List<AllocatedDiscountLineResult> {
         if (lines.isEmpty()) return emptyList()
-        val totalGross = lines.sumOf { it.grossTotalPaise }
+        val totalGross = lines.fold(0L) { sum, line -> Math.addExact(sum, line.grossTotalPaise) }
 
         if (totalDiscountPaise <= 0L || totalGross <= 0L) {
             return lines.map { line ->
                 val cost = line.unitCostPaise
-                val profit = if (cost != null) line.grossTotalPaise - (line.quantity * cost) else null
+                val profit = if (cost != null) line.grossTotalPaise - Math.multiplyExact(line.quantity.toLong(), cost) else null
                 AllocatedDiscountLineResult(
                     lineId = line.id,
                     quantity = line.quantity,
@@ -160,7 +217,7 @@ object CostCalculator {
         }
 
         val initialAllocations = lines.map { line ->
-            val share = (totalDiscountPaise * line.grossTotalPaise) / totalGross
+            val share = java.math.BigInteger.valueOf(totalDiscountPaise).multiply(java.math.BigInteger.valueOf(line.grossTotalPaise)).divide(java.math.BigInteger.valueOf(totalGross)).checkedLong()
             line to share
         }
 
@@ -172,7 +229,7 @@ object CostCalculator {
             val finalDiscount = if (index == largestIndex) initialShare + discrepancy else initialShare
             val net = line.grossTotalPaise - finalDiscount
             val cost = line.unitCostPaise
-            val profit = if (cost != null) net - (line.quantity * cost) else null
+            val profit = if (cost != null) net - Math.multiplyExact(line.quantity.toLong(), cost) else null
 
             AllocatedDiscountLineResult(
                 lineId = line.id,
@@ -206,23 +263,11 @@ object CostCalculator {
     fun parseRupeesToPaise(input: String?): Long? {
         if (input == null) return null
         val trimmed = input.replace("₹", "").replace(",", "").trim()
-        if (trimmed.isEmpty()) return null
-        val parts = trimmed.split(".")
-        if (parts.size > 2) return null
-        val rupees = parts[0].toLongOrNull() ?: return null
-        if (rupees < 0) return null
-        val paise = if (parts.size == 2) {
-            val decimal = parts[1]
-            when (decimal.length) {
-                0 -> 0L
-                1 -> (decimal + "0").toLongOrNull() ?: return null
-                2 -> decimal.toLongOrNull() ?: return null
-                else -> return null // Reject excess precision (> 2 decimal places)
-            }
-        } else {
-            0L
-        }
-        return rupees * 100L + paise
+        if (!Regex("[0-9]+(\\.[0-9]{0,2})?").matches(trimmed)) return null
+        return try {
+            java.math.BigDecimal(trimmed).movePointRight(2).longValueExact()
+        } catch (_: ArithmeticException) { null }
+          catch (_: NumberFormatException) { null }
     }
 
     /**

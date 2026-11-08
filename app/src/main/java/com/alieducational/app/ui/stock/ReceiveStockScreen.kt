@@ -23,6 +23,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -56,14 +58,19 @@ import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.domain.calculation.PurchaseLineInput
 import com.alieducational.app.ui.AliViewModel
 
-data class ReceiveLineState(
-    var productId: String = "",
-    var productName: String = "",
-    var packSize: Int = 1,
-    var isPack: Boolean = false,
-    var quantityStr: String = "1",
-    var unitPriceStr: String = "0"
-)
+class ReceiveLineState {
+    val lineId: String = java.util.UUID.randomUUID().toString()
+    var productId by mutableStateOf("")
+    var productName by mutableStateOf("")
+    var packSize by mutableStateOf(1)
+    var isPack by mutableStateOf(false)
+    var quantityStr by mutableStateOf("1")
+    var unitPriceStr by mutableStateOf("0")
+    var pricingMode by mutableStateOf(CostCalculator.PricingMode.GROSS_MARGIN)
+    var percentageStr by mutableStateOf("20")
+    var newSellingPriceStr by mutableStateOf("")
+    var lastEditedField by mutableStateOf("PERCENTAGE")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +105,7 @@ fun ReceiveStockScreen(
         val baseQty = if (line.isPack) qty * line.packSize else qty
         val pricePaise = ((line.unitPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
         if (line.productId.isNotBlank() && baseQty > 0) {
-            PurchaseLineInput(id = line.productId, quantity = baseQty, unitPricePaise = pricePaise)
+            PurchaseLineInput(id = line.lineId, quantity = baseQty, unitPricePaise = pricePaise)
         } else null
     }
 
@@ -158,6 +165,7 @@ fun ReceiveStockScreen(
                                     value = newSupplierName,
                                     onValueChange = { newSupplierName = it },
                                     label = { Text("New Supplier Name") },
+                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true
                                 )
@@ -341,7 +349,7 @@ fun ReceiveStockScreen(
                             }
 
                             // Show allocated delivery share for this line if delivery > 0
-                            val alloc = allocatedDelivery.firstOrNull { it.lineId == line.productId }
+                            val alloc = allocatedDelivery.firstOrNull { it.lineId == line.lineId }
                             if (alloc != null && totalDeliveryPaise > 0L) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(
@@ -361,24 +369,110 @@ fun ReceiveStockScreen(
                                 }
                             }
 
-                            // Show profit after transport if selling price is set
+                            // ── GROSS MARGIN / MARKUP PRICING (Section 8) ────────
                             val product = allProducts.firstOrNull { it.id == line.productId }
-                            if (product != null && product.sellingPricePiecePaise > 0L) {
-                                val landedCost = if (alloc != null && totalDeliveryPaise > 0L) alloc.effectiveUnitCostPaise else (((line.unitPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong())
-                                val profitPaise = product.sellingPricePiecePaise - landedCost
-                                val margin = if (product.sellingPricePiecePaise > 0) (profitPaise.toDouble() / product.sellingPricePiecePaise.toDouble()) * 100.0 else 0.0
-                                Spacer(modifier = Modifier.height(4.dp))
+                            val effectiveCostPaise = if (alloc != null && totalDeliveryPaise > 0L) {
+                                alloc.effectiveUnitCostPaise
+                            } else {
+                                ((line.unitPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                            }
+
+                            if (line.newSellingPriceStr.isBlank() && product != null && product.sellingPricePiecePaise > 0L) {
+                                line.newSellingPriceStr = (product.sellingPricePiecePaise / 100.0).toString()
+                                if (effectiveCostPaise > 0L) {
+                                    line.percentageStr = String.format(java.util.Locale.US, "%.1f", CostCalculator.calculatePercentageFromPrice(effectiveCostPaise, product.sellingPricePiecePaise, line.pricingMode))
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Pricing Mode & Target Selling Price",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = line.pricingMode == CostCalculator.PricingMode.GROSS_MARGIN,
+                                    onClick = {
+                                        line.pricingMode = CostCalculator.PricingMode.GROSS_MARGIN
+                                        val p = ((line.newSellingPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                                        if (p > 0 && effectiveCostPaise > 0) {
+                                            line.percentageStr = String.format(java.util.Locale.US, "%.1f", CostCalculator.calculatePercentageFromPrice(effectiveCostPaise, p, CostCalculator.PricingMode.GROSS_MARGIN))
+                                        }
+                                    },
+                                    label = { Text("Gross Margin (%)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = line.pricingMode == CostCalculator.PricingMode.MARKUP,
+                                    onClick = {
+                                        line.pricingMode = CostCalculator.PricingMode.MARKUP
+                                        val p = ((line.newSellingPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                                        if (p > 0 && effectiveCostPaise > 0) {
+                                            line.percentageStr = String.format(java.util.Locale.US, "%.1f", CostCalculator.calculatePercentageFromPrice(effectiveCostPaise, p, CostCalculator.PricingMode.MARKUP))
+                                        }
+                                    },
+                                    label = { Text("Markup (%)", fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = line.percentageStr,
+                                    onValueChange = {
+                                        line.percentageStr = it
+                                        line.lastEditedField = "PERCENTAGE"
+                                        val pct = it.toDoubleOrNull() ?: 0.0
+                                        if (effectiveCostPaise > 0) {
+                                            val calculatedPrice = CostCalculator.calculatePriceFromPercentage(effectiveCostPaise, pct, line.pricingMode)
+                                            line.newSellingPriceStr = calculatedPrice?.let { (it / 100.0).toString() } ?: ""
+                                        }
+                                    },
+                                    label = { Text(if (line.pricingMode == CostCalculator.PricingMode.GROSS_MARGIN) "Margin %" else "Markup %") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+
+                                OutlinedTextField(
+                                    value = line.newSellingPriceStr,
+                                    onValueChange = {
+                                        line.newSellingPriceStr = it
+                                        line.lastEditedField = "PRICE"
+                                        val p = ((it.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                                        if (p > 0 && effectiveCostPaise > 0) {
+                                            val pct = CostCalculator.calculatePercentageFromPrice(effectiveCostPaise, p, line.pricingMode)
+                                            line.percentageStr = String.format(java.util.Locale.US, "%.1f", pct)
+                                        }
+                                    },
+                                    label = { Text("Selling (₹/pc)") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                            }
+
+                            val currentSellPaise = ((line.newSellingPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
+                            if (currentSellPaise > 0L) {
+                                val profitPaise = currentSellPaise - effectiveCostPaise
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "Selling: ${CostCalculator.formatPaiseToRupees(product.sellingPricePiecePaise)}/pc",
+                                        text = "Landed: ${CostCalculator.formatPaiseToRupees(effectiveCostPaise)}/pc",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "Profit after transport: ${CostCalculator.formatPaiseToRupees(profitPaise)} (${String.format(java.util.Locale.US, "%.1f", margin)}% margin)",
+                                        text = "Profit: ${CostCalculator.formatPaiseToRupees(profitPaise)} (${line.percentageStr}%)",
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                         color = if (profitPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
                                     )
@@ -517,10 +611,13 @@ fun ReceiveStockScreen(
                                 val baseQty = if (line.isPack) qty * line.packSize else qty
                                 val pricePaise = ((line.unitPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong()
                                 if (line.productId.isNotBlank() && baseQty > 0) {
+                                    val newSellPaise = ((line.newSellingPriceStr.toDoubleOrNull() ?: 0.0) * 100).toLong().takeIf { it > 0 }
                                     PurchaseItemParam(
                                         productId = line.productId,
                                         quantityBase = baseQty,
-                                        unitPurchasePricePaise = pricePaise
+                                        unitPurchasePricePaise = pricePaise,
+                                        newSellingPricePiecePaise = newSellPaise,
+                                        lineId = line.lineId
                                     )
                                 } else null
                             }

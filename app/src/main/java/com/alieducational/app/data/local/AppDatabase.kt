@@ -227,7 +227,7 @@ abstract class AppDatabase : RoomDatabase() {
                 """.trimIndent())
             }
         }
-    
+
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -245,7 +245,7 @@ abstract class AppDatabase : RoomDatabase() {
                 val now = System.currentTimeMillis()
                 db.execSQL("""
                     INSERT OR IGNORE INTO `pigmy_schemes` (`id`, `name`, `usualDailyAmountPaise`, `isArchived`, `createdAt`, `updatedAt`)
-                    VALUES 
+                    VALUES
                         ('DEFAULT_PIGMY', 'Pigmy Scheme 1', 10000, 0, $now, $now),
                         ('scheme_2', 'Pigmy Scheme 2', 20000, 0, $now + 1, $now + 1),
                         ('scheme_3', 'Pigmy Scheme 3', 30000, 0, $now + 2, $now + 2)

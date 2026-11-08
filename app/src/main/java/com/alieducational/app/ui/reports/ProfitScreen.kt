@@ -174,7 +174,7 @@ fun ProfitScreen(
 
     // Products (retail) lines
     val periodProductLines = remember(periodSaleLines) {
-        periodSaleLines.filter { it.lineType != "SERVICE" }
+        periodSaleLines.filter { it.lineType != "SERVICE" && it.unitCostSnapshotPaise != null && it.unitCostSnapshotPaise > 0 }
     }
     val productRevenuePaise = remember(periodProductLines) {
         periodProductLines.sumOf { it.lineNetPaise }
@@ -184,6 +184,8 @@ fun ProfitScreen(
             line.quantityBase.toLong() * (line.unitCostSnapshotPaise ?: 0L)
         }
     }
+    val unresolvedProductCount = periodSaleLines.count { it.lineType != "SERVICE" && (it.unitCostSnapshotPaise == null || it.unitCostSnapshotPaise <= 0) }
+    val summaryCount = periodSales.count { it.isSummaryEntry || it.unresolvedStockDetails }
     val productGrossProfitPaise = productRevenuePaise - productCogsPaise
     val productGrossMarginPct = if (productRevenuePaise > 0) {
         (productGrossProfitPaise.toDouble() / productRevenuePaise.toDouble()) * 100.0
@@ -249,18 +251,24 @@ fun ProfitScreen(
     val totalNetOperatingExpensesPaise = netProductExpensesPaise + netServiceExpensesPaise + netSharedExpensesPaise
     val combinedRecordedOperatingResultPaise = productGrossProfitPaise + serviceRevenuePaise - totalNetOperatingExpensesPaise
 
-    // Potential inventory gross profit from current unsold stock
-    val expectedGrossProfitPaise = remember(allProducts) {
-        allProducts.sumOf { p ->
+    // Potential inventory gross profit from current unsold positive stock (A06)
+    val positiveProducts = remember(allProducts) {
+        allProducts.filter { it.currentSellableStock > 0 }
+    }
+    val shortageProducts = remember(allProducts) {
+        allProducts.filter { it.currentSellableStock < 0 }
+    }
+    val expectedGrossProfitPaise = remember(positiveProducts) {
+        positiveProducts.sumOf { p ->
             val potentialRevenue = p.currentSellableStock.toLong() * p.sellingPricePiecePaise
             val costValue = p.currentSellableStock.toLong() * p.movingAvgCostPaise
-            potentialRevenue - costValue
+            (potentialRevenue - costValue)
         }
     }
 
     // ── BUCKETED TREND DATA (Section 6 Graph A) ──────────────────────
     val trendBuckets = remember(periodSales, periodSaleLines, startTime, endTime, selectedPeriod) {
-        generateTrendBuckets(periodSales, periodSaleLines, startTime, endTime, selectedPeriod)
+        generateTrendBuckets(periodSales.filter { !it.isSummaryEntry }, periodSaleLines.filter { it.lineType != "SERVICE" && (it.unitCostSnapshotPaise ?: 0) > 0 }, startTime, endTime, selectedPeriod)
     }
 
     var selectedBucketDetail by remember { mutableStateOf<ProfitTrendBucket?>(null) }
@@ -302,6 +310,9 @@ fun ProfitScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                if (unresolvedProductCount > 0 || summaryCount > 0) item {
+                    Text("Incomplete profit: $unresolvedProductCount product lines have unknown cost; $summaryCount summary/unresolved bills. These amounts are excluded from known product profit.", color = MaterialTheme.colorScheme.error)
+                }
                 // Period Filter Chips Row
                 item {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -586,6 +597,15 @@ fun ProfitScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (shortageProducts.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "⚠️ Shortage warning: ${shortageProducts.size} product(s) have negative stock.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -817,7 +837,7 @@ fun generateTrendBuckets(
     val saleLinesMap = lines.groupBy { it.saleId }
 
     if (period == "Today") {
-        val totalSales = sales.sumOf { it.netTotalPaise }
+        val totalSales = lines.sumOf { it.lineNetPaise }
         val productLines = lines.filter { it.lineType != "SERVICE" }
         val totalCogs = productLines.sumOf { it.quantityBase.toLong() * (it.unitCostSnapshotPaise ?: 0L) }
         return listOf(
@@ -833,7 +853,7 @@ fun generateTrendBuckets(
     }
 
     // Group sales into days
-    val df = SimpleDateFormat("dd MMM", Locale.US)
+    val df = SimpleDateFormat("dd MMM yyyy", Locale.US)
     val dayBuckets = mutableMapOf<String, MutableList<com.alieducational.app.data.local.entity.SaleEntity>>()
 
     sales.sortedBy { it.timestamp }.forEach { s ->
@@ -844,7 +864,7 @@ fun generateTrendBuckets(
     return dayBuckets.map { (dateStr, daySales) ->
         val daySaleIds = daySales.map { it.id }.toSet()
         val dayLines = lines.filter { it.saleId in daySaleIds && it.lineType != "SERVICE" }
-        val sPaise = daySales.sumOf { it.netTotalPaise }
+        val sPaise = dayLines.sumOf { it.lineNetPaise }
         val cPaise = dayLines.sumOf { it.quantityBase.toLong() * (it.unitCostSnapshotPaise ?: 0L) }
         ProfitTrendBucket(
             label = dateStr,

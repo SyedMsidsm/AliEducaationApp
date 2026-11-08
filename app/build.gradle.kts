@@ -18,8 +18,8 @@ android {
         applicationId = "com.alieducational.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.0.12"
+        versionCode = 15
+        versionName = "1.0.15"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -108,6 +108,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.documentfile)
 
     // ── Jetpack Compose (BOM-managed) ──────────────────────────
     implementation(platform(libs.compose.bom))

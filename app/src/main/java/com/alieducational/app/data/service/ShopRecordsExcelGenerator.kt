@@ -171,7 +171,7 @@ class ShopRecordsExcelGenerator @Inject constructor() {
         addSummaryLine("Total Products Count:", data.products.size)
         val totalSellableStock = data.products.sumOf { it.currentSellableStock }
         addSummaryLine("Total Sellable Stock Units:", totalSellableStock)
-        val stockValuationRupees = data.products.sumOf { it.currentSellableStock * it.movingAvgCostPaise } / 100.0
+        val stockValuationRupees = data.products.filter { !it.isArchived && it.currentSellableStock > 0 }.sumOf { it.currentSellableStock * it.movingAvgCostPaise } / 100.0
         addSummaryLine("Total Stock Inventory Valuation (₹):", stockValuationRupees)
 
         val totalCustomersDueRupees = data.customers.sumOf { it.currentBalancePaise } / 100.0
@@ -397,7 +397,7 @@ class ShopRecordsExcelGenerator @Inject constructor() {
             "Amount (₹)", "Notes", "Linked Refund ID", "Has Attachment"
         )
         createHeaderRow(expSheet, 0, expHeaders)
-        val actualExpenses = data.cashExpenses.filter { !it.isIncome }
+        val actualExpenses = data.cashExpenses.filter { !it.isVoided && !it.isSavingsTransfer && (!it.isIncome || it.isExpenseRefund) }
         actualExpenses.forEachIndexed { idx, ex ->
             val row = expSheet.createRow(idx + 1)
             val classification = if (ex.isSavingsTransfer) "SAVINGS_TRANSFER" else ex.classification
@@ -405,7 +405,7 @@ class ShopRecordsExcelGenerator @Inject constructor() {
             writeString(row, 1, dateFormat.format(Date(ex.timestamp)))
             writeString(row, 2, classification)
             writeString(row, 3, ex.category)
-            writeNumber(row, 4, ex.amountPaise / 100.0)
+            writeNumber(row, 4, (if (ex.isExpenseRefund) -ex.amountPaise else ex.amountPaise) / 100.0)
             writeString(row, 5, ex.notes ?: "")
             writeString(row, 6, ex.linkedExpenseId ?: "")
             writeString(row, 7, if (!ex.attachmentUri.isNullOrBlank()) "YES" else "NO")

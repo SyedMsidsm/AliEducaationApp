@@ -2,14 +2,18 @@ package com.alieducational.app.data.service
 
 import android.content.Context
 import android.net.wifi.WifiManager
+import androidx.room.withTransaction
+import com.alieducational.app.data.local.AppDatabase
 import com.alieducational.app.data.local.dao.CustomerDao
 import com.alieducational.app.data.local.dao.ProductDao
 import com.alieducational.app.data.local.dao.SaleDao
 import com.alieducational.app.data.local.dao.ServiceDefinitionDao
 import com.alieducational.app.data.local.dao.StockMovementDao
+import com.alieducational.app.data.local.dao.SyncEventDao
 import com.alieducational.app.data.local.entity.SaleEntity
 import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
+import com.alieducational.app.data.local.entity.SyncEventEntity
 import com.alieducational.app.data.preferences.AppPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -48,12 +52,14 @@ sealed class SyncConnectionState {
 @Singleton
 class TwoPhoneSyncService @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val db: AppDatabase,
     private val preferences: AppPreferences,
     private val productDao: ProductDao,
     private val serviceDao: ServiceDefinitionDao,
     private val saleDao: SaleDao,
     private val customerDao: CustomerDao,
-    private val stockMovementDao: StockMovementDao
+    private val stockMovementDao: StockMovementDao,
+    private val syncEventDao: SyncEventDao
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var serverSocket: ServerSocket? = null
@@ -102,7 +108,9 @@ class TwoPhoneSyncService @Inject constructor(
 
         serverJob = scope.launch {
             try {
-                serverSocket = ServerSocket(port)
+                require(preferences.deviceRole.first() == "OWNER") { "Only the Owner can host" }
+                preferences.ensureSyncToken()
+                serverSocket = SyncTls.serverFactory().createServerSocket(port)
                 val ip = getLocalIpAddress()
                 _connectionState.value = SyncConnectionState.Hosting(ip, port)
 
@@ -130,24 +138,57 @@ class TwoPhoneSyncService @Inject constructor(
 
     private suspend fun handleClientRequest(socket: Socket) = withContext(Dispatchers.IO) {
         try {
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            socket.soTimeout = 10000
+            require(preferences.deviceRole.first() == "OWNER") { "Owner hosting is no longer authorized" }
+            val input = socket.getInputStream().buffered()
+            fun readHeader(): String? {
+                val bytes = java.io.ByteArrayOutputStream()
+                while (true) { val b = input.read(); if (b < 0) return if (bytes.size() == 0) null else bytes.toString("US-ASCII"); if (b == 10) break; require(bytes.size() < 8192) { "Header too large" }; if (b != 13) bytes.write(b) }
+                return bytes.toString("US-ASCII")
+            }
             val writer = OutputStreamWriter(socket.getOutputStream())
 
-            val requestLine = reader.readLine() ?: return@withContext
+            val requestLine = readHeader() ?: return@withContext
             val parts = requestLine.split(" ")
             if (parts.size < 2) return@withContext
 
             val method = parts[0]
             val path = parts[1]
 
-            // Read headers to get content length if POST
+            // Read headers to get content length and authorization
             var contentLength = 0
+            var authHeader: String? = null
             var line: String?
-            while (reader.readLine().also { line = it } != null) {
+            var headerCount = 0
+            while (readHeader().also { line = it } != null) {
+                require(++headerCount <= 64) { "Too many headers" }
                 if (line.isNullOrBlank()) break
-                if (line!!.lowercase().startsWith("content-length:")) {
-                    contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
+                val l = line!!.trim()
+                if (l.lowercase().startsWith("content-length:")) {
+                    contentLength = l.substringAfter(":").trim().toIntOrNull() ?: 0
+                } else if (l.lowercase().startsWith("authorization:")) {
+                    authHeader = l.substringAfter(":").trim()
                 }
+            }
+
+            // Secure authenticated endpoints (A01):
+            val requiredToken = preferences.syncToken.first()
+            val providedToken = authHeader?.removePrefix("Bearer ")?.trim()
+
+            if (requiredToken.length < 32 || providedToken.isNullOrEmpty() || !java.security.MessageDigest.isEqual(providedToken.toByteArray(), requiredToken.toByteArray())) {
+                val errJson = JSONObject().apply {
+                    put("status", "UNAUTHORIZED")
+                    put("message", "Invalid or missing Bearer authorization token.")
+                }.toString().toByteArray(Charsets.UTF_8)
+
+                writer.write("HTTP/1.1 401 Unauthorized\r\n")
+                writer.write("Content-Type: application/json; charset=utf-8\r\n")
+                writer.write("Content-Length: ${errJson.size}\r\n")
+                writer.write("\r\n")
+                writer.flush()
+                socket.getOutputStream().write(errJson)
+                socket.getOutputStream().flush()
+                return@withContext
             }
 
             if (method == "GET" && path.startsWith("/api/catalog")) {
@@ -170,6 +211,10 @@ class TwoPhoneSyncService @Inject constructor(
                     obj.put("sellingPricePiecePaise", p.sellingPricePiecePaise)
                     obj.put("sellingPricePackPaise", p.sellingPricePackPaise)
                     obj.put("currentSellableStock", p.currentSellableStock)
+                    obj.put("costQuote", CostQuote.issue(p.id, p.movingAvgCostPaise))
+                    val aliases = JSONArray()
+                    db.productBarcodeDao().getBarcodesForProduct(p.id).forEach { b -> aliases.put(JSONObject().put("id", b.id).put("barcode", b.barcode).put("unitType", b.unitType).put("packQuantity", b.packQuantity)) }
+                    obj.put("aliases", aliases)
                     productsArray.put(obj)
                 }
                 root.put("products", productsArray)
@@ -184,6 +229,9 @@ class TwoPhoneSyncService @Inject constructor(
                     servicesArray.put(obj)
                 }
                 root.put("services", servicesArray)
+                val customers = JSONArray()
+                customerDao.getAllCustomers().first().forEach { c -> customers.put(JSONObject().put("id", c.id).put("name", c.name).put("phone", c.phone ?: "").put("balance", c.currentBalancePaise)) }
+                root.put("customers", customers)
 
                 val responseBytes = root.toString().toByteArray(Charsets.UTF_8)
                 writer.write("HTTP/1.1 200 OK\r\n")
@@ -196,133 +244,166 @@ class TwoPhoneSyncService @Inject constructor(
 
             } else if (method == "POST" && path.startsWith("/api/sync-bills")) {
                 // Read body
-                val bodyChars = CharArray(contentLength)
-                var readTotal = 0
-                while (readTotal < contentLength) {
-                    val r = reader.read(bodyChars, readTotal, contentLength - readTotal)
-                    if (r < 0) break
-                    readTotal += r
-                }
-                val body = String(bodyChars, 0, readTotal)
+                require(contentLength in 1..(4 * 1024 * 1024)) { "Invalid payload size" }
+                val bodyBytes = ByteArray(contentLength)
+                java.io.DataInputStream(input).readFully(bodyBytes)
+                val body = String(bodyBytes, Charsets.UTF_8)
                 val billsArray = JSONArray(body)
+                require(billsArray.length() <= 1000) { "Too many bills" }
 
                 val acknowledgedIds = JSONArray()
 
-                for (i in 0 until billsArray.length()) {
-                    val billObj = billsArray.getJSONObject(i)
-                    val saleId = billObj.getString("id")
+                // A03: Atomically commit incoming sales, stock, and customer ledgers in one Room transaction
+                db.withTransaction {
+                    for (i in 0 until billsArray.length()) {
+                        val billObj = billsArray.getJSONObject(i)
+                        val saleId = billObj.getString("id")
 
-                    // Deduplicate: check if already committed
-                    val existingSale = saleDao.getSaleById(saleId)
-                    if (existingSale == null) {
-                        val receiptNumber = billObj.getString("receiptNumber")
-                        val customerId = billObj.optString("customerId").ifBlank { null }
-                        val customerName = billObj.optString("customerName").ifBlank { null }
-                        val grossTotal = billObj.getLong("grossTotalPaise")
-                        val discountType = billObj.getString("discountType")
-                        val discountValue = billObj.getLong("discountValuePaise")
-                        val discountPercent = billObj.optDouble("discountPercent", 0.0)
-                        val netTotal = billObj.getLong("netTotalPaise")
-                        val amountReceived = billObj.getLong("amountReceivedPaise")
-                        val changeGiven = billObj.optLong("changeGivenPaise", 0L)
-                        val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
-                        val paymentMethod = billObj.getString("paymentMethod")
-                        val timestamp = billObj.getLong("timestamp")
-                        val originDevice = billObj.optString("originDeviceId", "device-billing")
+                        // Deduplicate: check if already committed
+                        val existingSale = saleDao.getSaleById(saleId)
+                        if (existingSale != null) {
+                            val original = syncEventDao.getEventByEntityId(saleId)
+                            require(original?.eventType == "SYNC_BILL_INGESTION" && original.payloadJson == billObj.toString()) { "Conflicting replay of bill identity" }
+                        }
+                        if (existingSale == null) {
+                            val receiptNumber = billObj.getString("receiptNumber")
+                            val customerId = billObj.optString("customerId").ifBlank { null }
+                            val customerName = billObj.optString("customerName").ifBlank { null }
+                            val grossTotal = billObj.getLong("grossTotalPaise")
+                            val discountType = billObj.getString("discountType")
+                            val discountValue = billObj.getLong("discountValuePaise")
+                            val discountPercent = billObj.optDouble("discountPercent", 0.0)
+                            val netTotal = billObj.getLong("netTotalPaise")
+                            val amountReceived = billObj.getLong("amountReceivedPaise")
+                            val changeGiven = billObj.optLong("changeGivenPaise", 0L)
+                            val remainingCredit = billObj.optLong("remainingCreditPaise", 0L)
+                            val paymentMethod = billObj.getString("paymentMethod")
+                            val timestamp = billObj.getLong("timestamp")
+                            val originDevice = billObj.optString("originDeviceId", "device-billing")
 
-                        val sale = SaleEntity(
-                            id = saleId,
-                            receiptNumber = receiptNumber,
-                            customerId = customerId,
-                            customerName = customerName,
-                            grossTotalPaise = grossTotal,
-                            discountType = discountType,
-                            discountValuePaise = discountValue,
-                            discountPercent = discountPercent,
-                            netTotalPaise = netTotal,
-                            amountReceivedPaise = amountReceived,
-                            changeGivenPaise = changeGiven,
-                            remainingCreditPaise = remainingCredit,
-                            paymentMethod = paymentMethod,
-                            isSummaryEntry = false,
-                            unresolvedStockDetails = false,
-                            originDeviceId = originDevice,
-                            syncStatus = "SYNCED",
-                            timestamp = timestamp
-                        )
-                        saleDao.insertSale(sale)
-
-                        // Insert lines and adjust stock
-                        val linesArray = billObj.getJSONArray("lines")
-                        val saleLines = mutableListOf<SaleLineEntity>()
-                        for (j in 0 until linesArray.length()) {
-                            val lineObj = linesArray.getJSONObject(j)
-                            val lineType = lineObj.optString("lineType", "PRODUCT")
-                            val productId = lineObj.optString("productId").ifBlank { null }
-                            val productName = lineObj.getString("productName")
-                            val qtyBase = lineObj.getInt("quantityBase")
-                            val isPack = lineObj.optBoolean("isPack", false)
-                            val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
-                            val lineGross = lineObj.getLong("lineGrossPaise")
-                            val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
-                            val lineNet = lineObj.getLong("lineNetPaise")
-
-                            // Owner phone looks up product moving average cost snapshot
-                            val costSnapshot = if (lineType == "PRODUCT" && productId != null) {
-                                val p = productDao.getProductById(productId)
-                                p?.movingAvgCostPaise
-                            } else null
-
-                            val lineProfit = if (costSnapshot != null) {
-                                lineNet - (qtyBase * costSnapshot)
-                            } else null
-
-                            val line = SaleLineEntity(
-                                id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                saleId = saleId,
-                                productId = productId,
-                                productName = productName,
-                                quantityBase = qtyBase,
-                                isPack = isPack,
-                                unitSellingPricePaise = unitSellingPrice,
-                                unitCostSnapshotPaise = costSnapshot,
-                                lineGrossPaise = lineGross,
-                                lineDiscountAllocatedPaise = lineDiscount,
-                                lineNetPaise = lineNet,
-                                lineProfitPaise = lineProfit,
-                                lineType = lineType,
-                                serviceId = lineObj.optString("serviceId").ifBlank { null },
-                                serviceName = lineObj.optString("serviceName").ifBlank { null },
-                                serviceOption = lineObj.optString("serviceOption").ifBlank { null },
-                                unitLabel = lineObj.optString("unitLabel").ifBlank { null }
-                            )
-                            saleLines.add(line)
-
-                            // Deduct stock for product lines
-                            if (lineType == "PRODUCT" && productId != null) {
-                                productDao.adjustSellableStock(productId, -qtyBase)
-                                val product = productDao.getProductById(productId)
-                                stockMovementDao.insertMovement(
-                                    StockMovementEntity(
-                                        productId = productId,
-                                        type = "SALE",
-                                        quantityChangeBase = -qtyBase,
-                                        unitCostPaise = product?.movingAvgCostPaise ?: 0L,
-                                        reason = "Synced Bill $receiptNumber",
-                                        referenceId = saleId
-                                    )
-                                )
+                            require(grossTotal >= 0 && discountValue in 0..grossTotal && netTotal == grossTotal - discountValue && amountReceived >= 0 && remainingCredit == (netTotal - amountReceived).coerceAtLeast(0)) { "Invalid bill totals" }
+                            if (customerId != null && customerDao.getCustomerById(customerId) == null) {
+                                val customer = billObj.optJSONObject("customer") ?: error("Missing customer details")
+                                require(customer.getString("id") == customerId && customer.getString("name").isNotBlank()) { "Invalid customer identity" }
+                                customerDao.insertCustomer(com.alieducational.app.data.local.entity.CustomerEntity(id=customerId, name=customer.getString("name"), phone=customer.optString("phone").ifBlank { null }))
                             }
-                        }
-                        saleDao.insertSaleLines(saleLines)
+                            if (remainingCredit > 0) require(customerId != null) { "Credit needs a customer" }
+                            val sale = SaleEntity(
+                                id = saleId,
+                                receiptNumber = receiptNumber,
+                                customerId = customerId,
+                                customerName = customerName,
+                                grossTotalPaise = grossTotal,
+                                discountType = discountType,
+                                discountValuePaise = discountValue,
+                                discountPercent = discountPercent,
+                                netTotalPaise = netTotal,
+                                amountReceivedPaise = amountReceived,
+                                changeGivenPaise = changeGiven,
+                                remainingCreditPaise = remainingCredit,
+                                paymentMethod = paymentMethod,
+                                isSummaryEntry = false,
+                                unresolvedStockDetails = false,
+                                originDeviceId = originDevice,
+                                syncStatus = "SYNCED",
+                                timestamp = timestamp
+                            )
+                            saleDao.insertSale(sale)
 
-                        // Customer debt adjustment if credit
-                        if (customerId != null && remainingCredit > 0) {
-                            customerDao.adjustBalance(customerId, remainingCredit)
+                            // Insert lines and adjust stock
+                            val linesArray = billObj.getJSONArray("lines")
+                            val saleLines = mutableListOf<SaleLineEntity>()
+                            for (j in 0 until linesArray.length()) {
+                                val lineObj = linesArray.getJSONObject(j)
+                                val lineType = lineObj.optString("lineType", "PRODUCT")
+                                val productId = lineObj.optString("productId").ifBlank { null }
+                                val productName = lineObj.getString("productName")
+                                val qtyBase = lineObj.getInt("quantityBase")
+                                val isPack = lineObj.optBoolean("isPack", false)
+                                val unitSellingPrice = lineObj.getLong("unitSellingPricePaise")
+                                val lineGross = lineObj.getLong("lineGrossPaise")
+                                val lineDiscount = lineObj.optLong("lineDiscountAllocatedPaise", 0L)
+                                val lineNet = lineObj.getLong("lineNetPaise")
+
+                                require(lineType in setOf("PRODUCT", "SERVICE") && (lineType != "PRODUCT" || productId != null)) { "Invalid line type or product" }
+                                require(qtyBase > 0 && unitSellingPrice >= 0 && lineGross >= 0 && lineDiscount in 0..lineGross && lineNet == lineGross - lineDiscount) { "Invalid sale line" }
+                                // Missing cost stays unresolved; never silently price historic sales at today's cost.
+                                // Preserve valid sale-time cost snapshot if present; otherwise resolve from Owner DB (A07)
+                                val costSnapshot = if (lineType == "PRODUCT" && productId != null) {
+                                    CostQuote.resolve(lineObj.optString("costQuote"), productId)
+                                } else null
+
+                                val lineProfit = if (costSnapshot != null) {
+                                    lineNet - (qtyBase * costSnapshot)
+                                } else null
+
+                                val line = SaleLineEntity(
+                                    id = lineObj.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                    saleId = saleId,
+                                    productId = productId,
+                                    productName = productName,
+                                    quantityBase = qtyBase,
+                                    isPack = isPack,
+                                    unitSellingPricePaise = unitSellingPrice,
+                                    unitCostSnapshotPaise = costSnapshot,
+                                    lineGrossPaise = lineGross,
+                                    lineDiscountAllocatedPaise = lineDiscount,
+                                    lineNetPaise = lineNet,
+                                    lineProfitPaise = lineProfit,
+                                    lineType = lineType,
+                                    serviceId = lineObj.optString("serviceId").ifBlank { null },
+                                    serviceName = lineObj.optString("serviceName").ifBlank { null },
+                                    serviceOption = lineObj.optString("serviceOption").ifBlank { null },
+                                    unitLabel = lineObj.optString("unitLabel").ifBlank { null }
+                                )
+                                require(saleDao.getLineById(line.id) == null) { "Sale line identity already used" }
+                                saleLines.add(line)
+
+                                // Deduct stock for product lines
+                                if (lineType == "PRODUCT" && productId != null) {
+                                    require(productDao.getProductById(productId) != null) { "Unknown product" }
+                                    productDao.adjustSellableStock(productId, -qtyBase)
+                                    val product = productDao.getProductById(productId)
+                                    stockMovementDao.insertMovement(
+                                        StockMovementEntity(
+                                            productId = productId,
+                                            type = "SALE",
+                                            quantityChangeBase = -qtyBase,
+                                            unitCostPaise = costSnapshot ?: 0L,
+                                            reason = "Synced Bill $receiptNumber",
+                                            referenceId = saleId
+                                        )
+                                    )
+                                }
+                            }
+                            require(saleLines.sumOf { it.lineGrossPaise } == grossTotal && saleLines.sumOf { it.lineNetPaise } == netTotal) { "Bill and line totals differ" }
+                            require(saleLines.map { it.id }.distinct().size == saleLines.size) { "Duplicate line identity" }
+                            saleDao.insertSaleLines(saleLines)
+                            if (saleLines.any { it.lineType == "PRODUCT" && (it.unitCostSnapshotPaise == null || (it.productId?.let { id -> productDao.getProductById(id)?.currentSellableStock } ?: 0) < 0) }) {
+                                saleDao.updateSale(sale.copy(unresolvedStockDetails = true))
+                            }
+
+                            // Customer debt adjustment if credit
+                            if (customerId != null && remainingCredit > 0) {
+                                customerDao.adjustBalance(customerId, remainingCredit)
+                            }
+
+                            // Durable sync event entry (A03 / A09)
+                            syncEventDao.insertEvent(
+                                SyncEventEntity(
+                                    id = UUID.randomUUID().toString(),
+                                    eventType = "SYNC_BILL_INGESTION",
+                                    entityId = saleId,
+                                    payloadJson = billObj.toString(),
+                                    originDeviceId = originDevice,
+                                    status = "ACKNOWLEDGED",
+                                    timestamp = System.currentTimeMillis()
+                                )
+                            )
                         }
+
+                        acknowledgedIds.put(saleId)
                     }
-
-                    acknowledgedIds.put(saleId)
                 }
 
                 val responseRoot = JSONObject()
@@ -341,7 +422,9 @@ class TwoPhoneSyncService @Inject constructor(
                 writer.write("HTTP/1.1 404 Not Found\r\n\r\n")
                 writer.flush()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("AliSync", "Sync request rejected", e)
+            _connectionState.value = SyncConnectionState.Error("Sync request rejected: ${e.message}")
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
@@ -349,16 +432,20 @@ class TwoPhoneSyncService @Inject constructor(
 
     // ── Billing Phone Client Functions ──────────────────────────────────
 
-    suspend fun syncWithMainPhone(ownerHost: String, port: Int = 8080): Boolean = withContext(Dispatchers.IO) {
+    suspend fun syncWithMainPhone(ownerHost: String, port: Int = 8080, refreshOnly: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         try {
+            require(preferences.deviceRole.first() == "BILLING") { "Only a Billing device can receive the Owner catalog" }
+            val token = preferences.syncToken.first()
             _connectionState.value = SyncConnectionState.Syncing("Connecting to $ownerHost:$port...")
 
             // 1. Fetch latest catalog
-            val catalogUrl = URL("http://$ownerHost:$port/api/catalog")
-            val catalogConn = (catalogUrl.openConnection() as HttpURLConnection).apply {
+            val catalogUrl = URL("https://$ownerHost:$port/api/catalog")
+            val catalogConn = (catalogUrl.openConnection() as javax.net.ssl.HttpsURLConnection).apply {
+                SyncTls.configure(this, preferences.ownerCertificatePin.first())
                 connectTimeout = 4000
                 readTimeout = 6000
                 requestMethod = "GET"
+                setRequestProperty("Authorization", "Bearer $token")
             }
 
             if (catalogConn.responseCode != 200) {
@@ -370,6 +457,19 @@ class TwoPhoneSyncService @Inject constructor(
             val catalogRoot = JSONObject(catalogJsonStr)
             val productsArray = catalogRoot.getJSONArray("products")
 
+            db.withTransaction {
+            val customerArray = catalogRoot.optJSONArray("customers") ?: JSONArray()
+            for (i in 0 until customerArray.length()) {
+                val c = customerArray.getJSONObject(i)
+                val id = c.getString("id")
+                val pendingCredit = saleDao.getPendingSyncSales().filter { it.customerId == id }.sumOf { it.remainingCreditPaise }
+                val existing = customerDao.getCustomerById(id)
+                customerDao.insertCustomer((existing ?: com.alieducational.app.data.local.entity.CustomerEntity(id=id, name=c.getString("name"))).copy(name=c.getString("name"), phone=c.optString("phone").ifBlank { null }, currentBalancePaise=Math.addExact(c.getLong("balance"), pendingCredit)))
+            }
+            val pendingQuantities = mutableMapOf<String, Int>()
+            saleDao.getPendingSyncSales().forEach { sale -> saleDao.getLinesForSale(sale.id).forEach { line ->
+                if (line.productId != null) pendingQuantities[line.productId] = (pendingQuantities[line.productId] ?: 0) + line.quantityBase
+            } }
             // Upsert catalog items on billing phone
             for (i in 0 until productsArray.length()) {
                 val pObj = productsArray.getJSONObject(i)
@@ -389,13 +489,28 @@ class TwoPhoneSyncService @Inject constructor(
                     packSize = pObj.optInt("packSize", 1),
                     sellingPricePiecePaise = pObj.getLong("sellingPricePiecePaise"),
                     sellingPricePackPaise = pObj.getLong("sellingPricePackPaise"),
-                    currentSellableStock = pObj.getInt("currentSellableStock")
+                    currentSellableStock = pObj.getInt("currentSellableStock") - (pendingQuantities[id] ?: 0)
                 )
                 productDao.insertProduct(updated)
+                val quote = pObj.optString("costQuote")
+                syncEventDao.insertEvent(SyncEventEntity(id = "catalog-quote-$id", eventType = "CATALOG_QUOTE", entityId = "catalog-quote-$id", payloadJson = quote, originDeviceId = "OWNER", status = "ACKNOWLEDGED"))
+                val aliases = pObj.optJSONArray("aliases") ?: JSONArray()
+                for (j in 0 until aliases.length()) {
+                    val b = aliases.getJSONObject(j)
+                    val existingAlias = db.productBarcodeDao().findByBarcode(b.getString("barcode"))
+                    require(existingAlias == null || (existingAlias.productId == id && existingAlias.unitType == b.getString("unitType") && existingAlias.packQuantity == b.getInt("packQuantity"))) { "Conflicting barcode in catalog" }
+                    if (existingAlias == null) db.productBarcodeDao().insertBarcode(com.alieducational.app.data.local.entity.ProductBarcodeEntity(id = b.getString("id"), barcode = b.getString("barcode"), productId = id, unitType = b.getString("unitType"), packQuantity = b.getInt("packQuantity")))
+                }
             }
 
+            val serviceArray = catalogRoot.optJSONArray("services") ?: JSONArray()
+            for (i in 0 until serviceArray.length()) {
+                val value = serviceArray.getJSONObject(i)
+                serviceDao.insertService(com.alieducational.app.data.local.entity.ServiceDefinitionEntity(id = value.getString("id"), name = value.getString("name"), unitLabel = value.getString("unitLabel"), isPredefined = value.optBoolean("isPredefined")))
+            }
+            }
             // 2. Deliver pending bills to Main Phone
-            val pendingSales = saleDao.getPendingSyncSales()
+            val pendingSales = if (refreshOnly) emptyList() else saleDao.getPendingSyncSales().take(500)
             if (pendingSales.isNotEmpty()) {
                 _connectionState.value = SyncConnectionState.Syncing("Delivering ${pendingSales.size} pending bills...")
 
@@ -407,6 +522,9 @@ class TwoPhoneSyncService @Inject constructor(
                         put("receiptNumber", sale.receiptNumber)
                         put("customerId", sale.customerId ?: "")
                         put("customerName", sale.customerName ?: "")
+                        sale.customerId?.let { id -> customerDao.getCustomerById(id)?.let { customer ->
+                            put("customer", JSONObject().put("id", customer.id).put("name", customer.name).put("phone", customer.phone ?: ""))
+                        } }
                         put("grossTotalPaise", sale.grossTotalPaise)
                         put("discountType", sale.discountType)
                         put("discountValuePaise", sale.discountValuePaise)
@@ -421,6 +539,7 @@ class TwoPhoneSyncService @Inject constructor(
 
                         val lArray = JSONArray()
                         for (line in lines) {
+                            val quote = syncEventDao.getEventByEntityId("sale-quote-${line.id}")?.payloadJson ?: ""
                             val lObj = JSONObject().apply {
                                 put("id", line.id)
                                 put("lineType", line.lineType)
@@ -429,6 +548,7 @@ class TwoPhoneSyncService @Inject constructor(
                                 put("quantityBase", line.quantityBase)
                                 put("isPack", line.isPack)
                                 put("unitSellingPricePaise", line.unitSellingPricePaise)
+                                put("costQuote", quote)
                                 put("lineGrossPaise", line.lineGrossPaise)
                                 put("lineDiscountAllocatedPaise", line.lineDiscountAllocatedPaise)
                                 put("lineNetPaise", line.lineNetPaise)
@@ -444,13 +564,15 @@ class TwoPhoneSyncService @Inject constructor(
                     billsArray.put(sObj)
                 }
 
-                val billsUrl = URL("http://$ownerHost:$port/api/sync-bills")
-                val billsConn = (billsUrl.openConnection() as HttpURLConnection).apply {
+                val billsUrl = URL("https://$ownerHost:$port/api/sync-bills")
+                val billsConn = (billsUrl.openConnection() as javax.net.ssl.HttpsURLConnection).apply {
+                    SyncTls.configure(this, preferences.ownerCertificatePin.first())
                     connectTimeout = 6000
                     readTimeout = 10000
                     requestMethod = "POST"
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Authorization", "Bearer $token")
                 }
 
                 val bodyBytes = billsArray.toString().toByteArray(Charsets.UTF_8)
@@ -460,6 +582,7 @@ class TwoPhoneSyncService @Inject constructor(
                     val respStr = billsConn.inputStream.bufferedReader().use { it.readText() }
                     val respObj = JSONObject(respStr)
                     val ackIds = respObj.getJSONArray("acknowledgedIds")
+                    require((0 until ackIds.length()).map { ackIds.getString(it) }.toSet() == pendingSales.map { it.id }.toSet() && ackIds.length() == pendingSales.size) { "Invalid acknowledgement; pending bills retained" }
                     for (i in 0 until ackIds.length()) {
                         val ackId = ackIds.getString(i)
                         saleDao.updateSaleSyncStatus(ackId, "SYNCED")
@@ -470,6 +593,9 @@ class TwoPhoneSyncService @Inject constructor(
                 }
             }
 
+            if (pendingSales.isNotEmpty()) {
+                return@withContext syncWithMainPhone(ownerHost, port, refreshOnly = true)
+            }
             _connectionState.value = SyncConnectionState.Connected(ownerHost)
             true
         } catch (e: Exception) {

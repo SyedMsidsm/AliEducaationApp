@@ -5,6 +5,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
+import androidx.room.withTransaction
+import androidx.room.Room
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import androidx.documentfile.provider.DocumentFile
 import com.alieducational.app.data.local.AppDatabase
 import com.alieducational.app.data.preferences.AppPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -52,6 +57,8 @@ class BackupRestoreService @Inject constructor(
     private val excelGenerator: ShopRecordsExcelGenerator
 ) {
 
+    private val operationMutex = Mutex()
+
     val primaryBackupFolder: File
         get() {
             val appExternal = context.getExternalFilesDir("backups")
@@ -74,21 +81,13 @@ class BackupRestoreService @Inject constructor(
         get() = backupFolder.absolutePath
 
     suspend fun createBackup(): BackupMetadata = withContext(Dispatchers.IO) {
-        // 1. Checkpoint the SQLite WAL file so all committed records are in the main db file
+        operationMutex.withLock {
+        db.withTransaction {
+        val dbFile = File(context.cacheDir, "snapshot-${java.util.UUID.randomUUID()}.db")
+        DatabaseSnapshot.export(db.openHelper.writableDatabase, dbFile)
         try {
-            val dbHelper = db.openHelper.writableDatabase
-            val cursor = dbHelper.query("PRAGMA wal_checkpoint(FULL)")
-            cursor.moveToFirst()
-            cursor.close()
-        } catch (_: Exception) {}
-
-        val dbFile = context.getDatabasePath("ali_educational.db")
-        if (!dbFile.exists()) {
-            throw IllegalStateException("Database file 'ali_educational.db' not found.")
-        }
-
         val timestamp = System.currentTimeMillis()
-        val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(timestamp))
+        val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss-SSS", Locale.US).format(Date(timestamp))
         val snapshotId = "SNAP_$dateStr"
         val shopName = preferences.shopName.first()
 
@@ -100,9 +99,9 @@ class BackupRestoreService @Inject constructor(
         val sales = db.saleDao().getAllSalesWithVoided().first()
         val saleLines = db.saleDao().getAllSaleLines().first()
         val accountPayments = db.accountPaymentDao().getAllAccountPayments().first()
-        val customers = db.customerDao().getAllCustomers().first()
-        val suppliers = db.supplierDao().getAllSuppliers().first()
-        val cashExpenses = db.shopExpenseDao().getAllExpenses().first()
+        val customers = db.customerDao().getAllIncludingArchived().first()
+        val suppliers = db.supplierDao().getAllIncludingArchived().first()
+        val cashExpenses = db.shopExpenseDao().getAllIncludingArchived().first()
         val pigmySchemes = db.pigmySchemeDao().getAllSchemes().first()
         val pigmyDeposits = db.pigmyDepositDao().getAllDeposits().first()
         val pigmyWithdrawals = db.pigmyWithdrawalDao().getAllWithdrawals().first()
@@ -114,6 +113,12 @@ class BackupRestoreService @Inject constructor(
             attachmentsDir.listFiles()?.filter { it.isFile && it.length() > 0 } ?: emptyList()
         } else emptyList()
 
+        val referencedPaths = (products.mapNotNull { it.photoUri } + purchases.mapNotNull { it.photoUri } + cashExpenses.mapNotNull { it.attachmentUri }).filter { it.isNotBlank() }
+        referencedPaths.forEach { path ->
+            require(photoFiles.any { it.name == File(path.removePrefix("file://")).name }) { "Backup incomplete: referenced attachment is missing ($path)" }
+        }
+
+        val settingsBytes = preferences.exportSupportedSettings().toString().toByteArray(Charsets.UTF_8)
         val snapshotData = ShopSnapshotData(
             snapshotId = snapshotId,
             timestamp = timestamp,
@@ -151,7 +156,10 @@ class BackupRestoreService @Inject constructor(
 
             // B. Manifest JSON
             val manifestJson = JSONObject().apply {
-                put("formatVersion", 1)
+                put("formatVersion", 2)
+                put("dbSha256", sha256(dbFile))
+                put("settingsSha256", java.security.MessageDigest.getInstance("SHA-256").digest(settingsBytes).joinToString("") { "%02x".format(it) })
+                put("attachments", JSONObject().apply { photoFiles.forEach { put(it.name, sha256(it)) } })
                 put("app", "Ali Educational")
                 put("packageName", context.packageName)
                 put("schemaVersion", 8)
@@ -170,6 +178,10 @@ class BackupRestoreService @Inject constructor(
 
             zipOut.putNextEntry(ZipEntry("manifest.json"))
             zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
+            zipOut.closeEntry()
+
+            zipOut.putNextEntry(ZipEntry("settings.json"))
+            zipOut.write(settingsBytes)
             zipOut.closeEntry()
 
             // C. Attachment photos
@@ -255,15 +267,22 @@ class BackupRestoreService @Inject constructor(
             }
         } catch (_: Exception) {}
 
+        // 7. If connected Google Drive / external folder URI is configured, auto-export
+        val connectedFolderUri = preferences.googleDriveFolderUri.first()
+        if (connectedFolderUri.isNotBlank()) {
+            val (saved, message) = saveBackupToConnectedFolder(packageFile, connectedFolderUri)
+            check(saved) { "Local backup saved at ${packageFile.absolutePath}. External copy failed: $message. Retry external save." }
+        }
+
         preferences.setLastBackupTime(timestamp)
 
-        return@withContext BackupMetadata(
+        BackupMetadata(
             fileName = packageFileName,
             filePath = packageFile.absolutePath,
             sizeBytes = packageFile.length(),
             timestamp = timestamp,
             isValid = true,
-            integrityNote = "Verified Complete Archive + Excel Workbook",
+            integrityNote = "Snapshot saved; integrity checks available in backup details",
             snapshotId = snapshotId,
             packageFilePath = packageFile.absolutePath,
             completeBackupFilePath = completeBackupFile.absolutePath,
@@ -276,6 +295,47 @@ class BackupRestoreService @Inject constructor(
             cashInOutCount = cashExpenses.size,
             pigmyCount = pigmyDeposits.size + pigmyWithdrawals.size
         )
+        } finally { dbFile.delete() }
+        }
+        }
+    }
+
+    suspend fun saveBackupToConnectedFolder(packageFile: File, treeUriStr: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            if (treeUriStr.isBlank()) {
+                return@withContext Pair(false, "No Google Drive or external backup folder connected")
+            }
+            val treeUri = Uri.parse(treeUriStr)
+            val docFolder = DocumentFile.fromTreeUri(context, treeUri)
+                ?: return@withContext Pair(false, "Cannot open connected backup folder")
+            if (!docFolder.canWrite()) {
+                return@withContext Pair(false, "Folder write permission expired or revoked. Please reconnect folder.")
+            }
+
+            // Create or replace package file in connected folder
+            val targetDoc = docFolder.createFile("application/zip", packageFile.name)
+                ?: return@withContext Pair(false, "Failed to create backup in connected folder")
+
+            context.contentResolver.openOutputStream(targetDoc.uri)?.use { out ->
+                FileInputStream(packageFile).use { input ->
+                    input.copyTo(out)
+                }
+            } ?: return@withContext Pair(false, "Failed to open output stream to destination")
+
+            val expectedDigest = sha256(packageFile)
+            val actualDigest = (context.contentResolver.openInputStream(targetDoc.uri) ?: error("Destination cannot be reopened for verification")).use { input ->
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                val buffer = ByteArray(65536)
+                while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
+            check(actualDigest == expectedDigest) { "External backup checksum mismatch; retry the upload" }
+            val destName = docFolder.name ?: "Connected Folder"
+            preferences.setLastExternalSave(System.currentTimeMillis(), destName)
+            Pair(true, "Successfully saved to $destName")
+        } catch (e: Exception) {
+            Pair(false, "External save error: ${e.localizedMessage ?: "Unknown error"}")
+        }
     }
 
     suspend fun getAvailableBackups(): List<BackupMetadata> = withContext(Dispatchers.IO) {
@@ -349,116 +409,129 @@ class BackupRestoreService @Inject constructor(
         return@withContext resultList
     }
 
-    private fun inspectPackageOrBackup(file: File): Triple<Boolean, String, JSONObject?> {
-        try {
-            ZipInputStream(FileInputStream(file)).use { zipIn ->
-                var foundDb = false
-                var foundInnerCompleteZip = false
-                var manifestJson: JSONObject? = null
-                var entry: ZipEntry?
-
-                while (zipIn.nextEntry.also { entry = it } != null) {
-                    val name = entry!!.name
-                    if (name == "ali_educational.db") {
-                        foundDb = true
-                    } else if (name == "Complete_Backup.zip" || name.startsWith("Ali_Educational_Complete_Backup_")) {
-                        foundInnerCompleteZip = true
-                    } else if (name == "manifest.json") {
-                        try {
-                            val bytes = zipIn.readBytes()
-                            manifestJson = JSONObject(String(bytes, Charsets.UTF_8))
-                        } catch (_: Exception) {}
-                    }
-                    zipIn.closeEntry()
-                }
-
-                if (foundInnerCompleteZip) {
-                    return Triple(true, "Verified Backup Package (Archive + Excel)", manifestJson)
-                }
-                if (foundDb) {
-                    return Triple(true, "Verified SQLite Recovery Archive", manifestJson)
-                }
-                return Triple(false, "Invalid Archive: missing database or backup package", null)
-            }
-        } catch (e: Exception) {
-            return Triple(false, "Corrupt file: ${e.localizedMessage}", null)
+    private fun sha256(file: File): String = java.security.MessageDigest.getInstance("SHA-256").let { digest ->
+        file.inputStream().use { stream ->
+            val buffer = ByteArray(65536)
+            while (true) { val n = stream.read(buffer); if (n < 0) break; digest.update(buffer, 0, n) }
         }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun extractArchive(file: File, stage: File, depth: Int = 0): File {
+        require(depth <= 1) { "Nested archive limit" }
+        var total = 0L
+        var count = 0
+        val seen = mutableSetOf<String>()
+        java.util.zip.ZipInputStream(file.inputStream()).use { zip ->
+            while (true) {
+                val e = zip.nextEntry ?: break
+                require(++count <= 10000) { "Too many files" }
+                val target = File(stage, e.name).canonicalFile
+                require(target.path.startsWith(stage.canonicalPath + File.separator) && seen.add(target.path)) { "Unsafe or duplicate archive path" }
+                if (!e.isDirectory) {
+                    target.parentFile!!.mkdirs()
+                    target.outputStream().use { out ->
+                        val buffer = ByteArray(65536)
+                        while (true) { val n = zip.read(buffer); if (n < 0) break; total += n; require(total <= 512L * 1024 * 1024) { "Archive exceeds 512 MB" }; out.write(buffer, 0, n) }
+                    }
+                }
+                zip.closeEntry()
+            }
+        }
+        val dbFile = File(stage, "ali_educational.db")
+        if (dbFile.exists()) return stage
+        val inner = stage.listFiles()!!.filter { it.name == "Complete_Backup.zip" || it.name.startsWith("Ali_Educational_Complete_Backup_") }
+        require(inner.size == 1) { "Missing or ambiguous recovery archive" }
+        val sub = File(stage, "validated-inner").apply { mkdirs() }
+        return extractArchive(inner.single(), sub, depth + 1)
+    }
+
+    private fun validateStage(stage: File): JSONObject? {
+        val file = File(stage, "ali_educational.db")
+        val manifestFile = File(stage, "manifest.json")
+        val manifest = if (manifestFile.exists()) JSONObject(manifestFile.readText()) else null
+        if (manifest?.has("dbSha256") == true) require(manifest.getString("dbSha256") == sha256(file)) { "Database checksum mismatch" }
+        manifest?.optJSONObject("attachments")?.let { hashes ->
+            hashes.keys().forEach { name ->
+                val attachment = File(stage, "attachments/$name")
+                require(attachment.isFile && sha256(attachment) == hashes.getString(name)) { "Missing or damaged attachment" }
+            }
+        }
+        if (manifest?.has("settingsSha256") == true) require(sha256(File(stage, "settings.json")) == manifest.getString("settingsSha256")) { "Settings checksum mismatch" }
+        android.database.sqlite.SQLiteDatabase.openDatabase(file.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { raw ->
+            require(raw.version in 1..8) { "Unsupported backup schema ${raw.version}" }
+            raw.rawQuery("PRAGMA integrity_check", null).use { c -> require(c.moveToFirst() && c.getString(0) == "ok") { "Corrupt database" } }
+        }
+        // Never trust a stored identity hash as proof that actual tables still match.
+        android.database.sqlite.SQLiteDatabase.openDatabase(file.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { raw ->
+            raw.execSQL("DROP TABLE IF EXISTS room_master_table")
+        }
+        // Room validates every table when its identity marker is absent, and migrates older schemas.
+        val staged = Room.databaseBuilder(context, AppDatabase::class.java, file.absolutePath)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE).build()
+        try { staged.openHelper.writableDatabase.query("SELECT COUNT(*) FROM products").use { it.moveToFirst() } }
+        finally { staged.close() }
+        val settingsFile = File(stage, "settings.json")
+        if (settingsFile.exists()) require(JSONObject(settingsFile.readText()).optInt("version", 1) == 1) { "Unsupported settings" }
+        return manifest
+    }
+
+    private fun inspectPackageOrBackup(file: File): Triple<Boolean, String, JSONObject?> {
+        val stage = File(context.cacheDir, "inspect-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+        return try {
+            val root = extractArchive(file, stage)
+            val manifest = validateStage(root)
+            Triple(true, "Database schema and integrity checked", manifest)
+        } catch (e: Exception) { Triple(false, "Invalid backup: ${e.message}", null) }
+        finally { stage.deleteRecursively() }
     }
 
     suspend fun restoreBackup(backupFile: File): Boolean = withContext(Dispatchers.IO) {
-        val destDbFile = context.getDatabasePath("ali_educational.db")
-
-        // 1. Safety backup of current database before restoring
-        if (destDbFile.exists()) {
-            val safetyDir = File(context.cacheDir, "pre_restore_safety")
-            if (!safetyDir.exists()) safetyDir.mkdirs()
-            val safetyBackup = File(safetyDir, "safety_${System.currentTimeMillis()}.db")
-            destDbFile.copyTo(safetyBackup, overwrite = true)
-        }
-
-        // 2. Check if selected file is the outer package containing Complete_Backup.zip
-        var sourceArchive = backupFile
-        var isTempStaged = false
-
-        ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
-            var entry: ZipEntry?
-            while (zipIn.nextEntry.also { entry = it } != null) {
-                val name = entry!!.name
-                if (name == "Complete_Backup.zip" || name.startsWith("Ali_Educational_Complete_Backup_")) {
-                    val staged = File(context.cacheDir, "staged_complete_backup.zip")
-                    FileOutputStream(staged).use { out -> zipIn.copyTo(out) }
-                    sourceArchive = staged
-                    isTempStaged = true
-                    break
+        operationMutex.withLock {
+            val stage = File(context.cacheDir, "restore-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+            val previousSettings = preferences.exportSupportedSettings()
+            val writtenFiles = mutableListOf<File>()
+            try {
+                val root = extractArchive(backupFile, stage)
+                validateStage(root)
+                val source = File(root, "ali_educational.db")
+                val settings = File(root, "settings.json").takeIf { it.exists() }?.let { JSONObject(it.readText()) }
+                // Copy attachments under unique names first; a failed DB transaction cannot overwrite live evidence.
+                val remap = mutableMapOf<String, String>()
+                File(root, "attachments").listFiles()?.filter { it.isFile }?.forEach { original ->
+                    val destination = File(context.filesDir, "attachments/restored-${java.util.UUID.randomUUID()}-${original.name}")
+                    destination.parentFile!!.mkdirs(); original.copyTo(destination)
+                    writtenFiles.add(destination); remap[original.name] = destination.absolutePath
                 }
-                zipIn.closeEntry()
-            }
-        }
-
-        // 3. Restore from sourceArchive (with strict zip-slip protection)
-        var restoredDb = false
-        try {
-            ZipInputStream(FileInputStream(sourceArchive)).use { zipIn ->
-                var entry: ZipEntry?
-                while (zipIn.nextEntry.also { entry = it } != null) {
-                    val entryName = entry!!.name
-
-                    // Strict zip slip check
-                    if (entryName.contains("..") || entryName.startsWith("/") || entryName.startsWith("\\")) {
-                        throw SecurityException("Malicious path detected in archive entry: $entryName")
+                val safety = File(context.filesDir, "pre_restore_safety/safety-${System.currentTimeMillis()}.db")
+                safety.parentFile!!.mkdirs()
+                db.withTransaction {
+                    DatabaseSnapshot.export(db.openHelper.writableDatabase, safety)
+                    if (settings != null) preferences.importSupportedSettings(settings)
+                    android.database.sqlite.SQLiteDatabase.openDatabase(source.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { raw ->
+                        DatabaseSnapshot.replace(raw, db.openHelper.writableDatabase)
                     }
-
-                    if (entryName == "ali_educational.db") {
-                        val tempDb = File(context.cacheDir, "restored_temp.db")
-                        FileOutputStream(tempDb).use { out -> zipIn.copyTo(out) }
-
-                        // Close DB and replace main DB file
-                        db.close()
-                        tempDb.copyTo(destDbFile, overwrite = true)
-                        tempDb.delete()
-
-                        // Remove existing WAL / SHM files if any
-                        File(destDbFile.parent, "ali_educational.db-wal").delete()
-                        File(destDbFile.parent, "ali_educational.db-shm").delete()
-
-                        restoredDb = true
-                    } else if (entryName.startsWith("attachments/") && !entry!!.isDirectory) {
-                        val destDir = File(context.filesDir, "attachments")
-                        if (!destDir.exists()) destDir.mkdirs()
-                        val filename = File(entryName).name
-                        val destFile = File(destDir, filename)
-                        FileOutputStream(destFile).use { out -> zipIn.copyTo(out) }
+                    for ((table, column) in listOf("shop_expenses" to "attachmentUri", "products" to "photoUri", "purchases" to "photoUri")) {
+                        val changes = mutableListOf<Pair<String, String>>()
+                        db.openHelper.writableDatabase.query("SELECT id, $column FROM $table WHERE $column IS NOT NULL").use { c ->
+                            while (c.moveToNext()) {
+                                val old = c.getString(1); val replacement = remap[File(old.removePrefix("file://")).name]
+                                require(replacement != null) { "Missing attachment for $table ${c.getString(0)}" }
+                                changes.add(c.getString(0) to replacement)
+                            }
+                        }
+                        changes.forEach { (id, path) -> db.openHelper.writableDatabase.execSQL("UPDATE $table SET $column = ? WHERE id = ?", arrayOf(path, id)) }
                     }
-                    zipIn.closeEntry()
                 }
-            }
-        } finally {
-            if (isTempStaged) {
-                sourceArchive.delete()
-            }
+                true
+            } catch (e: Exception) {
+                preferences.importSupportedSettings(previousSettings)
+                writtenFiles.forEach { it.delete() }
+                throw e
+            } finally { stage.deleteRecursively() }
         }
-
-        return@withContext restoredDb
     }
 
     suspend fun restoreFromUri(uri: Uri): Boolean = withContext(Dispatchers.IO) {
@@ -497,7 +570,7 @@ class BackupRestoreService @Inject constructor(
 
     suspend fun exportBackupToUri(backupFile: File, targetUri: Uri): Boolean = withContext(Dispatchers.IO) {
         try {
-            context.contentResolver.openOutputStream(targetUri)?.use { out ->
+            (context.contentResolver.openOutputStream(targetUri) ?: error("Destination unavailable")).use { out ->
                 FileInputStream(backupFile).use { input ->
                     input.copyTo(out)
                 }

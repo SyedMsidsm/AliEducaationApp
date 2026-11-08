@@ -41,6 +41,10 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Image
@@ -72,6 +76,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -169,6 +174,7 @@ fun CashTrackerScreen(
             }
         }
     }
+    var itemToEdit by remember { mutableStateOf<ShopExpenseEntity?>(null) }
     var selectedItemForVoid by remember { mutableStateOf<ShopExpenseEntity?>(null) }
     var viewingPhotoFile by remember { mutableStateOf<File?>(null) }
 
@@ -502,33 +508,24 @@ fun CashTrackerScreen(
                 }
             }
 
-            // Table Header: Date | Income | Expense
+            // Table Header: Description / Details & Amount
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
                     .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Description / Details",
+                    text = "Transaction Details",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1.5f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Income",
+                    text = "Amount",
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF2E7D32),
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "Expense",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFFD32F2F),
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -578,42 +575,62 @@ fun CashTrackerScreen(
                             }
                         }
 
-                        // Day's Entries
+                        // Day's Entries (Section 2 Layout)
                         items(itemsOnDay) { entry ->
+                            var menuExpanded by remember { mutableStateOf(false) }
+
+                            val displayDescription = if (!entry.notes.isNullOrBlank()) entry.notes else entry.category
+                            val displayPayment = when (entry.paymentMethod.uppercase()) {
+                                "CASH" -> "Cash"
+                                "GPAY", "UPI" -> "UPI"
+                                "BANK" -> "Bank"
+                                else -> entry.paymentMethod
+                            }
+                            val metaText = "${entry.category} · $displayPayment · ${timeFormat.format(Date(entry.timestamp))}"
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { selectedItemForVoid = entry }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Description, Category pill, Time & Photo Icon
-                                Column(modifier = Modifier.weight(1.5f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // Category Pill
-                                        Card(
-                                            shape = RoundedCornerShape(4.dp),
-                                            colors = CardDefaults.cardColors(
-                                                containerColor = if (entry.isSavingsTransfer) Color(0xFFFFF3E0) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                                            )
-                                        ) {
-                                            Text(
-                                                text = entry.category,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (entry.isSavingsTransfer) Color(0xFFE65100) else MaterialTheme.colorScheme.onPrimaryContainer,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 10.sp
-                                            )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = displayDescription,
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = metaText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (entry.isSavingsTransfer) {
+                                            Card(
+                                                shape = RoundedCornerShape(3.dp),
+                                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                                            ) {
+                                                Text(
+                                                    text = "Pigmy",
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFFE65100),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
-
-                                        // Photo Attachment Indicator
                                         if (!entry.attachmentUri.isNullOrBlank()) {
-                                            Spacer(modifier = Modifier.width(6.dp))
                                             Box(
                                                 modifier = Modifier
-                                                    .size(20.dp)
-                                                    .background(Color(0xFFE0F2FE), RoundedCornerShape(4.dp))
+                                                    .size(18.dp)
+                                                    .background(Color(0xFFE0F2FE), RoundedCornerShape(3.dp))
                                                     .clickable {
                                                         val f = AttachmentManager.getAttachmentFile(context, entry.attachmentUri)
                                                         if (f != null && f.exists()) {
@@ -628,47 +645,54 @@ fun CashTrackerScreen(
                                                     Icons.Filled.Image,
                                                     contentDescription = "View Photo",
                                                     tint = Color(0xFF0284C7),
-                                                    modifier = Modifier.size(14.dp)
+                                                    modifier = Modifier.size(12.dp)
                                                 )
                                             }
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                    val noteSuffix = if (!entry.notes.isNullOrBlank()) entry.notes else ""
-                                    if (!noteSuffix.isNullOrBlank()) {
-                                        Text(
-                                            text = noteSuffix,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    Text(
-                                        text = timeFormat.format(Date(entry.timestamp)),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
 
-                                // Income Column
+                                Spacer(modifier = Modifier.width(8.dp))
+
                                 Text(
-                                    text = if (entry.isIncome) CostCalculator.formatPaiseToRupees(entry.amountPaise) else "",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF2E7D32),
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(1f)
+                                    text = (if (entry.isIncome) "+" else "-") + CostCalculator.formatPaiseToRupees(entry.amountPaise),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = if (entry.isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F),
+                                    textAlign = TextAlign.End
                                 )
 
-                                // Expense Column
-                                Text(
-                                    text = if (!entry.isIncome) CostCalculator.formatPaiseToRupees(entry.amountPaise) else "",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFD32F2F),
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Box {
+                                    IconButton(
+                                        onClick = { menuExpanded = true },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.MoreVert,
+                                            contentDescription = "Options",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Edit") },
+                                            onClick = {
+                                                menuExpanded = false
+                                                itemToEdit = entry
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Cancel / Reverse") },
+                                            onClick = {
+                                                menuExpanded = false
+                                                selectedItemForVoid = entry
+                                            }
+                                        )
+                                    }
+                                }
                             }
                             HorizontalDivider(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
@@ -790,7 +814,7 @@ fun CashTrackerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "Balance",
+                            text = "Register Net",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (netBalancePaise >= 0) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )
@@ -1059,14 +1083,35 @@ fun CashTrackerScreen(
                     }
 
                     item {
+                        var noteSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+                        LaunchedEffect(description, isIncomeMode) {
+                            noteSuggestions = viewModel.getNoteSuggestions(isIncomeMode, description)
+                        }
                         OutlinedTextField(
                             value = description,
                             onValueChange = { description = it },
                             label = { Text("Description / Particulars (Optional)") },
                             placeholder = { Text(if (isIncomeMode) "e.g. Counter Sales, Customer Payment" else "e.g. Office Rent, Electricity Bill, Tea") },
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        if (noteSuggestions.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                noteSuggestions.forEach { suggestion ->
+                                    SuggestionChip(
+                                        onClick = { description = suggestion },
+                                        label = { Text(suggestion, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     item {
@@ -1237,24 +1282,23 @@ fun CashTrackerScreen(
                                     )
                                 }
                             } else {
-                                val paymentNote = buildString {
-                                    append(paymentMode)
-                                    if (note.isNotBlank()) append(" - ${note.trim()}")
-                                    if (description.isNotBlank() && description.trim() != selectedCatName) {
-                                        append(" (${description.trim()})")
-                                    } else if (description.isBlank()) {
-                                        append(" ($selectedCatName)")
+                                val entryNotes = buildString {
+                                    if (description.isNotBlank()) append(description.trim())
+                                    if (note.isNotBlank()) {
+                                        if (isNotEmpty()) append(" - ")
+                                        append(note.trim())
                                     }
-                                }
+                                }.ifBlank { null }
 
                                 viewModel.recordShopExpense(
                                     category = selectedCatName,
                                     amountPaise = amountPaise,
                                     isIncome = isIncomeMode,
-                                    notes = paymentNote,
+                                    notes = entryNotes,
                                     timestamp = entryTimestamp,
                                     categoryId = selectedCatId.ifBlank { null },
                                     attachmentUri = persistedPath,
+                                    paymentMethod = paymentMode,
                                     onDone = { showAddDialog = false }
                                 )
                             }
@@ -1527,6 +1571,216 @@ fun CashTrackerScreen(
             confirmButton = {
                 Button(onClick = { viewingPhotoFile = null }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    // ── EDIT TRANSACTION DIALOG (Section 3) ──────────────────────
+    itemToEdit?.let { targetEntry ->
+        var editAmountStr by remember { mutableStateOf((targetEntry.amountPaise / 100.0).toString().removeSuffix(".0")) }
+        var editCategory by remember { mutableStateOf(targetEntry.category) }
+        var editPaymentMode by remember { mutableStateOf(targetEntry.paymentMethod) }
+        var editNotes by remember { mutableStateOf(targetEntry.notes ?: "") }
+        var editTimestamp by remember { mutableLongStateOf(targetEntry.timestamp) }
+        var editNoteSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+
+        val editDialogContext = LocalContext.current
+        val editCal = Calendar.getInstance().apply { timeInMillis = editTimestamp }
+        val editDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(editTimestamp))
+        val editTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(editTimestamp))
+
+        LaunchedEffect(editNotes) {
+            editNoteSuggestions = viewModel.getNoteSuggestions(targetEntry.isIncome, editNotes)
+        }
+
+        AlertDialog(
+            onDismissRequest = { itemToEdit = null },
+            title = {
+                Text(
+                    text = "Edit Transaction",
+                    fontWeight = FontWeight.Bold,
+                    color = if (targetEntry.isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                )
+            },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        OutlinedTextField(
+                            value = editAmountStr,
+                            onValueChange = { editAmountStr = it },
+                            label = { Text("Amount (₹) *") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Category",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            activeCategories.forEach { cat ->
+                                FilterChip(
+                                    selected = editCategory == cat.name,
+                                    onClick = { editCategory = cat.name },
+                                    label = { Text(cat.name, fontSize = 11.5.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            text = "Payment Mode",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf("CASH" to "Cash", "GPAY" to "GPAY / UPI", "BANK" to "Bank").forEach { (key, label) ->
+                                FilterChip(
+                                    selected = editPaymentMode.equals(key, ignoreCase = true),
+                                    onClick = { editPaymentMode = key },
+                                    label = { Text(label, fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            text = "Transaction Date & Time",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    DatePickerDialog(
+                                        editDialogContext,
+                                        { _, y, m, d ->
+                                            val c = Calendar.getInstance().apply {
+                                                timeInMillis = editTimestamp
+                                                set(Calendar.YEAR, y)
+                                                set(Calendar.MONTH, m)
+                                                set(Calendar.DAY_OF_MONTH, d)
+                                            }
+                                            editTimestamp = c.timeInMillis
+                                        },
+                                        editCal.get(Calendar.YEAR),
+                                        editCal.get(Calendar.MONTH),
+                                        editCal.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1.1f)
+                            ) {
+                                Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(editDateStr, fontSize = 12.sp, maxLines = 1)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    TimePickerDialog(
+                                        editDialogContext,
+                                        { _, hour, minute ->
+                                            val c = Calendar.getInstance().apply {
+                                                timeInMillis = editTimestamp
+                                                set(Calendar.HOUR_OF_DAY, hour)
+                                                set(Calendar.MINUTE, minute)
+                                            }
+                                            editTimestamp = c.timeInMillis
+                                        },
+                                        editCal.get(Calendar.HOUR_OF_DAY),
+                                        editCal.get(Calendar.MINUTE),
+                                        false
+                                    ).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(0.9f)
+                            ) {
+                                Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(editTimeStr, fontSize = 12.sp, maxLines = 1)
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = editNotes,
+                            onValueChange = { editNotes = it },
+                            label = { Text("Description / Notes") },
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (editNoteSuggestions.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                editNoteSuggestions.forEach { suggestion ->
+                                    SuggestionChip(
+                                        onClick = { editNotes = suggestion },
+                                        label = { Text(suggestion, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parsed = editAmountStr.toDoubleOrNull() ?: 0.0
+                        if (parsed <= 0.0) {
+                            Toast.makeText(editDialogContext, "Enter a valid positive amount", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val amountPaise = (parsed * 100).toLong()
+                        viewModel.updateShopExpense(
+                            id = targetEntry.id,
+                            amountPaise = amountPaise,
+                            category = editCategory,
+                            paymentMethod = editPaymentMode,
+                            notes = editNotes.trim().ifBlank { null },
+                            timestamp = editTimestamp,
+                            attachmentUri = targetEntry.attachmentUri
+                        ) {
+                            itemToEdit = null
+                        }
+                    }
+                ) {
+                    Text("Save Changes")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { itemToEdit = null }) {
+                    Text("Cancel")
                 }
             }
         )

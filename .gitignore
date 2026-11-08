@@ -32,3 +32,15 @@ keystore.properties
 __pycache__/
 *.pyc
 /legacy/android-prototype/docs/evidence/
+
+# Local credentials, recovery proofs and business data
+keystore.properties
+*.jks
+*.keystore
+local.properties
+**/owner-recovery-once.txt
+*.apk
+*.aab
+*.db
+*.db-wal
+*.db-shm

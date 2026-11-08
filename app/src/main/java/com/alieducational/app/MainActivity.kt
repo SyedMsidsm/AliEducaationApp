@@ -35,7 +35,8 @@ class MainActivity : FragmentActivity() {
     lateinit var biometricAuthManager: BiometricAuthManager
 
     private var lastPausedTime: Long = 0L
-    private var isAppLocked by mutableStateOf(false)
+    private var isAppLocked by mutableStateOf(true)
+    private var configuredLockTimeout = 120
     private var pendingWidgetAction by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,14 +48,26 @@ class MainActivity : FragmentActivity() {
         setContent {
             val viewModel: AliViewModel = hiltViewModel()
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+            val appTextSize by viewModel.appTextSize.collectAsState()
+            val operationError by viewModel.operationError.collectAsState()
             val appLanguage by viewModel.appLanguage.collectAsState()
-            val isFirstLaunch by viewModel.isFirstLaunch.collectAsState()
-            val isLockEnabled by viewModel.isLockEnabled.collectAsState()
+            val startupSettings by viewModel.startupSettings.collectAsState()
+            if (startupSettings == null) return@setContent
+            val isFirstLaunch = startupSettings!!.first
+            val isLockEnabled = startupSettings!!.second
+            val timeout by viewModel.lockTimeoutSeconds.collectAsState()
+            androidx.compose.runtime.SideEffect { configuredLockTimeout = timeout }
 
             val layoutDirection = LayoutDirection.Ltr
 
             CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-                AliEducationalTheme(darkTheme = isDarkTheme) {
+                AliEducationalTheme(darkTheme = isDarkTheme, appTextSize = appTextSize) {
+                    operationError?.let { message ->
+                        androidx.compose.material3.AlertDialog(onDismissRequest = { viewModel.clearOperationError() },
+                            title = { androidx.compose.material3.Text("Could not complete action") },
+                            text = { androidx.compose.material3.Text(message) },
+                            confirmButton = { androidx.compose.material3.TextButton(onClick = { viewModel.clearOperationError() }) { androidx.compose.material3.Text("OK") } })
+                    }
                     val navController = rememberNavController()
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
                     val currentRoute = navBackStackEntry?.destination?.route
@@ -121,7 +134,9 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                     ) { innerPadding ->
-                        AppNavigation(
+                        if (isLockEnabled && isAppLocked && !isFirstLaunch) {
+                            com.alieducational.app.ui.auth.UnlockScreen(biometricAuthManager = biometricAuthManager, onUnlocked = { isAppLocked = false })
+                        } else AppNavigation(
                             navController = navController,
                             startDestination = startDestination,
                             viewModel = viewModel,
@@ -174,7 +189,7 @@ class MainActivity : FragmentActivity() {
         if (lastPausedTime > 0L) {
             val elapsedSeconds = (System.currentTimeMillis() - lastPausedTime) / 1000
             // If background timeout exceeded (default 120s), relock
-            if (elapsedSeconds >= 120) {
+            if (elapsedSeconds >= configuredLockTimeout) {
                 isAppLocked = true
             }
         }

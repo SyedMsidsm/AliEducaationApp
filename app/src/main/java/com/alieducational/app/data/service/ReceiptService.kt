@@ -75,13 +75,13 @@ class ReceiptService @Inject constructor(
                 else if (line.quantityBase == 1 && line.unitLabel.equals("sheets", ignoreCase = true)) "sheet"
                 else line.unitLabel
             } else if (line.isPack) {
-                if (line.quantityBase == 1) "pack" else "packs"
+                "pcs (pack sale)"
             } else {
                 if (line.quantityBase == 1) "pc" else "pcs"
             }
             val lineGross = if (line.lineGrossPaise > 0L) line.lineGrossPaise else line.quantityBase * line.unitSellingPricePaise
             val lineTotal = CostCalculator.formatPaiseToRupees(lineGross)
-            sb.append("• ${line.productName}: ${line.quantityBase} $unit @ ${CostCalculator.formatPaiseToRupees(line.unitSellingPricePaise)} = $lineTotal\n")
+            sb.append("• ${line.productName}: ${com.alieducational.app.domain.calculation.ReceiptUnits.quantity(line)} @ ${CostCalculator.formatPaiseToRupees(com.alieducational.app.domain.calculation.ReceiptUnits.ratePaise(line))} = $lineTotal\n")
         }
         sb.append("------------------------------\n")
         sb.append("Subtotal: ${CostCalculator.formatPaiseToRupees(sale.grossTotalPaise)}\n")
@@ -303,12 +303,12 @@ class ReceiptService @Inject constructor(
                 else if (line.quantityBase == 1 && line.unitLabel.equals("sheets", ignoreCase = true)) "sheet"
                 else line.unitLabel
             } else if (line.isPack) {
-                if (line.quantityBase == 1) "pack" else "packs"
+                "pcs (pack sale)"
             } else {
                 if (line.quantityBase == 1) "pc" else "pcs"
             }
-            val qtyStr = "${line.quantityBase} $unitStr"
-            val rateStr = CostCalculator.formatPaiseToRupees(line.unitSellingPricePaise)
+            val qtyStr = com.alieducational.app.domain.calculation.ReceiptUnits.quantity(line)
+            val rateStr = CostCalculator.formatPaiseToRupees(com.alieducational.app.domain.calculation.ReceiptUnits.ratePaise(line))
             val lineGross = if (line.lineGrossPaise > 0L) line.lineGrossPaise else line.quantityBase * line.unitSellingPricePaise
             val amountStr = CostCalculator.formatPaiseToRupees(lineGross)
             val rowHeight = 18f + (wrapped.size - 1) * 13f

@@ -362,6 +362,7 @@ fun RemoveStockScreen(
                             value = reason,
                             onValueChange = { reason = it },
                             label = { Text("Notes / Reason (Optional)") },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp)

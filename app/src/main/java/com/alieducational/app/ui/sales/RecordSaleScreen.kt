@@ -200,6 +200,7 @@ fun RecordSaleScreen(
                                     value = newCustomerName,
                                     onValueChange = { newCustomerName = it },
                                     label = { Text("Customer Name") },
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true
                                 )

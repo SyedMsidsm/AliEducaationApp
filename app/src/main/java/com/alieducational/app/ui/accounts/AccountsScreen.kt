@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alieducational.app.R
@@ -100,6 +101,13 @@ fun AccountsScreen(
 
     var showOnlyOutstanding by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    val customerTarget by viewModel.accountCustomerTarget.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(customerTarget, customers) {
+        customerTarget?.let { id -> customers.firstOrNull { it.id == id }?.let { customer ->
+            selectedTab = 1; searchQuery = customer.name; showOnlyOutstanding = false
+            viewModel.clearCustomerAccountTarget()
+        } }
+    }
 
     val filteredSuppliers = remember(suppliers, showOnlyOutstanding, searchQuery) {
         suppliers.filter { sup ->
@@ -389,6 +397,7 @@ fun AccountsScreen(
                         value = name,
                         onValueChange = { name = it },
                         label = { Text("Supplier / Company Name *") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -448,6 +457,7 @@ fun AccountsScreen(
                         value = name,
                         onValueChange = { name = it },
                         label = { Text("Customer Name *") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -555,6 +565,7 @@ fun AccountsScreen(
                         value = notes,
                         onValueChange = { notes = it },
                         label = { Text("Notes / Reference (Optional)") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

@@ -101,3 +101,24 @@ val AliTypography = Typography(
         lineHeight = 14.sp,
     ),
 )
+
+fun getScaledTypography(scaleFactor: Float): Typography {
+    if (scaleFactor == 1.0f) return AliTypography
+    return Typography(
+        displayLarge = AliTypography.displayLarge.copy(fontSize = (32 * scaleFactor).sp, lineHeight = (40 * scaleFactor).sp),
+        displayMedium = AliTypography.displayMedium.copy(fontSize = (28 * scaleFactor).sp, lineHeight = (36 * scaleFactor).sp),
+        displaySmall = AliTypography.displaySmall.copy(fontSize = (24 * scaleFactor).sp, lineHeight = (32 * scaleFactor).sp),
+        headlineLarge = AliTypography.headlineLarge.copy(fontSize = (28 * scaleFactor).sp, lineHeight = (36 * scaleFactor).sp),
+        headlineMedium = AliTypography.headlineMedium.copy(fontSize = (24 * scaleFactor).sp, lineHeight = (32 * scaleFactor).sp),
+        headlineSmall = AliTypography.headlineSmall.copy(fontSize = (20 * scaleFactor).sp, lineHeight = (28 * scaleFactor).sp),
+        titleLarge = AliTypography.titleLarge.copy(fontSize = (22 * scaleFactor).sp, lineHeight = (28 * scaleFactor).sp),
+        titleMedium = AliTypography.titleMedium.copy(fontSize = (18 * scaleFactor).sp, lineHeight = (24 * scaleFactor).sp),
+        titleSmall = AliTypography.titleSmall.copy(fontSize = (14 * scaleFactor).sp, lineHeight = (20 * scaleFactor).sp),
+        bodyLarge = AliTypography.bodyLarge.copy(fontSize = (16 * scaleFactor).sp, lineHeight = (24 * scaleFactor).sp),
+        bodyMedium = AliTypography.bodyMedium.copy(fontSize = (14 * scaleFactor).sp, lineHeight = (20 * scaleFactor).sp),
+        bodySmall = AliTypography.bodySmall.copy(fontSize = (12 * scaleFactor).sp, lineHeight = (16 * scaleFactor).sp),
+        labelLarge = AliTypography.labelLarge.copy(fontSize = (14 * scaleFactor).sp, lineHeight = (20 * scaleFactor).sp),
+        labelMedium = AliTypography.labelMedium.copy(fontSize = (12 * scaleFactor).sp, lineHeight = (16 * scaleFactor).sp),
+        labelSmall = AliTypography.labelSmall.copy(fontSize = (10 * scaleFactor).sp, lineHeight = (14 * scaleFactor).sp),
+    )
+}

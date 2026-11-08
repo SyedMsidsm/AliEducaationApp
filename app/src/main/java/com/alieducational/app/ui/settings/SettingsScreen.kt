@@ -1,8 +1,14 @@
 package com.alieducational.app.ui.settings
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,13 +20,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -29,8 +41,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -50,47 +62,70 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.documentfile.provider.DocumentFile
 import com.alieducational.app.data.service.SyncConnectionState
-import com.alieducational.app.data.service.TwoPhoneSyncService
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.ui.platform.LocalContext
-import com.alieducational.app.widget.AliSlimBarWidgetProvider
 import com.alieducational.app.ui.AliViewModel
+import com.alieducational.app.widget.AliSlimBarWidgetProvider
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: AliViewModel,
-    onNavigateBack: () -> Unit,
+    onNavigateBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val isLockEnabled by viewModel.isLockEnabled.collectAsState()
     val lockTimeoutSeconds by viewModel.lockTimeoutSeconds.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
+    val pairingToken by viewModel.syncToken.collectAsState()
+    val ownerCertificatePin by viewModel.ownerCertificatePin.collectAsState()
+    var newOwnerPin by remember { mutableStateOf("") }
+    var pinSetupMessage by remember { mutableStateOf<String?>(null) }
+    var tokenInput by remember(pairingToken) { mutableStateOf(pairingToken) }
+    var certificateInput by remember(ownerCertificatePin) { mutableStateOf(ownerCertificatePin) }
     val pairedOwnerHost by viewModel.pairedOwnerHost.collectAsState()
     val syncState by viewModel.syncConnectionState.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
+    val appTextSize by viewModel.appTextSize.collectAsState()
+    val connectedFolderUri by viewModel.googleDriveFolderUri.collectAsState()
+    val connectedFolderName by viewModel.googleDriveFolderName.collectAsState()
 
     var showSwitchToBillingWarning by remember { mutableStateOf(false) }
+    var showOwnerPinDialog by remember { mutableStateOf(false) }
+    var enteredOwnerPin by remember { mutableStateOf("") }
+    var ownerPinError by remember { mutableStateOf<String?>(null) }
+
     var hostAddressInput by remember(pairedOwnerHost) { mutableStateOf(pairedOwnerHost) }
     var syncResultMsg by remember { mutableStateOf<String?>(null) }
+
+    val driveFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                val doc = DocumentFile.fromTreeUri(context, uri)
+                val name = doc?.name ?: "Selected Folder"
+                viewModel.setGoogleDriveFolder(uri.toString(), name)
+            } catch (_: Exception) {}
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("App Settings", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
+                title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground
@@ -111,7 +146,7 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 1. Two-Phone Sync & Role Card
+                // 1. Two-Phone Sync & Role Card (A01 & A02)
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -123,7 +158,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text("Two-Phone Billing & Sync", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                Text("Share database over Wi-Fi / Hotspot", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Secure authenticated sync over Wi-Fi / Hotspot", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
 
@@ -136,7 +171,10 @@ fun SettingsScreen(
                                 selected = deviceRole == "OWNER",
                                 onClick = {
                                     if (deviceRole != "OWNER") {
-                                        viewModel.setDeviceRole("OWNER")
+                                        // Enforce real role protection (A02): require Owner PIN unlock!
+                                        showOwnerPinDialog = true
+                                        enteredOwnerPin = ""
+                                        ownerPinError = null
                                     }
                                 },
                                 label = { Text("Owner (Main)") },
@@ -156,6 +194,11 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
+                        if (deviceRole == "BILLING") {
+                            OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, label = { Text("Owner pairing token") })
+                            OutlinedTextField(value = certificateInput, onValueChange = { certificateInput = it }, label = { Text("Owner certificate SHA-256") })
+                            TextButton(onClick = { viewModel.configurePairing(tokenInput, certificateInput) }) { Text("Save verified pairing") }
+                        }
                         if (deviceRole == "OWNER") {
                             // OWNER HOST CONTROLS
                             val localIp = remember { viewModel.twoPhoneSyncService.getLocalIpAddress() }
@@ -168,9 +211,15 @@ fun SettingsScreen(
                                     Text("Main Phone Host Info", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text("IP Address: $localIp (Port: 8080)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                    Text("Pairing token: $pairingToken", style = MaterialTheme.typography.bodySmall)
+                                    Text("Certificate SHA-256: ${com.alieducational.app.data.service.SyncTls.fingerprint()}", style = MaterialTheme.typography.bodySmall)
+                                    TextButton(onClick = { viewModel.rotateSyncToken() }) { Text("Create / revoke pairing token") }
+                                    OutlinedTextField(value = newOwnerPin, onValueChange = { newOwnerPin = it }, label = { Text("Set Owner PIN (6–12 digits)") }, visualTransformation = PasswordVisualTransformation())
+                                    TextButton(onClick = { viewModel.saveOwnerPin(newOwnerPin) { pinSetupMessage = it ?: "Owner PIN saved"; newOwnerPin = "" } }) { Text("Save Owner PIN") }
+                                    pinSetupMessage?.let { Text(it) }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        "Keep this phone connected to the shop Wi-Fi or start its personal hotspot. On the secondary phone, select 'Billing Device' and enter this IP address.",
+                                        "Keep this phone connected to shop Wi-Fi or its personal hotspot. On the billing phone, enter this IP address.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -275,7 +324,138 @@ fun SettingsScreen(
                     }
                 }
 
-                // 2. Theme Card
+                // 2. App Text Size Setting (Section 5)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.FormatSize, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("App Text Size", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Adjust text size throughout the app. Printed receipts remain independent.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val sizeOptions = listOf("Small", "Default", "Large", "Extra Large")
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            sizeOptions.forEach { opt ->
+                                FilterChip(
+                                    selected = appTextSize == opt,
+                                    onClick = { viewModel.setAppTextSize(opt) },
+                                    label = { Text(opt, fontSize = 11.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        // Live Preview Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("Preview ($appTextSize)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Ali Educational", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                Text("Stationery & Educational Supplies", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("₹12,235.00", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                                    Button(
+                                        onClick = {},
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Sample Button", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. One-Tap Google Drive / External Destination (Section 10)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Cloud & Drive Destination", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                Text("Connect Google Drive or SD folder once", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (connectedFolderUri.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Filled.CloudDone, contentDescription = null, tint = Color(0xFF75B890), modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Connected Destination:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(connectedFolderName.ifBlank { "Connected Folder" }, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { driveFolderLauncher.launch(null) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Change Folder")
+                                }
+                                OutlinedButton(
+                                    onClick = { viewModel.clearGoogleDriveFolder() },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Disconnect")
+                                }
+                            }
+                        } else {
+                            Text(
+                                "No destination connected. Select a Google Drive folder or local folder once to enable 1-tap backup uploads.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = { driveFolderLauncher.launch(null) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Icon(Icons.Filled.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Connect Google Drive Folder")
+                            }
+                        }
+                    }
+                }
+
+                // 4. Appearance Theme Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -305,7 +485,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 3. App Lock Card
+                // 5. App Lock Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -368,8 +548,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 4. Home Screen Widget Card
-                val context = LocalContext.current
+                // 6. Home Screen Widget Card
                 val canPinWidget = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
                     (context.getSystemService(AppWidgetManager::class.java)?.isRequestPinAppWidgetSupported == true)
 
@@ -432,6 +611,68 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showSwitchToBillingWarning = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showOwnerPinDialog) {
+        AlertDialog(
+            onDismissRequest = { showOwnerPinDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Owner PIN Required", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "Enter the Owner PIN previously provisioned on this device. A paired Billing phone cannot create its own Owner authorization.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(onClick = {
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        if (activity == null) ownerPinError = "Cannot open device authentication"
+                        else viewModel.recoverOwner(activity) { error ->
+                            if (error == null) { showOwnerPinDialog = false; pinSetupMessage = "Owner access recovered. Set and save a new Owner PIN below." }
+                            else ownerPinError = error
+                        }
+                    }) { Text("Forgot Owner PIN?") }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = enteredOwnerPin,
+                        onValueChange = {
+                            enteredOwnerPin = it
+                            ownerPinError = null
+                        },
+                        label = { Text("Owner PIN") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
+                        isError = ownerPinError != null,
+                        supportingText = ownerPinError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.authorizeOwner(enteredOwnerPin) { valid ->
+                            if (valid) showOwnerPinDialog = false
+                            else ownerPinError = "Owner authorization failed or temporarily locked."
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Unlock & Promote")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOwnerPinDialog = false }) {
                     Text("Cancel")
                 }
             }

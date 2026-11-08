@@ -1,6 +1,13 @@
 package com.alieducational.app.ui.stock
 
 import android.Manifest
+import android.content.Intent
+import androidx.compose.foundation.Image
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.FileProvider
+import com.alieducational.app.data.service.BarcodeGeneratorService
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -106,6 +113,8 @@ fun StockScreen(
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Low Stock"
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductEntity?>(null) }
+    var showBarcodeLabelExport by remember { mutableStateOf<ProductEntity?>(null) }
+    val barcodeService = remember { BarcodeGeneratorService() }
 
     val widgetAction by viewModel.widgetActionTrigger.collectAsState()
     androidx.compose.runtime.LaunchedEffect(widgetAction) {
@@ -140,6 +149,9 @@ fun StockScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp)
         ) {
+            androidx.compose.material3.OutlinedButton(onClick = onNavigateToReceiveStock, modifier = Modifier.fillMaxWidth()) {
+                Text("Receive supplier invoice · multiple items")
+            }
             Spacer(modifier = Modifier.height(12.dp))
 
             // Integrated Top Action Buttons: Add Stock & Product + Import
@@ -272,6 +284,7 @@ fun StockScreen(
         IntegratedAddStockProductDialog(
             existingProduct = selectedProductForEdit,
             suppliers = allSuppliers,
+            onResolveBarcode = { code, done -> viewModel.lookupBarcode(code) { product, unit, count -> done(product, unit ?: "PIECE", count ?: 1) } },
             onAddSupplier = { newSup, onCreated ->
                 viewModel.addSupplier(newSup) {
                     onCreated(newSup)
@@ -280,6 +293,14 @@ fun StockScreen(
             onDismiss = {
                 showAddDialog = false
                 selectedProductForEdit = null
+            },
+            onGenerateBarcode = { prodId, onDone ->
+                viewModel.generateShopBarcode(prodId, "PIECE", 1) { entity ->
+                    onDone(entity.barcode)
+                }
+            },
+            onExportLabels = { prod ->
+                showBarcodeLabelExport = prod
             },
             onSave = { existingId, name, barcode, category, brand, packSize, boxesBrought, loosePieces, costPaise, sellingPaise, wholesalePaise, lowStock, supplierName, billNo, transportPaise, isPaidNow, billPaymentMethod ->
                 viewModel.addOrUpdateProductWithStock(
@@ -303,6 +324,122 @@ fun StockScreen(
                 )
                 showAddDialog = false
                 selectedProductForEdit = null
+            }
+        )
+    }
+
+    // ── BARCODE LABEL EXPORT DIALOG (Section 16) ───────────────────
+    showBarcodeLabelExport?.let { exportProd ->
+        var exportBarcode by remember(exportProd.id) { mutableStateOf(exportProd.barcode ?: "") }
+        var includePriceOnLabel by remember { mutableStateOf(true) }
+        var copiesCountStr by remember { mutableStateOf("24") }
+        var selectedUnitLabel by remember { mutableStateOf("Piece") }
+        var labelPrice by remember { mutableStateOf(exportProd.sellingPricePiecePaise) }
+        val exportContext = LocalContext.current
+
+        val barcodeBitmap = remember(exportBarcode) {
+            try {
+                if (exportBarcode.isNotBlank()) barcodeService.generateBarcodeBitmap(exportBarcode, 360, 100) else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showBarcodeLabelExport = null },
+            title = { Text("Print / Export Barcode Labels", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(exportProd.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    if (exportProd.packSize > 1 && exportProd.barcode?.startsWith("AE-P") == true) {
+                        Row {
+                            TextButton(onClick = { exportBarcode = exportProd.barcode ?: ""; selectedUnitLabel = "Piece"; labelPrice = exportProd.sellingPricePiecePaise }) { Text("Piece") }
+                            TextButton(onClick = { viewModel.generateShopBarcode(exportProd.id, "PACK", exportProd.packSize) { b -> exportBarcode = b.barcode; selectedUnitLabel = "Pack of ${b.packQuantity}"; labelPrice = exportProd.sellingPricePackPaise } }) { Text("Pack of ${exportProd.packSize}") }
+                        }
+                    }
+                    Text("Barcode: $exportBarcode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+
+                    if (barcodeBitmap != null) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp),
+                            colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Image(
+                                    bitmap = barcodeBitmap.asImageBitmap(),
+                                    contentDescription = "Barcode Preview",
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = includePriceOnLabel,
+                            onCheckedChange = { includePriceOnLabel = it }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Include Price: ${CostCalculator.formatPaiseToRupees(labelPrice)}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = copiesCountStr,
+                        onValueChange = { copiesCountStr = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Number of Copies (1 - 100)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val copies = (copiesCountStr.toIntOrNull() ?: 24).coerceIn(1, 100)
+                        val price = if (includePriceOnLabel) labelPrice else null
+                        try {
+                            val pdfFile = barcodeService.generateLabelsPdf(
+                                context = exportContext,
+                                productName = exportProd.name,
+                                barcode = exportBarcode,
+                                unitLabel = selectedUnitLabel,
+                                pricePaise = price,
+                                copies = copies
+                            )
+                            val uri = FileProvider.getUriForFile(
+                                exportContext,
+                                "${exportContext.packageName}.fileprovider",
+                                pdfFile
+                            )
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/pdf"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            exportContext.startActivity(Intent.createChooser(shareIntent, "Share Barcode Labels PDF"))
+                            showBarcodeLabelExport = null
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(exportContext, "Error creating PDF: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                ) {
+                    Text("Export / Share PDF")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showBarcodeLabelExport = null }) {
+                    Text("Close")
+                }
             }
         )
     }
@@ -432,8 +569,11 @@ fun ProductItemCard(
 fun IntegratedAddStockProductDialog(
     existingProduct: ProductEntity?,
     suppliers: List<SupplierEntity>,
+    onResolveBarcode: (String, (ProductEntity?, String, Int) -> Unit) -> Unit = { _, done -> done(null, "PIECE", 1) },
     onAddSupplier: (SupplierEntity, (SupplierEntity) -> Unit) -> Unit = { _, _ -> },
     onDismiss: () -> Unit,
+    onGenerateBarcode: (String, (String) -> Unit) -> Unit = { _, _ -> },
+    onExportLabels: (ProductEntity) -> Unit = {},
     onSave: (
         existingId: String?,
         name: String,
@@ -457,6 +597,11 @@ fun IntegratedAddStockProductDialog(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    var scannedProduct by remember { mutableStateOf<ProductEntity?>(null) }
+    var scannedQuantity by remember { mutableStateOf("1") }
+    var scannedUnit by remember { mutableStateOf("PIECE") }
+    var scannedPackSize by remember { mutableStateOf(1) }
+    var confirmScan by remember { mutableStateOf(false) }
     var supplierName by remember { mutableStateOf("") }
     var selectedSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
     var supplierMenuExpanded by remember { mutableStateOf(false) }
@@ -470,7 +615,7 @@ fun IntegratedAddStockProductDialog(
     var brand by remember { mutableStateOf(existingProduct?.brand ?: "") }
 
     var piecesStr by remember {
-        mutableStateOf(if (existingProduct != null) existingProduct.currentSellableStock.toString() else "0")
+        mutableStateOf("0")
     }
 
     var costPerPieceStr by remember {
@@ -485,6 +630,7 @@ fun IntegratedAddStockProductDialog(
         mutableStateOf(if (existingProduct != null && existingProduct.wholesalePricePiecePaise > 0L) (existingProduct.wholesalePricePiecePaise / 100.0).toString() else "")
     }
 
+    var pricingMode by remember { mutableStateOf(CostCalculator.PricingMode.GROSS_MARGIN) }
     var marginPercentStr by remember {
         val cost = (existingProduct?.movingAvgCostPaise ?: 0L) / 100.0
         val selling = (existingProduct?.sellingPricePiecePaise ?: 0L) / 100.0
@@ -514,7 +660,7 @@ fun IntegratedAddStockProductDialog(
     }
 
     // Computations
-    val packSize = existingProduct?.packSize ?: 1
+    val packSize = scannedProduct?.packSize ?: existingProduct?.packSize ?: 1
     val totalPiecesAdded = piecesStr.replace(",", "").trim().toIntOrNull() ?: 0
     val boxesBrought = 0
     val loosePieces = totalPiecesAdded
@@ -527,6 +673,10 @@ fun IntegratedAddStockProductDialog(
     val landedCost = baseCost + transportPerPiece
 
     val selling = sellingPieceStr.replace(",", "").trim().toDoubleOrNull() ?: 0.0
+    androidx.compose.runtime.LaunchedEffect(landedCost, pricingMode) {
+        val percent = CostCalculator.calculatePercentageFromPrice((landedCost * 100).toLong(), (selling * 100).toLong(), pricingMode)
+        marginPercentStr = percent?.let { String.format(Locale.US, "%.1f", it) } ?: ""
+    }
     val profitBeforeTransport = selling - baseCost
     val profitAfterTransport = selling - landedCost
 
@@ -553,6 +703,7 @@ fun IntegratedAddStockProductDialog(
                     onValueChange = { name = it },
                     label = { Text("Product Name *") },
                     placeholder = { Text("Product Name") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -584,12 +735,43 @@ fun IntegratedAddStockProductDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (existingProduct != null) {
+                    if (barcode.isBlank()) {
+                        Button(
+                            onClick = {
+                                onGenerateBarcode(existingProduct.id) { generated ->
+                                    if (generated.isNotBlank()) barcode = generated
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Generate Shop Barcode (Code 128)")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                onExportLabels(existingProduct.copy(barcode = barcode))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Print / Export Barcode Labels")
+                        }
+                    }
+                }
+
                 // 3. Category & Brand
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = category,
                         onValueChange = { category = it },
                         label = { Text("Category") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -597,6 +779,7 @@ fun IntegratedAddStockProductDialog(
                         value = brand,
                         onValueChange = { brand = it },
                         label = { Text("Brand") },
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -648,9 +831,7 @@ fun IntegratedAddStockProductDialog(
                         onValueChange = {
                             sellingPieceStr = it
                             val s = it.toDoubleOrNull() ?: 0.0
-                            if (s > 0 && s > landedCost) {
-                                marginPercentStr = String.format(Locale.US, "%.1f", ((s - landedCost) / s) * 100.0)
-                            }
+                            marginPercentStr = CostCalculator.calculatePercentageFromPrice((landedCost * 100).toLong(), (s * 100).toLong(), pricingMode)?.let { value -> String.format(Locale.US, "%.1f", value) } ?: ""
                         },
                         label = { Text("Selling (₹/pc) *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -659,19 +840,24 @@ fun IntegratedAddStockProductDialog(
                     )
                 }
 
-                // 6. Margin (%) & Wholesale (₹/pc)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = pricingMode == CostCalculator.PricingMode.GROSS_MARGIN,
+                        onClick = { pricingMode = CostCalculator.PricingMode.GROSS_MARGIN }, label = { Text("Gross margin") })
+                    FilterChip(selected = pricingMode == CostCalculator.PricingMode.MARKUP,
+                        onClick = { pricingMode = CostCalculator.PricingMode.MARKUP }, label = { Text("Markup on cost") })
+                }
+                // 6. Selected pricing percentage and wholesale price
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = marginPercentStr,
                         onValueChange = {
                             marginPercentStr = it
                             val m = it.toDoubleOrNull() ?: 0.0
-                            if (landedCost > 0 && m < 100.0 && m > 0.0) {
-                                val calculatedSelling = landedCost / (1.0 - (m / 100.0))
-                                sellingPieceStr = String.format(Locale.US, "%.2f", calculatedSelling)
+                            CostCalculator.calculatePriceFromPercentage((landedCost * 100).toLong(), m, pricingMode)?.let { price ->
+                                sellingPieceStr = String.format(Locale.US, "%.2f", price / 100.0)
                             }
                         },
-                        label = { Text("Margin (%)") },
+                        label = { Text(if (pricingMode == CostCalculator.PricingMode.GROSS_MARGIN) "Margin (%)" else "Markup (%)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -680,7 +866,7 @@ fun IntegratedAddStockProductDialog(
                     OutlinedTextField(
                         value = wholesalePieceStr,
                         onValueChange = { wholesalePieceStr = it },
-                        label = { Text("Wholesale (₹/pc)") },
+                        label = { Text("Wholesale", maxLines = 1) },
                         placeholder = { Text("Optional") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
@@ -850,18 +1036,18 @@ fun IntegratedAddStockProductDialog(
                         if (selling > 0) {
                             if (transportTotal > 0.0 && totalPiecesAdded > 0) {
                                 Text(
-                                    text = "Profit after transport: ₹${String.format(Locale.US, "%.2f", profitAfterTransport)}/pc (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
+                                    text = "Profit after transport: ${CostCalculator.formatPaiseToRupees((profitAfterTransport * 100).toLong())}/pc (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = if (profitAfterTransport >= 0) Color(0xFF75B890) else Color(0xFFE57373)
                                 )
                                 Text(
-                                    text = "Before transport was: ₹${String.format(Locale.US, "%.2f", profitBeforeTransport)}/pc • Landed Cost: ₹${String.format(Locale.US, "%.2f", landedCost)}/pc",
+                                    text = "Before transport was: ${CostCalculator.formatPaiseToRupees((profitBeforeTransport * 100).toLong())}/pc • Landed Cost: ${CostCalculator.formatPaiseToRupees((landedCost * 100).toLong())}/pc",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
                                 Text(
-                                    text = "Profit per piece: ₹${String.format(Locale.US, "%.2f", profitAfterTransport)} (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
+                                    text = "Profit per piece: ${CostCalculator.formatPaiseToRupees((profitAfterTransport * 100).toLong())} (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = if (profitAfterTransport >= 0) Color(0xFF75B890) else Color(0xFFE57373)
                                 )
@@ -875,14 +1061,19 @@ fun IntegratedAddStockProductDialog(
             Button(
                 onClick = {
                     if (name.isBlank()) return@Button
-                    val costPaise = ((baseCost * 100)).toLong()
-                    val transportPaise = ((transportTotal * 100)).toLong()
-                    val sellingPaise = ((selling * 100)).toLong()
-                    val wholesalePaise = ((wholesalePieceStr.replace(",", "").trim().toDoubleOrNull() ?: 0.0) * 100).toLong()
-                    val lowStock = lowStockStr.replace(",", "").trim().toIntOrNull() ?: 5
+                    val costPaise = CostCalculator.parseRupeesToPaise(costPerPieceStr)
+                    val transportPaise = CostCalculator.parseRupeesToPaise(transportChargesStr.ifBlank { "0" })
+                    val sellingPaise = CostCalculator.parseRupeesToPaise(sellingPieceStr)
+                    val wholesalePaise = CostCalculator.parseRupeesToPaise(wholesalePieceStr.ifBlank { "0" })
+                    val lowStock = lowStockStr.replace(",", "").trim().toIntOrNull()
+                    val quantity = piecesStr.replace(",", "").trim().toIntOrNull()
+                    if (costPaise == null || transportPaise == null || sellingPaise == null || wholesalePaise == null || lowStock == null || lowStock < 0 || quantity == null || quantity < 0) {
+                        android.widget.Toast.makeText(context, "Enter valid nonnegative amounts (up to 2 decimals) and whole quantities", android.widget.Toast.LENGTH_LONG).show()
+                        return@Button
+                    }
 
                     onSave(
-                        existingProduct?.id,
+                        scannedProduct?.id ?: existingProduct?.id,
                         name.trim(),
                         barcode.trim().ifBlank { null },
                         category.trim().ifBlank { "Stationery" },
@@ -912,6 +1103,10 @@ fun IntegratedAddStockProductDialog(
         }
     )
 
+    if (confirmScan) AlertDialog(onDismissRequest = { confirmScan = false }, title = { Text("Quantity received") },
+        text = { Column { Text(if (scannedUnit == "PACK") "Packs of $scannedPackSize" else "Pieces"); OutlinedTextField(value = scannedQuantity, onValueChange = { scannedQuantity = it.filter(Char::isDigit) }, label = { Text("Quantity") }) } },
+        confirmButton = { TextButton(onClick = { val qty = scannedQuantity.toIntOrNull() ?: 0; if (qty > 0 && qty.toLong() * scannedPackSize <= Int.MAX_VALUE) { piecesStr = (qty * if (scannedUnit == "PACK") scannedPackSize else 1).toString(); confirmScan = false } }) { Text("Use quantity") } },
+        dismissButton = { TextButton(onClick = { confirmScan = false }) { Text("Cancel") } })
     // Camera Barcode Scanner Dialog
     if (showBarcodeScanner) {
         Dialog(onDismissRequest = { showBarcodeScanner = false }) {
@@ -957,8 +1152,17 @@ fun IntegratedAddStockProductDialog(
                                                 cameraExecutor,
                                                 BarcodeAnalyzer(
                                                     onBarcodeDetected = { scannedCode, _ ->
-                                                        barcode = scannedCode
-                                                        showBarcodeScanner = false
+                                                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                            if (showBarcodeScanner) {
+                                                                showBarcodeScanner = false
+                                                                onResolveBarcode(scannedCode) { product, unit, count ->
+                                                                    scannedProduct = product; scannedUnit = unit; scannedPackSize = count
+                                                                    barcode = product?.barcode ?: scannedCode
+                                                                    if (product != null) { name = product.name; category = product.category; brand = product.brand ?: ""; costPerPieceStr = (product.movingAvgCostPaise / 100.0).toString(); sellingPieceStr = (product.sellingPricePiecePaise / 100.0).toString() }
+                                                                    confirmScan = true
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 )
                                             )

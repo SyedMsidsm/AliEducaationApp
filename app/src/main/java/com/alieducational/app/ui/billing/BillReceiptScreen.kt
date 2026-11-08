@@ -78,10 +78,11 @@ fun BillReceiptScreen(
     val context = LocalContext.current
     val shopName by viewModel.shopName.collectAsState()
     val billingState by viewModel.billingState.collectAsState()
-    var currentSale by remember { mutableStateOf(billingState.lastSavedSale) }
+    var currentSale by remember(receiptNumber) { mutableStateOf<com.alieducational.app.data.local.entity.SaleEntity?>(null) }
     var saleLines by remember { mutableStateOf<List<SaleLineEntity>>(emptyList()) }
 
-    LaunchedEffect(currentSale?.id, receiptNumber) {
+    LaunchedEffect(receiptNumber) {
+        currentSale = viewModel.getSaleByReceipt(receiptNumber)
         val saleId = currentSale?.id
         if (saleId != null) {
             saleLines = viewModel.getSaleLines(saleId)
@@ -94,7 +95,7 @@ fun BillReceiptScreen(
     var isVoiding by remember { mutableStateOf(false) }
 
     val dateFormat = remember { SimpleDateFormat("dd MMMM yyyy, hh:mm a", Locale.getDefault()) }
-    val formattedDate = remember { dateFormat.format(Date()) }
+    val formattedDate = remember(currentSale?.timestamp) { currentSale?.timestamp?.let { dateFormat.format(Date(it)) } ?: "Loading receipt…" }
 
     val isVoided = currentSale?.isVoided == true
     val paymentMethod = currentSale?.paymentMethod ?: billingState.paymentMethod
@@ -303,9 +304,9 @@ fun BillReceiptScreen(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             val unitStr = if (line.isPack) stringResource(R.string.billing_pack) else stringResource(R.string.billing_piece)
-                                            val unitPrice = CostCalculator.formatPaiseToRupees(line.unitSellingPricePaise)
+                                            val unitPrice = CostCalculator.formatPaiseToRupees(com.alieducational.app.domain.calculation.ReceiptUnits.ratePaise(line))
                                             Text(
-                                                text = "${line.quantityBase} $unitStr @ $unitPrice",
+                                                text = "${com.alieducational.app.domain.calculation.ReceiptUnits.quantity(line)} @ $unitPrice",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )

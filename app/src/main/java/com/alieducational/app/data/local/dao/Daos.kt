@@ -66,7 +66,7 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isArchived = 0 AND category = :category ORDER BY name ASC")
     fun getProductsByCategory(category: String): Flow<List<ProductEntity>>
 
-    @Query("SELECT SUM(currentSellableStock * movingAvgCostPaise) FROM products WHERE isArchived = 0")
+    @Query("SELECT SUM(currentSellableStock * movingAvgCostPaise) FROM products WHERE isArchived = 0 AND currentSellableStock > 0")
     fun getTotalStockValuePaise(): Flow<Long?>
 
     @Query("SELECT COUNT(*) FROM products WHERE isArchived = 0 AND currentSellableStock <= lowStockThreshold")
@@ -117,6 +117,9 @@ interface StockMovementDao {
 
 @Dao
 interface SupplierDao {
+    @Query("SELECT * FROM suppliers")
+    fun getAllIncludingArchived(): Flow<List<SupplierEntity>>
+
     @Query("SELECT * FROM suppliers WHERE isArchived = 0 ORDER BY name ASC")
     fun getAllSuppliers(): Flow<List<SupplierEntity>>
 
@@ -141,7 +144,7 @@ interface SupplierDao {
     @Query("UPDATE suppliers SET currentBalancePaise = currentBalancePaise + :amountChangePaise WHERE id = :supplierId")
     suspend fun adjustBalance(supplierId: String, amountChangePaise: Long)
 
-    @Query("UPDATE suppliers SET isArchived = 1, currentBalancePaise = 0 WHERE id = :supplierId")
+    @Query("UPDATE suppliers SET isArchived = 1 WHERE id = :supplierId")
     suspend fun archiveSupplier(supplierId: String)
 
     @Query("DELETE FROM suppliers WHERE id = :supplierId")
@@ -150,6 +153,9 @@ interface SupplierDao {
 
 @Dao
 interface CustomerDao {
+    @Query("SELECT * FROM customers")
+    fun getAllIncludingArchived(): Flow<List<CustomerEntity>>
+
     @Query("SELECT * FROM customers WHERE isArchived = 0 ORDER BY name ASC")
     fun getAllCustomers(): Flow<List<CustomerEntity>>
 
@@ -171,7 +177,7 @@ interface CustomerDao {
     @Query("UPDATE customers SET currentBalancePaise = currentBalancePaise + :amountChangePaise WHERE id = :customerId")
     suspend fun adjustBalance(customerId: String, amountChangePaise: Long)
 
-    @Query("UPDATE customers SET isArchived = 1, currentBalancePaise = 0 WHERE id = :customerId")
+    @Query("UPDATE customers SET isArchived = 1 WHERE id = :customerId")
     suspend fun archiveCustomer(customerId: String)
 
     @Query("DELETE FROM customers WHERE id = :customerId")
@@ -180,6 +186,9 @@ interface CustomerDao {
 
 @Dao
 interface PurchaseDao {
+    @Update
+    suspend fun updatePurchase(purchase: PurchaseEntity)
+
     @Query("SELECT * FROM purchase_lines")
     fun getAllPurchaseLines(): Flow<List<PurchaseLineEntity>>
 
@@ -204,6 +213,15 @@ interface PurchaseDao {
 
 @Dao
 interface SaleDao {
+    @Query("SELECT * FROM sale_lines WHERE id = :id LIMIT 1")
+    suspend fun getLineById(id: String): SaleLineEntity?
+
+    @Query("SELECT * FROM sales WHERE receiptNumber = :number LIMIT 1")
+    suspend fun getSaleByReceipt(number: String): SaleEntity?
+
+    @Update
+    suspend fun updateSale(sale: SaleEntity)
+
     @Query("SELECT * FROM sales WHERE isVoided = 0 ORDER BY timestamp DESC")
     fun getAllSales(): Flow<List<SaleEntity>>
 
@@ -276,8 +294,14 @@ interface AccountPaymentDao {
 
 @Dao
 interface ShopExpenseDao {
+    @Query("SELECT * FROM shop_expenses")
+    fun getAllIncludingArchived(): Flow<List<ShopExpenseEntity>>
+
     @Query("SELECT * FROM shop_expenses WHERE isVoided = 0 ORDER BY timestamp DESC")
     fun getAllExpenses(): Flow<List<ShopExpenseEntity>>
+
+    @Query("SELECT notes FROM shop_expenses WHERE isVoided = 0 AND isIncome = :isIncome AND notes IS NOT NULL AND TRIM(notes) != '' ORDER BY timestamp DESC LIMIT 100")
+    suspend fun getRecentRawNotes(isIncome: Boolean): List<String>
 
     @Query("SELECT * FROM shop_expenses WHERE linkedExpenseId = :expenseId AND isVoided = 0")
     suspend fun getActiveRefundsForExpense(expenseId: String): List<ShopExpenseEntity>
@@ -312,6 +336,9 @@ interface ShopExpenseDao {
 
 @Dao
 interface ImportBatchDao {
+    @Query("SELECT * FROM import_batches WHERE id = :id LIMIT 1")
+    suspend fun getBatch(id: String): ImportBatchEntity?
+
     @Query("SELECT * FROM import_batches ORDER BY timestamp DESC")
     fun getAllBatches(): Flow<List<ImportBatchEntity>>
 
@@ -351,6 +378,9 @@ interface HeldBillDao {
 
 @Dao
 interface PigmyDepositDao {
+    @Query("SELECT * FROM pigmy_deposits WHERE linkedExpenseId = :id AND isVoided = 0 LIMIT 1")
+    suspend fun getByExpense(id: String): PigmyDepositEntity?
+
     @Query("SELECT * FROM pigmy_deposits WHERE accountSchemeId = :schemeId ORDER BY paidTimestamp DESC")
     fun getDepositsForScheme(schemeId: String): Flow<List<PigmyDepositEntity>>
 
@@ -534,6 +564,9 @@ interface CashCategoryDao {
 
 @Dao
 interface PigmyWithdrawalDao {
+    @Query("SELECT * FROM pigmy_withdrawals WHERE linkedExpenseId = :id AND isVoided = 0 LIMIT 1")
+    suspend fun getByExpense(id: String): PigmyWithdrawalEntity?
+
     @Query("SELECT * FROM pigmy_withdrawals WHERE accountSchemeId = :schemeId ORDER BY withdrawalTimestamp DESC")
     fun getWithdrawalsForScheme(schemeId: String): Flow<List<PigmyWithdrawalEntity>>
 
@@ -570,4 +603,3 @@ interface PigmyWithdrawalDao {
     @Query("UPDATE pigmy_withdrawals SET isVoided = 1, voidReason = :reason, updatedAt = :timestamp WHERE id = :id")
     suspend fun voidWithdrawal(id: String, reason: String, timestamp: Long = System.currentTimeMillis())
 }
-
