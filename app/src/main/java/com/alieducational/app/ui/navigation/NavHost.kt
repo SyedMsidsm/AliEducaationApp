@@ -107,9 +107,7 @@ fun AppNavigation(
         }
 
         composable(Screen.Stock.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Stock", onBack = { navController.popBackStack() }) {
 
             StockScreen(
                 viewModel = viewModel,
@@ -161,9 +159,7 @@ fun AppNavigation(
         }
 
         composable(Screen.Accounts.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Accounts", onBack = { navController.popBackStack() }) {
 
             AccountsScreen(
                 viewModel = viewModel,
@@ -271,9 +267,7 @@ fun AppNavigation(
 
         // Workflows
         composable(Screen.ReceiveStock.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Receive Stock", onBack = { navController.popBackStack() }) {
 
             ReceiveStockScreen(
                 viewModel = viewModel,
@@ -284,9 +278,7 @@ fun AppNavigation(
         }
 
         composable(Screen.RemoveStock.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Remove Stock", onBack = { navController.popBackStack() }) {
 
             RemoveStockScreen(
                 viewModel = viewModel,
@@ -302,9 +294,7 @@ fun AppNavigation(
         }
 
         composable(Screen.RecordSale.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Record Sale", onBack = { navController.popBackStack() }) {
 
             RecordSaleScreen(
                 viewModel = viewModel,
@@ -315,9 +305,7 @@ fun AppNavigation(
         }
 
         composable(Screen.RecordDailyTotal.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Record Daily Total", onBack = { navController.popBackStack() }) {
 
             RecordDailyTotalScreen(
                 viewModel = viewModel,
@@ -328,9 +316,7 @@ fun AppNavigation(
         }
 
         composable(Screen.ImportCatalog.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Import Catalog", onBack = { navController.popBackStack() }) {
 
             ImportCatalogScreen(
                 viewModel = viewModel,
@@ -341,13 +327,7 @@ fun AppNavigation(
         }
 
         composable(Screen.ProfitAnalysis.route) {
-            val deviceRole by viewModel.deviceRole.collectAsState()
-            if (deviceRole.uppercase() != "OWNER") {
-                OwnerPermissionDeniedScreen(
-                    title = "Profit Analysis",
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            } else {
+            OwnerOnly(viewModel, title = "Profit Analysis", onBack = { navController.popBackStack() }) {
                 ProfitScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -356,9 +336,7 @@ fun AppNavigation(
         }
 
         composable(Screen.Expenses.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Expenses", onBack = { navController.popBackStack() }) {
 
             ExpensesScreen(
                 viewModel = viewModel,
@@ -369,9 +347,7 @@ fun AppNavigation(
         }
 
         composable(Screen.CashTracker.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Cash Tracker", onBack = { navController.popBackStack() }) {
 
             CashTrackerScreen(
                 viewModel = viewModel,
@@ -382,13 +358,7 @@ fun AppNavigation(
         }
 
         composable(Screen.BackupRestore.route) {
-            val deviceRole by viewModel.deviceRole.collectAsState()
-            if (deviceRole.uppercase() != "OWNER") {
-                OwnerPermissionDeniedScreen(
-                    title = "Backup & Restore",
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            } else {
+            OwnerOnly(viewModel, title = "Backup & Restore", onBack = { navController.popBackStack() }) {
                 BackupRestoreScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -397,9 +367,7 @@ fun AppNavigation(
         }
 
         composable(Screen.PigmySavings.route) {
-            val role by viewModel.deviceRole.collectAsState()
-            if (role != "OWNER") OwnerPermissionDeniedScreen(title = "Owner access", onNavigateBack = { navController.popBackStack() })
-            else {
+            OwnerOnly(viewModel, title = "Pigmy Savings", onBack = { navController.popBackStack() }) {
 
             PigmySavingsScreen(
                 viewModel = viewModel,
@@ -417,6 +385,21 @@ fun AppNavigation(
         }
     }
 }
+@Composable
+fun OwnerOnly(
+    vm: AliViewModel,
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val role by vm.deviceRole.collectAsState()
+    if (role.uppercase() == "OWNER") {
+        content()
+    } else {
+        OwnerPermissionDeniedScreen(title = title, onNavigateBack = onBack)
+    }
+}
+
 @Composable
 fun OwnerPermissionDeniedScreen(
     title: String,
