@@ -1194,13 +1194,17 @@ class AliViewModel @Inject constructor(
         }
     }
 
-    fun createBackup(onDone: () -> Unit = {}) {
+    fun isBackupEncrypted(file: File): Boolean = backupService.isEncrypted(file)
+
+    fun isBackupEncryptedUri(uri: Uri): Boolean = backupService.isEncryptedUri(uri)
+
+    fun createBackup(passphrase: CharArray? = null, onDone: () -> Unit = {}) {
         if (_isCreatingBackup.value) return // Prevent overlapping jobs
         _isCreatingBackup.value = true
         _backupStatus.value = "Creating backup..."
         viewModelScope.launch(operationHandler) {
             try {
-                val meta = backupService.createBackup()
+                val meta = backupService.createBackup(passphrase)
                 _backupStatus.value = "Backup created: ${meta.fileName}"
                 loadBackups()
                 onDone()
@@ -1212,20 +1216,20 @@ class AliViewModel @Inject constructor(
         }
     }
 
-    fun restoreBackup(file: File, onDone: () -> Unit = {}) {
+    fun restoreBackup(file: File, passphrase: CharArray? = null, onDone: () -> Unit = {}) {
         viewModelScope.launch(operationHandler) {
             try {
-                val success = backupService.restoreBackup(file)
+                val success = backupService.restoreBackup(file, passphrase)
                 _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
                 onDone()
             } catch (e: Exception) { _backupStatus.value = "Restore rejected; existing data retained: ${e.message}" }
         }
     }
 
-    fun restoreFromUri(uri: Uri, onDone: () -> Unit = {}) {
+    fun restoreFromUri(uri: Uri, passphrase: CharArray? = null, onDone: () -> Unit = {}) {
         viewModelScope.launch(operationHandler) {
             try {
-                val success = backupService.restoreFromUri(uri)
+                val success = backupService.restoreFromUri(uri, passphrase)
                 _backupStatus.value = if (success) "Restored successfully" else "Restore failed"
                 onDone()
             } catch (e: Exception) { _backupStatus.value = "Restore rejected; existing data retained: ${e.message}" }

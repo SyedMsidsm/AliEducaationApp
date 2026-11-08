@@ -51,12 +51,11 @@ class CashTrackerExcelService @Inject constructor(
 
     private val exportFolder: File
         get() {
-            val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val dir = File(docs, "AliEducational/Exports")
+            val dir = context?.getExternalFilesDir("exports") ?: File(context?.cacheDir, "exports")
             if (!dir.exists()) {
                 dir.mkdirs()
             }
-            return if (dir.exists()) dir else File(context?.getExternalFilesDir(null), "exports").apply { mkdirs() }
+            return dir
         }
 
     /**

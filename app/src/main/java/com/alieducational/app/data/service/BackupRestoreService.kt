@@ -80,7 +80,15 @@ class BackupRestoreService @Inject constructor(
     val backupFolderPath: String
         get() = backupFolder.absolutePath
 
-    suspend fun createBackup(): BackupMetadata = withContext(Dispatchers.IO) {
+    fun isEncrypted(file: File): Boolean = runCatching {
+        file.inputStream().use { BackupCrypto.isEncryptedBackup(it) }
+    }.getOrDefault(false)
+
+    fun isEncryptedUri(uri: Uri): Boolean = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { BackupCrypto.isEncryptedBackup(it) } ?: false
+    }.getOrDefault(false)
+
+    suspend fun createBackup(passphrase: CharArray? = null): BackupMetadata = withContext(Dispatchers.IO) {
         operationMutex.withLock {
         db.withTransaction {
         val dbFile = File(context.cacheDir, "snapshot-${java.util.UUID.randomUUID()}.db")
@@ -254,18 +262,18 @@ class BackupRestoreService @Inject constructor(
             zipOut.closeEntry()
         }
 
-        tempPackageZip.copyTo(packageFile, overwrite = true)
-        tempPackageZip.delete()
-
-        // 6. Try copying package to public Documents directory if accessible
-        try {
-            val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            val publicAliDir = File(publicDocs, "AliEducational/Backups")
-            if (publicAliDir.exists() || publicAliDir.mkdirs()) {
-                packageFile.copyTo(File(publicAliDir, packageFileName), overwrite = true)
-                excelFile.copyTo(File(publicAliDir, excelFileName), overwrite = true)
+        if (passphrase != null && passphrase.isNotEmpty()) {
+            FileInputStream(tempPackageZip).use { inStream ->
+                FileOutputStream(packageFile).use { outStream ->
+                    BackupCrypto.encrypt(inStream, outStream, passphrase)
+                }
             }
-        } catch (_: Exception) {}
+            tempPackageZip.delete()
+        } else {
+            tempPackageZip.copyTo(packageFile, overwrite = true)
+            tempPackageZip.delete()
+        }
+        // Secure storage: public Documents directory copy removed to prevent data leakage (SEC-06c).
 
         // 7. If connected Google Drive / external folder URI is configured, auto-export
         val connectedFolderUri = preferences.googleDriveFolderUri.first()
@@ -488,13 +496,32 @@ class BackupRestoreService @Inject constructor(
         finally { stage.deleteRecursively() }
     }
 
-    suspend fun restoreBackup(backupFile: File): Boolean = withContext(Dispatchers.IO) {
+    suspend fun restoreBackup(backupFile: File, passphrase: CharArray? = null): Boolean = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             val stage = File(context.cacheDir, "restore-${java.util.UUID.randomUUID()}").apply { mkdirs() }
             val previousSettings = preferences.exportSupportedSettings()
             val writtenFiles = mutableListOf<File>()
             try {
-                val root = extractArchive(backupFile, stage)
+                val isEncrypted = backupFile.inputStream().use { BackupCrypto.isEncryptedBackup(it) }
+                val targetArchive = if (isEncrypted) {
+                    require(passphrase != null && passphrase.isNotEmpty()) {
+                        "This backup is encrypted and requires a passphrase to restore."
+                    }
+                    val decrypted = File(stage, "decrypted_archive.zip")
+                    val success = backupFile.inputStream().use { inStream ->
+                        FileOutputStream(decrypted).use { outStream ->
+                            BackupCrypto.decrypt(inStream, outStream, passphrase)
+                        }
+                    }
+                    require(success) {
+                        "Incorrect backup passphrase or corrupted archive."
+                    }
+                    decrypted
+                } else {
+                    backupFile
+                }
+
+                val root = extractArchive(targetArchive, stage)
                 validateStage(root)
                 val source = File(root, "ali_educational.db")
                 val settings = File(root, "settings.json").takeIf { it.exists() }?.let { JSONObject(it.readText()) }
@@ -534,7 +561,7 @@ class BackupRestoreService @Inject constructor(
         }
     }
 
-    suspend fun restoreFromUri(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+    suspend fun restoreFromUri(uri: Uri, passphrase: CharArray? = null): Boolean = withContext(Dispatchers.IO) {
         val tempFile = File(context.cacheDir, "imported_restore_${System.currentTimeMillis()}.zip")
         try {
             context.contentResolver.openInputStream(uri)?.use { input ->
@@ -542,7 +569,7 @@ class BackupRestoreService @Inject constructor(
                     input.copyTo(output)
                 }
             }
-            val result = restoreBackup(tempFile)
+            val result = restoreBackup(tempFile, passphrase)
             return@withContext result
         } finally {
             tempFile.delete()

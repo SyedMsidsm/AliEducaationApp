@@ -1,6 +1,9 @@
 package com.alieducational.app.ui.more
 
 import android.content.Intent
+import android.net.Uri
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.OutlinedTextField
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -84,6 +87,11 @@ fun BackupRestoreScreen(
 
     var selectedBackupForRestore by remember { mutableStateOf<BackupMetadata?>(null) }
     var viewingDetailsBackup by remember { mutableStateOf<BackupMetadata?>(null) }
+    var showCreateBackupDialog by remember { mutableStateOf(false) }
+    var createPassphrase by remember { mutableStateOf("") }
+    var createPassphraseConfirm by remember { mutableStateOf("") }
+    var restorePassphrase by remember { mutableStateOf("") }
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val positiveColor = if (isDarkTheme) PositiveGreenDark else PositiveGreenLight
     val negativeColor = if (isDarkTheme) NegativeRedDark else NegativeRedLight
@@ -128,7 +136,11 @@ fun BackupRestoreScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            viewModel.restoreFromUri(uri)
+            if (viewModel.isBackupEncryptedUri(uri)) {
+                pendingRestoreUri = uri
+            } else {
+                viewModel.restoreFromUri(uri, null)
+            }
         }
     }
 
@@ -330,7 +342,7 @@ fun BackupRestoreScreen(
                             // Primary One-Tap Backup & Save Button (Section 10)
                             Button(
                                 onClick = {
-                                    viewModel.createBackup()
+                                    showCreateBackupDialog = true
                                 },
                                 enabled = !isCreatingBackup,
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -394,7 +406,7 @@ fun BackupRestoreScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
-                                    onClick = { viewModel.createBackup() },
+                                    onClick = { showCreateBackupDialog = true },
                                     enabled = !isCreatingBackup,
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(8.dp),
@@ -676,22 +688,119 @@ fun BackupRestoreScreen(
     }
 
     // Restore Warning Confirmation Dialog
+    if (showCreateBackupDialog) {
+        val passwordsMatch = createPassphrase.isNotEmpty() && createPassphrase == createPassphraseConfirm
+        AlertDialog(
+            onDismissRequest = {
+                showCreateBackupDialog = false
+                createPassphrase = ""
+                createPassphraseConfirm = ""
+            },
+            icon = {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+            },
+            title = { Text("Protect Backup Archive") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Set an encryption passphrase to protect customer balances and shop records with AES-256-GCM.\n\n⚠️ A lost passphrase means the backup cannot be recovered.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = createPassphrase,
+                        onValueChange = { createPassphrase = it },
+                        label = { Text("Passphrase") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = createPassphraseConfirm,
+                        onValueChange = { createPassphraseConfirm = it },
+                        label = { Text("Confirm Passphrase") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = createPassphraseConfirm.isNotEmpty() && !passwordsMatch
+                    )
+                    if (createPassphraseConfirm.isNotEmpty() && !passwordsMatch) {
+                        Text("Passphrases do not match", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val pass = createPassphrase.toCharArray()
+                        showCreateBackupDialog = false
+                        createPassphrase = ""
+                        createPassphraseConfirm = ""
+                        viewModel.createBackup(pass)
+                    },
+                    enabled = passwordsMatch
+                ) {
+                    Text("Encrypt & Back Up")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            showCreateBackupDialog = false
+                            createPassphrase = ""
+                            createPassphraseConfirm = ""
+                            viewModel.createBackup(null)
+                        }
+                    ) {
+                        Text("Unencrypted", color = warningColor)
+                    }
+                    TextButton(
+                        onClick = {
+                            showCreateBackupDialog = false
+                            createPassphrase = ""
+                            createPassphraseConfirm = ""
+                        }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
+
     if (selectedBackupForRestore != null) {
         val backup = selectedBackupForRestore!!
+        val file = File(backup.filePath)
+        val isEncrypted = remember(backup.filePath) { viewModel.isBackupEncrypted(file) }
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(backup.timestamp))
         val sizeKb = backup.sizeBytes / 1024
 
         AlertDialog(
-            onDismissRequest = { selectedBackupForRestore = null },
-            icon = {
-                Icon(Icons.Filled.Warning, contentDescription = null, tint = Color(0xFFE4B765), modifier = Modifier.size(36.dp))
+            onDismissRequest = {
+                selectedBackupForRestore = null
+                restorePassphrase = ""
             },
-            title = { Text("Restore This Backup?") },
+            icon = {
+                Icon(if (isEncrypted) Icons.Filled.Lock else Icons.Filled.Warning, contentDescription = null, tint = if (isEncrypted) MaterialTheme.colorScheme.primary else Color(0xFFE4B765), modifier = Modifier.size(36.dp))
+            },
+            title = { Text(if (isEncrypted) "Restore Encrypted Backup" else "Restore Legacy Backup") },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("File: ${backup.fileName}", fontWeight = FontWeight.Bold)
                     Text("Created: $dateStr ($sizeKb KB)", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    if (isEncrypted) {
+                        Text("🔒 This backup is encrypted with AES-256. Enter the passphrase set at backup time:", style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(
+                            value = restorePassphrase,
+                            onValueChange = { restorePassphrase = it },
+                            label = { Text("Backup Passphrase") },
+                            singleLine = true,
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Text("⚠️ Unencrypted legacy backup archive.", color = Color(0xFFE4B765), style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(
                         "WARNING: Restoring will overwrite all current local stock, customer khata, and sales records with this backup's snapshot.\n\nA safety backup of your existing records will be created automatically before restoring.",
                         color = Color(0xFFE4B765),
@@ -703,30 +812,90 @@ fun BackupRestoreScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val file = File(backup.filePath)
+                        val pass = if (isEncrypted) restorePassphrase.toCharArray() else null
                         val activity = context as? androidx.fragment.app.FragmentActivity
                         if (activity != null) {
                             viewModel.stepUp.require(
                                 activity = activity,
                                 title = "Authenticate to restore backup",
                                 onOk = {
+                                    val f = file
                                     selectedBackupForRestore = null
-                                    viewModel.restoreBackup(file)
+                                    restorePassphrase = ""
+                                    viewModel.restoreBackup(f, pass)
                                 },
                                 onFail = { /* cancel restore */ }
                             )
                         } else {
                             selectedBackupForRestore = null
-                            viewModel.restoreBackup(file)
+                            restorePassphrase = ""
+                            viewModel.restoreBackup(file, pass)
                         }
                     },
+                    enabled = !isEncrypted || restorePassphrase.isNotEmpty(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE57373))
                 ) {
                     Text("Confirm Restore")
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { selectedBackupForRestore = null }) {
+                OutlinedButton(onClick = {
+                    selectedBackupForRestore = null
+                    restorePassphrase = ""
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val pendingUri = pendingRestoreUri
+    if (pendingUri != null) {
+        val targetUri = pendingUri
+        var importPassphrase by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pendingRestoreUri = null },
+            icon = {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+            },
+            title = { Text("Restore Encrypted Backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("This imported backup archive is encrypted. Enter its passphrase to restore:", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        value = importPassphrase,
+                        onValueChange = { importPassphrase = it },
+                        label = { Text("Passphrase") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val pass = importPassphrase.toCharArray()
+                        pendingRestoreUri = null
+                        val activity = context as? androidx.fragment.app.FragmentActivity
+                        if (activity != null) {
+                            viewModel.stepUp.require(
+                                activity = activity,
+                                title = "Authenticate to restore backup",
+                                onOk = { viewModel.restoreFromUri(targetUri, pass) },
+                                onFail = { /* cancel restore */ }
+                            )
+                        } else {
+                            viewModel.restoreFromUri(targetUri, pass)
+                        }
+                    },
+                    enabled = importPassphrase.isNotEmpty()
+                ) {
+                    Text("Restore")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingRestoreUri = null }) {
                     Text("Cancel")
                 }
             }
