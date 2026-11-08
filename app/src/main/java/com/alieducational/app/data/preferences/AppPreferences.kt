@@ -18,6 +18,8 @@ import org.json.JSONObject
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.alieducational.app.data.service.SecretBox
+import com.alieducational.app.data.service.SecretBoxMigration
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ali_educational_preferences")
 
@@ -113,7 +115,8 @@ class AppPreferences @Inject constructor(
     }
 
     val syncToken: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[Keys.SYNC_TOKEN]?.takeUnless { it == "AE-SYNC-987654" } ?: ""
+        val raw = preferences[Keys.SYNC_TOKEN]?.takeUnless { it == "AE-SYNC-987654" } ?: ""
+        SecretBoxMigration.resolve(raw) { SecretBox.open(it) }.value
     }
 
     val syncPort: Flow<Int> = context.dataStore.data.map { preferences ->
@@ -186,14 +189,29 @@ class AppPreferences @Inject constructor(
         }
     }
 
-    val ownerCertificatePin = context.dataStore.data.map { it[Keys.OWNER_CERT_PIN] ?: "" }
-    suspend fun setOwnerCertificatePin(pin: String) { context.dataStore.edit { it[Keys.OWNER_CERT_PIN] = pin.trim() } }
+    val ownerCertificatePin = context.dataStore.data.map { preferences ->
+        val raw = preferences[Keys.OWNER_CERT_PIN] ?: ""
+        SecretBoxMigration.resolve(raw) { SecretBox.open(it) }.value
+    }
+    suspend fun setOwnerCertificatePin(pin: String) {
+        val trimmed = pin.trim()
+        val sealed = if (trimmed.isEmpty()) "" else SecretBox.seal(trimmed)
+        context.dataStore.edit { it[Keys.OWNER_CERT_PIN] = sealed }
+    }
     suspend fun ensureSyncToken(): String {
         var token = ""
         context.dataStore.edit { p ->
-            token = p[Keys.SYNC_TOKEN]?.takeIf { it.length >= 32 && it != "AE-SYNC-987654" }
-                ?: java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID().toString()
-            p[Keys.SYNC_TOKEN] = token
+            val raw = p[Keys.SYNC_TOKEN]?.takeUnless { it == "AE-SYNC-987654" } ?: ""
+            val resolved = SecretBoxMigration.resolve(raw) { SecretBox.open(it) }
+            if (resolved.value.length >= 32) {
+                token = resolved.value
+                if (resolved.needsReSeal) {
+                    p[Keys.SYNC_TOKEN] = SecretBox.seal(resolved.value)
+                }
+            } else {
+                token = java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID().toString()
+                p[Keys.SYNC_TOKEN] = SecretBox.seal(token)
+            }
         }
         return token
     }
@@ -298,8 +316,9 @@ class AppPreferences @Inject constructor(
     }
 
     suspend fun setSyncToken(token: String) {
+        val sealed = if (token.isEmpty()) "" else SecretBox.seal(token)
         context.dataStore.edit { preferences ->
-            preferences[Keys.SYNC_TOKEN] = token
+            preferences[Keys.SYNC_TOKEN] = sealed
         }
     }
 
