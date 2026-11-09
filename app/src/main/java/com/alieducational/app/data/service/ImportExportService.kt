@@ -669,7 +669,8 @@ class ImportExportService @Inject constructor(
         mode: ImportMode = ImportMode.ADD_STOCK,
         validRowsOnly: Boolean = false,
         fileName: String = "import.xlsx",
-        mapping: ColumnMapping? = null
+        mapping: ColumnMapping? = null,
+        batchId: String = UUID.randomUUID().toString()
     ): ImportResult = withContext(Dispatchers.IO) {
         val pDao = productDao ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Database not initialized")
         val mDao = movementDao ?: return@withContext ImportResult(0, 0, 0, isSuccess = false, failureReason = "Database not initialized")
@@ -698,7 +699,6 @@ class ImportExportService @Inject constructor(
             else row.status != RowStatus.ERROR
         }
 
-        val batchId = UUID.randomUUID().toString()
         var importedCount = 0
         var updatedCount = 0
         var skippedCount = plan.count { it.status == RowStatus.SKIP_DUPLICATE }
@@ -1038,14 +1038,18 @@ class ImportExportService @Inject constructor(
             }
 
             val plan = planImport(rows, mapping, mode)
-            commit(plan, mode, validRowsOnly, fileName, mapping)
+            commit(plan, mode, validRowsOnly, fileName, mapping, batchId = batchKey)
         } catch (e: Exception) {
             ImportResult(0, 0, 0, isSuccess = false, failureReason = "Import rolled back: ${e.message}")
         }
     }
 
     internal fun readAllCsv(stream: InputStream): List<List<String>> {
-        return CsvReader.read(stream)
+        val rows = CsvReader.read(stream)
+        if (rows.size > 20000) {
+            throw IllegalArgumentException("CSV file exceeds the 20,000 row limit (${rows.size} rows). Please split into smaller files.")
+        }
+        return rows
     }
 
     internal fun readAllExcel(stream: InputStream, sheetIndex: Int): List<List<String>> {

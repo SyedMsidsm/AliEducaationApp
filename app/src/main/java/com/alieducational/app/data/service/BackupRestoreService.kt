@@ -467,7 +467,7 @@ class BackupRestoreService @Inject constructor(
         }
         if (manifest?.has("settingsSha256") == true) require(sha256(File(stage, "settings.json")) == manifest.getString("settingsSha256")) { "Settings checksum mismatch" }
         android.database.sqlite.SQLiteDatabase.openDatabase(file.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { raw ->
-            require(raw.version in 1..8) { "Unsupported backup schema ${raw.version}" }
+            require(raw.version in 1..9) { "Unsupported backup schema ${raw.version}" }
             raw.rawQuery("PRAGMA integrity_check", null).use { c -> require(c.moveToFirst() && c.getString(0) == "ok") { "Corrupt database" } }
         }
         // Never trust a stored identity hash as proof that actual tables still match.

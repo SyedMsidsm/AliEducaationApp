@@ -48,7 +48,13 @@ class BarcodeGeneratorService @Inject constructor() {
      * New codes should use ShopBarcode.newPayload(...).
      */
     fun createBarcodePayload(productId: String, unitType: String, packQty: Int): String {
-        return ShopBarcode.newPayload(unitType, packQty)
+        val cleanId = productId.replace("-", "").uppercase()
+        return if (unitType.equals("PACK", ignoreCase = true)) {
+            val safePack = if (packQty > 1) packQty else 10
+            "AE-P$cleanId-PK$safePack"
+        } else {
+            "AE-P$cleanId-PC"
+        }
     }
 
     /**

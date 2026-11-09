@@ -152,7 +152,8 @@ object CsvReader {
                         if (currentRow.any { it.isNotEmpty() }) {
                             rows.add(currentRow)
                             if (rows.size > maxRows) {
-                                throw IllegalArgumentException("File exceeds the $maxRows row limit. Please split into smaller files.")
+                                val formattedLimit = "%,d".format(java.util.Locale.US, maxRows)
+                                throw IllegalArgumentException("File exceeds the $formattedLimit row limit. Please split into smaller files.")
                             }
                         }
                         currentRow = ArrayList()
@@ -163,7 +164,8 @@ object CsvReader {
                         if (currentRow.any { it.isNotEmpty() }) {
                             rows.add(currentRow)
                             if (rows.size > maxRows) {
-                                throw IllegalArgumentException("File exceeds the $maxRows row limit. Please split into smaller files.")
+                                val formattedLimit = "%,d".format(java.util.Locale.US, maxRows)
+                                throw IllegalArgumentException("File exceeds the $formattedLimit row limit. Please split into smaller files.")
                             }
                         }
                         currentRow = ArrayList()
@@ -179,7 +181,8 @@ object CsvReader {
             if (currentRow.any { it.isNotEmpty() }) {
                 rows.add(currentRow)
                 if (rows.size > maxRows) {
-                    throw IllegalArgumentException("File exceeds the $maxRows row limit. Please split into smaller files.")
+                    val formattedLimit = "%,d".format(java.util.Locale.US, maxRows)
+                    throw IllegalArgumentException("File exceeds the $formattedLimit row limit. Please split into smaller files.")
                 }
             }
         }

@@ -108,6 +108,9 @@ class MainActivity : FragmentActivity() {
                     androidx.compose.runtime.LaunchedEffect(pendingWidgetAction, isLockEnabled, viewModel.isAppLocked, isFirstLaunch) {
                         val action = pendingWidgetAction
                         if (action != null && !isFirstLaunch && (!isLockEnabled || !viewModel.isAppLocked)) {
+                            while (runCatching { navController.graph }.isFailure) {
+                                kotlinx.coroutines.delay(50)
+                            }
                             when (action) {
                                 com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN -> {
                                     viewModel.triggerWidgetAction(com.alieducational.app.widget.AliSlimBarWidgetProvider.ACTION_CASH_IN)

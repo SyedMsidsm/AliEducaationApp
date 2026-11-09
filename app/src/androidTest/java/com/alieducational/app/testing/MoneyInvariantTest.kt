@@ -4,8 +4,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alieducational.app.data.local.AppDatabase
 import com.alieducational.app.data.local.entity.CustomerEntity
+import com.alieducational.app.data.local.entity.PigmySchemeEntity
 import com.alieducational.app.data.local.entity.ProductEntity
 import com.alieducational.app.data.local.entity.StockMovementEntity
+import com.alieducational.app.data.local.entity.SupplierEntity
 import com.alieducational.app.data.repository.AppRepository
 import com.alieducational.app.data.repository.PurchaseItemParam
 import com.alieducational.app.data.repository.SaleItemParam
@@ -86,7 +88,7 @@ class MoneyInvariantTest {
             )
         }
 
-        // 2. Seed 2 customers
+        // 2. Seed 2 customers and 1 supplier
         for (c in 1..2) {
             db.customerDao().insertCustomer(
                 CustomerEntity(
@@ -96,10 +98,24 @@ class MoneyInvariantTest {
                 )
             )
         }
+        db.supplierDao().insertSupplier(
+            SupplierEntity(
+                id = "supp-1",
+                name = "Supplier 1",
+                currentBalancePaise = 0L
+            )
+        )
 
         // 3. Initialize Pigmy Scheme
-        repo.createPigmyScheme("DEFAULT_PIGMY", "Pigmy Savings", 1000L)
-        repo.updatePigmySchemeOpeningBalance("DEFAULT_PIGMY", 20000L)
+        db.pigmySchemeDao().insertScheme(
+            PigmySchemeEntity(
+                id = "DEFAULT_PIGMY",
+                name = "Pigmy Savings",
+                usualDailyAmountPaise = 1000L,
+                openingBalancePaise = 20000L,
+                createdAt = System.currentTimeMillis()
+            )
+        )
 
         // Loop iterations
         for (step in 1..iterations) {
@@ -158,8 +174,9 @@ class MoneyInvariantTest {
                     // Receive stock (purchase)
                     val prodId = "prod-${1 + rng.nextInt(3)}"
                     val qty = 5 + rng.nextInt(10)
-                    repo.receiveStock(
-                        supplierId = null,
+                    repo.receiveGoods(
+                        supplierId = "supp-1",
+                        invoiceNumber = "INV-$step",
                         items = listOf(
                             PurchaseItemParam(
                                 productId = prodId,
@@ -167,8 +184,9 @@ class MoneyInvariantTest {
                                 unitPurchasePricePaise = 2000L
                             )
                         ),
+                        totalDeliveryPaise = 0L,
+                        deliveryPaidTo = "SETTLED",
                         amountPaidPaise = qty * 2000L,
-                        deliveryChargesPaise = 0L,
                         paymentMethod = "CASH",
                         notes = "Test purchase"
                     )
@@ -180,12 +198,13 @@ class MoneyInvariantTest {
                     val cust = db.customerDao().getCustomerById(custId)!!
                     if (cust.currentBalancePaise > 0) {
                         val pay = minOf(cust.currentBalancePaise, (1 + rng.nextInt(5)) * 1000L)
-                        repo.recordPayment(
+                        repo.recordAccountPayment(
                             accountType = "CUSTOMER",
                             accountId = custId,
                             amountPaise = pay,
                             paymentMethod = "CASH",
-                            notes = "Repayment step $step"
+                            notes = "Repayment step $step",
+                            receiptRef = null
                         )
                         opDesc += "REPAYMENT cust=$custId amount=$pay"
                     } else {
@@ -230,7 +249,7 @@ class MoneyInvariantTest {
             for (i in 1..3) {
                 val pid = "prod-$i"
                 val p = db.productDao().getProductById(pid)!!
-                val movements = db.stockMovementDao().getMovementsForProduct(pid)
+                val movements = db.stockMovementDao().getMovementsForProduct(pid).first()
                 val expectedStock = movements.filter { it.type != "DAMAGED" }.sumOf { it.quantityChangeBase }
                 assertEquals(
                     "Invariant 1 failed for $pid at step $step (seed=$seed)\nHistory:\n${history.takeLast(10).joinToString("\n")}",
