@@ -1,5 +1,15 @@
 package com.alieducational.app.ui.stock
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.ui.text.input.ImeAction
+import com.alieducational.app.ui.theme.AliDimens
+import com.alieducational.app.ui.theme.LocalAliStatusColors
+
+
+
 import android.Manifest
 import android.content.Intent
 import androidx.compose.foundation.Image
@@ -68,6 +78,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -284,6 +295,8 @@ fun StockScreen(
         IntegratedAddStockProductDialog(
             existingProduct = selectedProductForEdit,
             suppliers = allSuppliers,
+            categories = remember(allProducts) { allProducts.map { it.category }.filter { it.isNotBlank() }.distinct().sorted() },
+            allProducts = allProducts,
             onResolveBarcode = { code, done -> viewModel.lookupBarcode(code) { product, unit, count -> done(product, unit ?: "PIECE", count ?: 1) } },
             onAddSupplier = { newSup, onCreated ->
                 viewModel.addSupplier(newSup) {
@@ -602,6 +615,8 @@ fun IntegratedAddStockProductDialog(
     onDismiss: () -> Unit,
     onGenerateBarcode: (String, (String) -> Unit) -> Unit = { _, _ -> },
     onExportLabels: (ProductEntity) -> Unit = {},
+    categories: List<String> = emptyList(),
+    allProducts: List<ProductEntity> = emptyList(),
     onSave: (
         existingId: String?,
         name: String,
@@ -624,53 +639,74 @@ fun IntegratedAddStockProductDialog(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val statusColors = LocalAliStatusColors.current
 
-    var scannedProduct by remember { mutableStateOf<ProductEntity?>(null) }
-    var scannedQuantity by remember { mutableStateOf("1") }
-    var scannedUnit by remember { mutableStateOf("PIECE") }
-    var scannedPackSize by remember { mutableStateOf(1) }
-    var confirmScan by remember { mutableStateOf(false) }
+    // Initial state tracking for discard protection
+    val initialName = existingProduct?.name ?: ""
+    val initialBarcode = existingProduct?.barcode ?: ""
+    val initialCategory = existingProduct?.category ?: "Stationery"
+    val initialBrand = existingProduct?.brand ?: ""
+    val initialCostStr = if (existingProduct != null && existingProduct.movingAvgCostPaise > 0L) {
+        if (existingProduct.movingAvgCostPaise % 100L == 0L) (existingProduct.movingAvgCostPaise / 100L).toString()
+        else String.format(Locale.US, "%.2f", existingProduct.movingAvgCostPaise / 100.0)
+    } else ""
+    val initialSellingStr = if (existingProduct != null && existingProduct.sellingPricePiecePaise > 0L) {
+        if (existingProduct.sellingPricePiecePaise % 100L == 0L) (existingProduct.sellingPricePiecePaise / 100L).toString()
+        else String.format(Locale.US, "%.2f", existingProduct.sellingPricePiecePaise / 100.0)
+    } else ""
+    val initialWholesaleStr = if (existingProduct != null && existingProduct.wholesalePricePiecePaise > 0L) {
+        if (existingProduct.wholesalePricePiecePaise % 100L == 0L) (existingProduct.wholesalePricePiecePaise / 100L).toString()
+        else String.format(Locale.US, "%.2f", existingProduct.wholesalePricePiecePaise / 100.0)
+    } else ""
+    val initialLowStockStr = existingProduct?.lowStockThreshold?.toString() ?: "5"
+
+    var name by remember { mutableStateOf(initialName) }
+    var barcode by remember { mutableStateOf(initialBarcode) }
+    var printLabelsAfterSave by remember { mutableStateOf(false) }
+    var category by remember { mutableStateOf(initialCategory) }
+    var brand by remember { mutableStateOf(initialBrand) }
+
+    var piecesStr by remember { mutableStateOf("") }
+    var costPerPieceStr by remember { mutableStateOf(initialCostStr) }
+    var sellingPieceStr by remember { mutableStateOf(initialSellingStr) }
+    var wholesalePieceStr by remember { mutableStateOf(initialWholesaleStr) }
+    var lowStockStr by remember { mutableStateOf(initialLowStockStr) }
+
+    var pricingMode by remember { mutableStateOf(CostCalculator.PricingMode.GROSS_MARGIN) }
+    var marginPercentStr by remember {
+        val costP = CostCalculator.parseRupeesToPaise(initialCostStr) ?: 0L
+        val sellP = CostCalculator.parseRupeesToPaise(initialSellingStr) ?: 0L
+        val pct = CostCalculator.calculatePercentageFromPrice(costP, sellP, CostCalculator.PricingMode.GROSS_MARGIN)
+        mutableStateOf(pct?.let { String.format(Locale.US, "%.1f", it) } ?: "")
+    }
+
     var supplierName by remember { mutableStateOf("") }
     var selectedSupplier by remember { mutableStateOf<SupplierEntity?>(null) }
     var supplierMenuExpanded by remember { mutableStateOf(false) }
     var showAddSupplierInlineDialog by remember { mutableStateOf(false) }
     var billNo by remember { mutableStateOf("") }
-    var transportChargesStr by remember { mutableStateOf("0") }
-
-    var name by remember { mutableStateOf(existingProduct?.name ?: "") }
-    var barcode by remember { mutableStateOf(existingProduct?.barcode ?: "") }
-    var printLabelsAfterSave by remember { mutableStateOf(false) }
-    var category by remember { mutableStateOf(existingProduct?.category ?: "Stationery") }
-    var brand by remember { mutableStateOf(existingProduct?.brand ?: "") }
-
-    var piecesStr by remember {
-        mutableStateOf("0")
-    }
-
-    var costPerPieceStr by remember {
-        mutableStateOf(if (existingProduct != null && existingProduct.movingAvgCostPaise > 0L) (existingProduct.movingAvgCostPaise / 100.0).toString() else "0")
-    }
-
-    var sellingPieceStr by remember {
-        mutableStateOf(if (existingProduct != null && existingProduct.sellingPricePiecePaise > 0L) (existingProduct.sellingPricePiecePaise / 100.0).toString() else "0")
-    }
-
-    var wholesalePieceStr by remember {
-        mutableStateOf(if (existingProduct != null && existingProduct.wholesalePricePiecePaise > 0L) (existingProduct.wholesalePricePiecePaise / 100.0).toString() else "")
-    }
-
-    var pricingMode by remember { mutableStateOf(CostCalculator.PricingMode.GROSS_MARGIN) }
-    var marginPercentStr by remember {
-        val cost = (existingProduct?.movingAvgCostPaise ?: 0L) / 100.0
-        val selling = (existingProduct?.sellingPricePiecePaise ?: 0L) / 100.0
-        val initialMargin = if (selling > 0 && selling > cost) ((selling - cost) / selling) * 100.0 else 0.0
-        mutableStateOf(if (initialMargin > 0) String.format(Locale.US, "%.1f", initialMargin) else "0")
-    }
-
-    var lowStockStr by remember { mutableStateOf(existingProduct?.lowStockThreshold?.toString() ?: "5") }
-
+    var transportChargesStr by remember { mutableStateOf("") }
     var isPaidNow by remember { mutableStateOf(false) }
     var billPaymentMethod by remember { mutableStateOf("CASH") }
+
+    // Category dropdown & new category state
+    var categoryExpanded by remember { mutableStateOf(false) }
+    var showNewCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryInput by remember { mutableStateOf("") }
+
+    val availableCategories = remember(categories) {
+        (categories + listOf("Stationery", "Books", "Uniform", "General", "Art Supplies", "Electronics"))
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+
+    // Scanned product helper state
+    var scannedProduct by remember { mutableStateOf<ProductEntity?>(null) }
+    var scannedQuantity by remember { mutableStateOf("1") }
+    var scannedUnit by remember { mutableStateOf("PIECE") }
+    var scannedPackSize by remember { mutableStateOf(1) }
+    var confirmScan by remember { mutableStateOf(false) }
 
     // Camera Barcode Scanner State
     var showBarcodeScanner by remember { mutableStateOf(false) }
@@ -688,525 +724,1011 @@ fun IntegratedAddStockProductDialog(
         }
     }
 
-    // Computations
-    val packSize = scannedProduct?.packSize ?: existingProduct?.packSize ?: 1
+    // Auto-expand supplier bill section when quantity > 0
     val totalPiecesAdded = piecesStr.replace(",", "").trim().toIntOrNull() ?: 0
+    var supplierSectionExpanded by remember {
+        mutableStateOf(existingProduct == null || totalPiecesAdded > 0 || supplierName.isNotBlank() || billNo.isNotBlank())
+    }
+    LaunchedEffect(totalPiecesAdded) {
+        if (totalPiecesAdded > 0) {
+            supplierSectionExpanded = true
+        }
+    }
+
+    // Exact Paise Math
+    val packSize = scannedProduct?.packSize ?: existingProduct?.packSize ?: 1
     val boxesBrought = 0
     val loosePieces = totalPiecesAdded
 
-    val baseCost = costPerPieceStr.replace(",", "").trim().toDoubleOrNull() ?: 0.0
-    val transportTotal = transportChargesStr.replace(",", "").trim().toDoubleOrNull() ?: 0.0
-    val transportPerPiece = if (totalPiecesAdded > 0 && transportTotal > 0.0) {
-        transportTotal / totalPiecesAdded
-    } else 0.0
-    val landedCost = baseCost + transportPerPiece
+    val baseCostPaise = CostCalculator.parseRupeesToPaise(costPerPieceStr.ifBlank { "0" }) ?: 0L
+    val transportTotalPaise = CostCalculator.parseRupeesToPaise(transportChargesStr.ifBlank { "0" }) ?: 0L
+    val transportPerPiecePaise = if (totalPiecesAdded > 0 && transportTotalPaise > 0L) {
+        transportTotalPaise / totalPiecesAdded
+    } else 0L
+    val landedCostPaise = baseCostPaise + transportPerPiecePaise
 
-    val selling = sellingPieceStr.replace(",", "").trim().toDoubleOrNull() ?: 0.0
-    androidx.compose.runtime.LaunchedEffect(landedCost, pricingMode) {
-        val percent = CostCalculator.calculatePercentageFromPrice((landedCost * 100).toLong(), (selling * 100).toLong(), pricingMode)
-        marginPercentStr = percent?.let { String.format(Locale.US, "%.1f", it) } ?: ""
+    val sellingPaise = CostCalculator.parseRupeesToPaise(sellingPieceStr.ifBlank { "0" }) ?: 0L
+    val wholesalePaise = CostCalculator.parseRupeesToPaise(wholesalePieceStr.ifBlank { "0" }) ?: 0L
+    val lowStock = lowStockStr.replace(",", "").trim().toIntOrNull() ?: 5
+
+    // Margin & Profit
+    val profitPaise = sellingPaise - landedCostPaise
+    val calculatedMarginPct = if (sellingPaise > 0L) {
+        (profitPaise.toDouble() / sellingPaise.toDouble()) * 100.0
+    } else 0.0
+
+    val stockValuePaise = totalPiecesAdded.toLong() * landedCostPaise
+
+    // Duplicate barcode check
+    val conflictingProduct = remember(barcode, allProducts, existingProduct) {
+        if (barcode.isNotBlank()) {
+            allProducts.firstOrNull {
+                it.barcode.equals(barcode.trim(), ignoreCase = true) &&
+                        it.id != (existingProduct?.id ?: "")
+            }
+        } else null
     }
-    val profitBeforeTransport = selling - baseCost
-    val profitAfterTransport = selling - landedCost
 
-    val calculatedMarginPct = if (selling > 0.0) {
-        (profitAfterTransport / selling) * 100.0
-    } else 0.0
+    // Discard Protection
+    var showDiscardConfirmDialog by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(dismissOnClickOutside = false),
-        title = {
-            Text(if (existingProduct != null) "Edit Product & Stock" else "Add Stock & Product", fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // 1. Product Name *
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Product Name *") },
-                    placeholder = { Text("Product Name") },
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+    fun hasChanges(): Boolean {
+        return name != initialName ||
+                barcode != initialBarcode ||
+                category != initialCategory ||
+                brand != initialBrand ||
+                piecesStr.isNotBlank() ||
+                costPerPieceStr != initialCostStr ||
+                sellingPieceStr != initialSellingStr ||
+                wholesalePieceStr != initialWholesaleStr ||
+                lowStockStr != initialLowStockStr ||
+                supplierName.isNotBlank() ||
+                billNo.isNotBlank() ||
+                transportChargesStr.isNotBlank()
+    }
 
-                // 2. Barcode (Optional) with Generate and Camera Scanner buttons
-                OutlinedTextField(
-                    value = barcode,
-                    onValueChange = { barcode = it },
-                    label = { Text("Barcode (Optional)") },
-                    placeholder = { Text("Scan or enter barcode") },
-                    trailingIcon = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (barcode.isBlank()) {
-                                IconButton(
-                                    onClick = {
-                                        onGenerateBarcode(existingProduct?.id ?: "") { generated ->
-                                            if (generated.isNotBlank()) barcode = generated
-                                        }
-                                    }
-                                ) {
-                                    Text("✨", fontSize = 16.sp)
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (hasCameraPermission) {
-                                        showBarcodeScanner = true
-                                    } else {
-                                        permissionLauncher.launch(Manifest.permission.CAMERA)
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.QrCodeScanner,
-                                    contentDescription = "Scan Barcode",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+    fun onAttemptDismiss() {
+        if (hasChanges()) {
+            showDiscardConfirmDialog = true
+        } else {
+            onDismiss()
+        }
+    }
 
-                if (barcode.isNotBlank() && barcode.startsWith("AE-P")) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            val previewBitmap = remember(barcode) {
-                                try {
-                                    BarcodeGeneratorService().generateBarcodeBitmap(barcode, 360, 90)
-                                } catch (_: Exception) { null }
-                            }
-                            if (previewBitmap != null) {
-                                Image(
-                                    bitmap = previewBitmap.asImageBitmap(),
-                                    contentDescription = "Barcode Preview",
-                                    modifier = Modifier.height(50.dp).fillMaxWidth()
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(barcode, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
+    BackHandler {
+        onAttemptDismiss()
+    }
 
-                if (barcode.isNotBlank()) {
+    fun doSave() {
+        if (name.isBlank()) return
+        val costP = CostCalculator.parseRupeesToPaise(costPerPieceStr.ifBlank { "0" })
+        val transP = CostCalculator.parseRupeesToPaise(transportChargesStr.ifBlank { "0" })
+        val sellP = CostCalculator.parseRupeesToPaise(sellingPieceStr.ifBlank { "0" })
+        val wsP = CostCalculator.parseRupeesToPaise(wholesalePieceStr.ifBlank { "0" })
+        val ls = lowStockStr.replace(",", "").trim().toIntOrNull()
+        val qty = piecesStr.ifBlank { "0" }.replace(",", "").trim().toIntOrNull()
+
+        if (costP == null || transP == null || sellP == null || wsP == null || ls == null || ls < 0 || qty == null || qty < 0) {
+            android.widget.Toast.makeText(context, "Enter valid nonnegative amounts and whole quantities", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+
+        onSave(
+            scannedProduct?.id ?: existingProduct?.id,
+            name.trim(),
+            barcode.trim().ifBlank { null },
+            category.trim().ifBlank { "Stationery" },
+            brand.trim().ifBlank { null },
+            packSize,
+            boxesBrought,
+            qty,
+            costP,
+            sellP,
+            wsP,
+            ls,
+            supplierName.trim().ifBlank { null },
+            billNo.trim().ifBlank { null },
+            transP,
+            isPaidNow,
+            billPaymentMethod
+        )
+
+        if (printLabelsAfterSave && barcode.isNotBlank()) {
+            val tempProd = ProductEntity(
+                id = scannedProduct?.id ?: existingProduct?.id ?: java.util.UUID.randomUUID().toString(),
+                name = name.trim(),
+                category = category.trim().ifBlank { "Stationery" },
+                brand = brand.trim().ifBlank { null },
+                barcode = barcode.trim().ifBlank { null },
+                packSize = packSize,
+                sellingPricePiecePaise = sellP,
+                movingAvgCostPaise = costP
+            )
+            onExportLabels(tempProd)
+        }
+    }
+
+    // Full-screen Dialog
+    Dialog(
+        onDismissRequest = { onAttemptDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Pinned Top Bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp
+                ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { printLabelsAfterSave = !printLabelsAfterSave }
-                            .padding(vertical = 2.dp)
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingSm),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Checkbox(
-                            checked = printLabelsAfterSave,
-                            onCheckedChange = { printLabelsAfterSave = it }
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Print labels after saving", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                if (existingProduct != null) {
-                    if (barcode.isBlank()) {
-                        Button(
-                            onClick = {
-                                onGenerateBarcode(existingProduct.id) { generated ->
-                                    if (generated.isNotBlank()) barcode = generated
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Generate Shop Barcode (Code 128)")
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = {
-                                onExportLabels(existingProduct.copy(barcode = barcode))
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Print / Export Barcode Labels")
-                        }
-                    }
-                }
-
-                // 3. Category & Brand
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = category,
-                        onValueChange = { category = it },
-                        label = { Text("Category") },
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = brand,
-                        onValueChange = { brand = it },
-                        label = { Text("Brand") },
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // 4. Pcs & Low Stock Alert
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = piecesStr,
-                        onValueChange = { piecesStr = it },
-                        label = { Text("Pcs") },
-                        placeholder = { Text("0") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = lowStockStr,
-                        onValueChange = { lowStockStr = it },
-                        label = { Text("Low Stock Alert") },
-                        placeholder = { Text("5") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // 5. Cost & Selling Price
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = costPerPieceStr,
-                        onValueChange = {
-                            costPerPieceStr = it
-                            val c = it.toDoubleOrNull() ?: 0.0
-                            val effCost = c + transportPerPiece
-                            val s = sellingPieceStr.toDoubleOrNull() ?: 0.0
-                            if (s > 0 && s > effCost) {
-                                marginPercentStr = String.format(Locale.US, "%.1f", ((s - effCost) / s) * 100.0)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { onAttemptDismiss() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close")
                             }
-                        },
-                        label = { Text("Base Cost (₹/pc) *") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    OutlinedTextField(
-                        value = sellingPieceStr,
-                        onValueChange = {
-                            sellingPieceStr = it
-                            val s = it.toDoubleOrNull() ?: 0.0
-                            marginPercentStr = CostCalculator.calculatePercentageFromPrice((landedCost * 100).toLong(), (s * 100).toLong(), pricingMode)?.let { value -> String.format(Locale.US, "%.1f", value) } ?: ""
-                        },
-                        label = { Text("Selling (₹/pc) *") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = pricingMode == CostCalculator.PricingMode.GROSS_MARGIN,
-                        onClick = { pricingMode = CostCalculator.PricingMode.GROSS_MARGIN }, label = { Text("Gross margin") })
-                    FilterChip(selected = pricingMode == CostCalculator.PricingMode.MARKUP,
-                        onClick = { pricingMode = CostCalculator.PricingMode.MARKUP }, label = { Text("Markup on cost") })
-                }
-                // 6. Selected pricing percentage and wholesale price
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = marginPercentStr,
-                        onValueChange = {
-                            marginPercentStr = it
-                            val m = it.toDoubleOrNull() ?: 0.0
-                            CostCalculator.calculatePriceFromPercentage((landedCost * 100).toLong(), m, pricingMode)?.let { price ->
-                                sellingPieceStr = String.format(Locale.US, "%.2f", price / 100.0)
-                            }
-                        },
-                        label = { Text(if (pricingMode == CostCalculator.PricingMode.GROSS_MARGIN) "Margin (%)" else "Markup (%)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    OutlinedTextField(
-                        value = wholesalePieceStr,
-                        onValueChange = { wholesalePieceStr = it },
-                        label = { Text("Wholesale", maxLines = 1) },
-                        placeholder = { Text("Optional") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // 7. Supplier Selector (Full Width)
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Supplier",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    ExposedDropdownMenuBox(
-                        expanded = supplierMenuExpanded,
-                        onExpandedChange = { supplierMenuExpanded = !supplierMenuExpanded },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = supplierName,
-                            onValueChange = {
-                                supplierName = it
-                                supplierMenuExpanded = true
-                            },
-                            label = { Text("Search or select supplier") },
-                            placeholder = { Text("Select supplier from directory") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = supplierMenuExpanded) },
-                            singleLine = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor()
-                        )
-                        val matchingSuppliers = remember(suppliers, supplierName) {
-                            if (supplierName.isBlank()) suppliers
-                            else suppliers.filter { it.name.contains(supplierName, ignoreCase = true) }
-                        }
-                        ExposedDropdownMenu(
-                            expanded = supplierMenuExpanded,
-                            onDismissRequest = { supplierMenuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("+ Add new supplier", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    }
-                                },
-                                onClick = {
-                                    supplierMenuExpanded = false
-                                    showAddSupplierInlineDialog = true
-                                }
+                            Spacer(modifier = Modifier.width(AliDimens.spacingXs))
+                            Text(
+                                text = if (existingProduct != null) "Edit Stock & Product" else "Add Stock & Product",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            HorizontalDivider()
-                            matchingSuppliers.forEach { sup ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(sup.name, fontWeight = FontWeight.SemiBold)
-                                            if (!sup.phone.isNullOrBlank()) {
-                                                Text(sup.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Button(
+                            onClick = { doSave() },
+                            enabled = name.isNotBlank() && baseCostPaise >= 0L && sellingPaise >= 0L,
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                        ) {
+                            Text("Save", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                HorizontalDivider()
+
+                // Scrollable Form Content
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd),
+                    verticalArrangement = Arrangement.spacedBy(AliDimens.spacingLg)
+                ) {
+                    // ── SECTION 1: PRODUCT ─────────────────────────────────────
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            shape = RoundedCornerShape(AliDimens.radiusMd)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(AliDimens.spacingMd),
+                                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                            ) {
+                                Text(
+                                    "PRODUCT",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                OutlinedTextField(
+                                    value = name,
+                                    onValueChange = { name = it },
+                                    label = { Text("Product Name *") },
+                                    placeholder = { Text("Product name") },
+                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                OutlinedTextField(
+                                    value = barcode,
+                                    onValueChange = { barcode = it },
+                                    label = { Text("Barcode (Optional)") },
+                                    placeholder = { Text("Scan or enter barcode") },
+                                    trailingIcon = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (barcode.isBlank()) {
+                                                IconButton(
+                                                    onClick = {
+                                                        onGenerateBarcode(existingProduct?.id ?: "") { generated ->
+                                                            if (generated.isNotBlank()) barcode = generated
+                                                        }
+                                                    }
+                                                ) {
+                                                    Text("✨", fontSize = 16.sp)
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    if (hasCameraPermission) {
+                                                        showBarcodeScanner = true
+                                                    } else {
+                                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.QrCodeScanner,
+                                                    contentDescription = "Scan Barcode",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
                                             }
                                         }
                                     },
-                                    onClick = {
-                                        selectedSupplier = sup
-                                        supplierName = sup.name
-                                        supplierMenuExpanded = false
-                                    }
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
+
+                                if (conflictingProduct != null) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "⚠️ Barcode already assigned to '${conflictingProduct.name}'",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.padding(AliDimens.spacingSm)
+                                        )
+                                    }
+                                }
+
+                                if (barcode.isNotBlank() && barcode.startsWith("AE-P")) {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                        shape = RoundedCornerShape(AliDimens.radiusSm)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            val previewBitmap = remember(barcode) {
+                                                try {
+                                                    BarcodeGeneratorService().generateBarcodeBitmap(barcode, 360, 90)
+                                                } catch (_: Exception) { null }
+                                            }
+                                            if (previewBitmap != null) {
+                                                Image(
+                                                    bitmap = previewBitmap.asImageBitmap(),
+                                                    contentDescription = "Barcode Preview",
+                                                    modifier = Modifier.height(48.dp).fillMaxWidth()
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(barcode, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                }
+
+                                if (barcode.isNotBlank()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { printLabelsAfterSave = !printLabelsAfterSave }
+                                            .padding(vertical = 2.dp)
+                                    ) {
+                                        Checkbox(
+                                            checked = printLabelsAfterSave,
+                                            onCheckedChange = { printLabelsAfterSave = it }
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Print labels after saving", style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                ) {
+                                    ExposedDropdownMenuBox(
+                                        expanded = categoryExpanded,
+                                        onExpandedChange = { categoryExpanded = !categoryExpanded },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = category,
+                                            onValueChange = { category = it },
+                                            label = { Text("Category *") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
+                                            singleLine = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = categoryExpanded,
+                                            onDismissRequest = { categoryExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text("+ New category...", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                },
+                                                onClick = {
+                                                    categoryExpanded = false
+                                                    showNewCategoryDialog = true
+                                                }
+                                            )
+                                            HorizontalDivider()
+                                            availableCategories.forEach { catName ->
+                                                DropdownMenuItem(
+                                                    text = { Text(catName) },
+                                                    onClick = {
+                                                        category = catName
+                                                        categoryExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    OutlinedTextField(
+                                        value = brand,
+                                        onValueChange = { brand = it },
+                                        label = { Text("Brand") },
+                                        placeholder = { Text("Optional") },
+                                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── SECTION 2: STOCK ───────────────────────────────────────
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            shape = RoundedCornerShape(AliDimens.radiusMd)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(AliDimens.spacingMd),
+                                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "STOCK",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    if (existingProduct != null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(AliDimens.radiusPill),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                        ) {
+                                            Text(
+                                                text = "In stock now: ${existingProduct.currentSellableStock} pcs",
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                ) {
+                                    OutlinedTextField(
+                                        value = piecesStr,
+                                        onValueChange = { piecesStr = it },
+                                        label = { Text(if (existingProduct != null) "Add to stock (pcs)" else "Quantity received (pcs)") },
+                                        placeholder = { Text("0") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = lowStockStr,
+                                        onValueChange = { lowStockStr = it },
+                                        label = { Text("Low-stock alert") },
+                                        placeholder = { Text("5") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── SECTION 3: PRICING ─────────────────────────────────────
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            shape = RoundedCornerShape(AliDimens.radiusMd)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(AliDimens.spacingMd),
+                                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                            ) {
+                                Text(
+                                    "PRICING",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                ) {
+                                    OutlinedTextField(
+                                        value = costPerPieceStr,
+                                        onValueChange = {
+                                            costPerPieceStr = it
+                                            val c = CostCalculator.parseRupeesToPaise(it.ifBlank { "0" }) ?: 0L
+                                            val effLanded = c + transportPerPiecePaise
+                                            val s = CostCalculator.parseRupeesToPaise(sellingPieceStr.ifBlank { "0" }) ?: 0L
+                                            if (s > 0L && s > effLanded) {
+                                                val pct = CostCalculator.calculatePercentageFromPrice(effLanded, s, pricingMode)
+                                                marginPercentStr = pct?.let { String.format(Locale.US, "%.1f", it) } ?: ""
+                                            }
+                                        },
+                                        label = { Text("Cost price (₹/pc) *") },
+                                        placeholder = { Text("0.00") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    OutlinedTextField(
+                                        value = sellingPieceStr,
+                                        onValueChange = {
+                                            sellingPieceStr = it
+                                            val s = CostCalculator.parseRupeesToPaise(it.ifBlank { "0" }) ?: 0L
+                                            if (s > 0L && landedCostPaise > 0L) {
+                                                val pct = CostCalculator.calculatePercentageFromPrice(landedCostPaise, s, pricingMode)
+                                                marginPercentStr = pct?.let { String.format(Locale.US, "%.1f", it) } ?: ""
+                                            }
+                                        },
+                                        label = { Text("Selling price (₹/pc) *") },
+                                        placeholder = { Text("0.00") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                ) {
+                                    OutlinedTextField(
+                                        value = wholesalePieceStr,
+                                        onValueChange = { wholesalePieceStr = it },
+                                        label = { Text("Wholesale (₹/pc)") },
+                                        placeholder = { Text("Optional") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    OutlinedTextField(
+                                        value = marginPercentStr,
+                                        onValueChange = {
+                                            marginPercentStr = it
+                                            val m = it.toDoubleOrNull() ?: 0.0
+                                            if (landedCostPaise > 0L) {
+                                                CostCalculator.calculatePriceFromPercentage(landedCostPaise, m, pricingMode)?.let { targetSelling ->
+                                                    sellingPieceStr = String.format(Locale.US, "%.2f", targetSelling / 100.0)
+                                                }
+                                            }
+                                        },
+                                        label = { Text(if (pricingMode == CostCalculator.PricingMode.GROSS_MARGIN) "Margin (%)" else "Markup (%)") },
+                                        placeholder = { Text("0.0") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = pricingMode == CostCalculator.PricingMode.GROSS_MARGIN,
+                                        onClick = { pricingMode = CostCalculator.PricingMode.GROSS_MARGIN },
+                                        label = { Text("Gross margin", fontSize = AliDimens.minChipTextSize) }
+                                    )
+                                    FilterChip(
+                                        selected = pricingMode == CostCalculator.PricingMode.MARKUP,
+                                        onClick = { pricingMode = CostCalculator.PricingMode.MARKUP },
+                                        label = { Text("Markup on cost", fontSize = AliDimens.minChipTextSize) }
+                                    )
+                                }
+
+                                // Warnings
+                                if (sellingPaise > 0L && sellingPaise < landedCostPaise) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "⚠️ Selling price is below landed cost (${CostCalculator.formatPaiseToRupees(landedCostPaise)})!",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.padding(AliDimens.spacingSm)
+                                        )
+                                    }
+                                }
+
+                                if (sellingPieceStr.isNotBlank() && sellingPaise == 0L) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
+                                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "⚠️ Selling price is ₹0.00",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(AliDimens.spacingSm)
+                                        )
+                                    }
+                                }
+
+                                if (totalPiecesAdded > 0 && baseCostPaise == 0L) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
+                                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "⚠️ Cost price is ₹0.00 with incoming stock",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(AliDimens.spacingSm)
+                                        )
+                                    }
+                                }
+
+                                // Pricing summary chip
+                                if (sellingPaise > 0L) {
+                                    Surface(
+                                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                                        color = if (profitPaise >= 0L) statusColors.paidBg else statusColors.dueBg,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "Profit ${CostCalculator.formatPaiseToRupees(profitPaise)}/pc • ${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (profitPaise >= 0L) statusColors.paidFg else statusColors.dueFg,
+                                            modifier = Modifier.padding(AliDimens.spacingSm)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── SECTION 4: SUPPLIER BILL ───────────────────────────────
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            shape = RoundedCornerShape(AliDimens.radiusMd)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(AliDimens.spacingMd),
+                                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(AliDimens.radiusSm))
+                                        .clickable { supplierSectionExpanded = !supplierSectionExpanded }
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (supplierSectionExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            "SUPPLIER BILL (optional)",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    if (!supplierSectionExpanded && supplierName.isNotBlank()) {
+                                        Text(
+                                            supplierName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                if (supplierSectionExpanded) {
+                                    ExposedDropdownMenuBox(
+                                        expanded = supplierMenuExpanded,
+                                        onExpandedChange = { supplierMenuExpanded = !supplierMenuExpanded },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        OutlinedTextField(
+                                            value = supplierName,
+                                            onValueChange = {
+                                                supplierName = it
+                                                supplierMenuExpanded = true
+                                            },
+                                            label = { Text("Supplier") },
+                                            placeholder = { Text("Search or select supplier") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = supplierMenuExpanded) },
+                                            singleLine = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .menuAnchor()
+                                        )
+                                        val matchingSuppliers = remember(suppliers, supplierName) {
+                                            if (supplierName.isBlank()) suppliers
+                                            else suppliers.filter { it.name.contains(supplierName, ignoreCase = true) }
+                                        }
+                                        ExposedDropdownMenu(
+                                            expanded = supplierMenuExpanded,
+                                            onDismissRequest = { supplierMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text("+ Add new supplier", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                },
+                                                onClick = {
+                                                    supplierMenuExpanded = false
+                                                    showAddSupplierInlineDialog = true
+                                                }
+                                            )
+                                            HorizontalDivider()
+                                            matchingSuppliers.forEach { sup ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Column {
+                                                            Text(sup.name, fontWeight = FontWeight.SemiBold)
+                                                            if (!sup.phone.isNullOrBlank()) {
+                                                                Text(sup.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                            }
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        selectedSupplier = sup
+                                                        supplierName = sup.name
+                                                        supplierMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = billNo,
+                                            onValueChange = { billNo = it },
+                                            label = { Text("Bill / Invoice No.") },
+                                            placeholder = { Text("Optional #") },
+                                            leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        OutlinedTextField(
+                                            value = transportChargesStr,
+                                            onValueChange = { transportChargesStr = it },
+                                            label = { Text("Transport (₹)") },
+                                            placeholder = { Text("0") },
+                                            leadingIcon = { Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    // Payment Status
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(AliDimens.radiusSm))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                            .padding(AliDimens.spacingSm),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "Supplier Bill Payment",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            FilterChip(
+                                                selected = !isPaidNow,
+                                                onClick = { isPaidNow = false },
+                                                label = { Text("Unpaid (Add to Dues)", fontSize = AliDimens.minChipTextSize) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            FilterChip(
+                                                selected = isPaidNow,
+                                                onClick = { isPaidNow = true },
+                                                label = { Text("Paid Now", fontSize = AliDimens.minChipTextSize) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        if (isPaidNow) {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                FilterChip(
+                                                    selected = billPaymentMethod == "CASH",
+                                                    onClick = { billPaymentMethod = "CASH" },
+                                                    label = { Text("Cash", fontSize = AliDimens.minChipTextSize) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                FilterChip(
+                                                    selected = billPaymentMethod == "UPI",
+                                                    onClick = { billPaymentMethod = "UPI" },
+                                                    label = { Text("UPI", fontSize = AliDimens.minChipTextSize) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                FilterChip(
+                                                    selected = billPaymentMethod == "BANK",
+                                                    onClick = { billPaymentMethod = "BANK" },
+                                                    label = { Text("Bank", fontSize = AliDimens.minChipTextSize) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                // Bill No. (Dedicated Row)
-                OutlinedTextField(
-                    value = billNo,
-                    onValueChange = { billNo = it },
-                    label = { Text("Bill / Invoice No.") },
-                    placeholder = { Text("Optional invoice number") },
-                    leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                HorizontalDivider()
 
-                // 8. Transport Charges
-                OutlinedTextField(
-                    value = transportChargesStr,
-                    onValueChange = { transportChargesStr = it },
-                    label = { Text("Transport Charges (₹)") },
-                    placeholder = { Text("0") },
-                    leadingIcon = { Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Supplier Bill Payment Status
-                if (supplierName.isNotBlank() || billNo.isNotBlank()) {
+                // Pinned Bottom Bar (Summary + Actions)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 4.dp
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingSm)
                     ) {
-                        Text(
-                            text = "Supplier Bill Payment",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = !isPaidNow,
-                                onClick = { isPaidNow = false },
-                                label = { Text("Unpaid (Add to Dues)") },
-                                modifier = Modifier.weight(1f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Stock value: ${CostCalculator.formatPaiseToRupees(stockValuePaise)}",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            FilterChip(
-                                selected = isPaidNow,
-                                onClick = { isPaidNow = true },
-                                label = { Text("Paid Now") },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        if (isPaidNow) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(
-                                    selected = billPaymentMethod == "CASH",
-                                    onClick = { billPaymentMethod = "CASH" },
-                                    label = { Text("Cash") },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                FilterChip(
-                                    selected = billPaymentMethod == "UPI",
-                                    onClick = { billPaymentMethod = "UPI" },
-                                    label = { Text("UPI / GPay") },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                FilterChip(
-                                    selected = billPaymentMethod == "BANK",
-                                    onClick = { billPaymentMethod = "BANK" },
-                                    label = { Text("Bank") },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 9. Profit After Transport Breakdown
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "Profit after transport",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-
-                        if (selling > 0) {
-                            if (transportTotal > 0.0 && totalPiecesAdded > 0) {
+                            if (sellingPaise > 0L) {
                                 Text(
-                                    text = "Profit after transport: ${CostCalculator.formatPaiseToRupees((profitAfterTransport * 100).toLong())}/pc (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (profitAfterTransport >= 0) Color(0xFF75B890) else Color(0xFFE57373)
-                                )
-                                Text(
-                                    text = "Before transport was: ${CostCalculator.formatPaiseToRupees((profitBeforeTransport * 100).toLong())}/pc • Landed Cost: ${CostCalculator.formatPaiseToRupees((landedCost * 100).toLong())}/pc",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                Text(
-                                    text = "Profit per piece: ${CostCalculator.formatPaiseToRupees((profitAfterTransport * 100).toLong())} (${String.format(Locale.US, "%.1f", calculatedMarginPct)}% margin)",
+                                    text = "Profit: ${CostCalculator.formatPaiseToRupees(profitPaise)}/pc (${String.format(Locale.US, "%.1f", calculatedMarginPct)}%)",
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = if (profitAfterTransport >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                                    color = if (profitPaise >= 0L) statusColors.paidFg else statusColors.dueFg
                                 )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(AliDimens.spacingXs))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onAttemptDismiss() },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AliDimens.radiusSm)
+                            ) {
+                                Text("Cancel")
+                            }
+                            Button(
+                                onClick = { doSave() },
+                                enabled = name.isNotBlank() && baseCostPaise >= 0L && sellingPaise >= 0L,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AliDimens.radiusSm)
+                            ) {
+                                Text("Save", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.isBlank()) return@Button
-                    val costPaise = CostCalculator.parseRupeesToPaise(costPerPieceStr)
-                    val transportPaise = CostCalculator.parseRupeesToPaise(transportChargesStr.ifBlank { "0" })
-                    val sellingPaise = CostCalculator.parseRupeesToPaise(sellingPieceStr)
-                    val wholesalePaise = CostCalculator.parseRupeesToPaise(wholesalePieceStr.ifBlank { "0" })
-                    val lowStock = lowStockStr.replace(",", "").trim().toIntOrNull()
-                    val quantity = piecesStr.replace(",", "").trim().toIntOrNull()
-                    if (costPaise == null || transportPaise == null || sellingPaise == null || wholesalePaise == null || lowStock == null || lowStock < 0 || quantity == null || quantity < 0) {
-                        android.widget.Toast.makeText(context, "Enter valid nonnegative amounts (up to 2 decimals) and whole quantities", android.widget.Toast.LENGTH_LONG).show()
-                        return@Button
-                    }
-
-                    onSave(
-                        scannedProduct?.id ?: existingProduct?.id,
-                        name.trim(),
-                        barcode.trim().ifBlank { null },
-                        category.trim().ifBlank { "Stationery" },
-                        brand.trim().ifBlank { null },
-                        packSize,
-                        boxesBrought,
-                        loosePieces,
-                        costPaise,
-                        sellingPaise,
-                        wholesalePaise,
-                        lowStock,
-                        supplierName.trim().ifBlank { null },
-                        billNo.trim().ifBlank { null },
-                        transportPaise,
-                        isPaidNow,
-                        billPaymentMethod
-                    )
-                    if (printLabelsAfterSave && barcode.isNotBlank()) {
-                        val tempProd = ProductEntity(
-                            id = scannedProduct?.id ?: existingProduct?.id ?: java.util.UUID.randomUUID().toString(),
-                            name = name.trim(),
-                            category = category.trim().ifBlank { "Stationery" },
-                            brand = brand.trim().ifBlank { null },
-                            barcode = barcode.trim().ifBlank { null },
-                            packSize = packSize,
-                            sellingPricePiecePaise = sellingPaise,
-                            movingAvgCostPaise = costPaise
-                        )
-                        onExportLabels(tempProd)
-                    }
-                }
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
-    )
+    }
 
-    if (confirmScan) AlertDialog(onDismissRequest = { confirmScan = false }, title = { Text("Quantity received") },
-        text = { Column { Text(if (scannedUnit == "PACK") "Packs of $scannedPackSize" else "Pieces"); OutlinedTextField(value = scannedQuantity, onValueChange = { scannedQuantity = it.filter(Char::isDigit) }, label = { Text("Quantity") }) } },
-        confirmButton = { TextButton(onClick = { val qty = scannedQuantity.toIntOrNull() ?: 0; if (qty > 0 && qty.toLong() * scannedPackSize <= Int.MAX_VALUE) { piecesStr = (qty * if (scannedUnit == "PACK") scannedPackSize else 1).toString(); confirmScan = false } }) { Text("Use quantity") } },
-        dismissButton = { TextButton(onClick = { confirmScan = false }) { Text("Cancel") } })
+    // Sub-dialog: New Category
+    if (showNewCategoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewCategoryDialog = false },
+            title = { Text("New Category") },
+            text = {
+                OutlinedTextField(
+                    value = newCategoryInput,
+                    onValueChange = { newCategoryInput = it },
+                    label = { Text("Category Name") },
+                    placeholder = { Text("e.g. Uniform, Textbooks") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = newCategoryInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            category = trimmed
+                            showNewCategoryDialog = false
+                            newCategoryInput = ""
+                        }
+                    }
+                ) {
+                    Text("Add & Select")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showNewCategoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Sub-dialog: Discard Changes Confirmation
+    if (showDiscardConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirmDialog = false },
+            title = { Text("Discard Changes?") },
+            text = { Text("You have unsaved changes. Are you sure you want to discard them?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDiscardConfirmDialog = false
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Discard")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDiscardConfirmDialog = false }) {
+                    Text("Keep Editing")
+                }
+            }
+        )
+    }
+
+    // Confirm scan dialog
+    if (confirmScan) {
+        AlertDialog(
+            onDismissRequest = { confirmScan = false },
+            title = { Text("Quantity received") },
+            text = {
+                Column {
+                    Text(if (scannedUnit == "PACK") "Packs of $scannedPackSize" else "Pieces")
+                    OutlinedTextField(
+                        value = scannedQuantity,
+                        onValueChange = { scannedQuantity = it.filter(Char::isDigit) },
+                        label = { Text("Quantity") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val qty = scannedQuantity.toIntOrNull() ?: 0
+                    if (qty > 0 && qty.toLong() * scannedPackSize <= Int.MAX_VALUE) {
+                        piecesStr = (qty * if (scannedUnit == "PACK") scannedPackSize else 1).toString()
+                        confirmScan = false
+                    }
+                }) {
+                    Text("Use quantity")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmScan = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Inline Add Supplier Dialog
+    if (showAddSupplierInlineDialog) {
+        var inlineSupplierName by remember { mutableStateOf("") }
+        var inlineSupplierPhone by remember { mutableStateOf("") }
+        var inlineSupplierNotes by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddSupplierInlineDialog = false },
+            title = { Text("Add New Supplier", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = inlineSupplierName,
+                        onValueChange = { inlineSupplierName = it },
+                        label = { Text("Supplier / Company Name *") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = inlineSupplierPhone,
+                        onValueChange = { inlineSupplierPhone = it },
+                        label = { Text("Phone Number") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = inlineSupplierNotes,
+                        onValueChange = { inlineSupplierNotes = it },
+                        label = { Text("Notes / Address") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = inlineSupplierName.trim()
+                        if (trimmed.isNotBlank()) {
+                            val newSup = SupplierEntity(
+                                id = java.util.UUID.randomUUID().toString(),
+                                name = trimmed,
+                                phone = inlineSupplierPhone.trim().ifBlank { null },
+                                notes = inlineSupplierNotes.trim().ifBlank { null }
+                            )
+                            onAddSupplier(newSup) { created ->
+                                selectedSupplier = created
+                                supplierName = created.name
+                                showAddSupplierInlineDialog = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("Save Supplier")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showAddSupplierInlineDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Camera Barcode Scanner Dialog
     if (showBarcodeScanner) {
         Dialog(onDismissRequest = { showBarcodeScanner = false }) {
@@ -1256,9 +1778,17 @@ fun IntegratedAddStockProductDialog(
                                                             if (showBarcodeScanner) {
                                                                 showBarcodeScanner = false
                                                                 onResolveBarcode(scannedCode) { product, unit, count ->
-                                                                    scannedProduct = product; scannedUnit = unit; scannedPackSize = count
+                                                                    scannedProduct = product
+                                                                    scannedUnit = unit
+                                                                    scannedPackSize = count
                                                                     barcode = product?.barcode ?: scannedCode
-                                                                    if (product != null) { name = product.name; category = product.category; brand = product.brand ?: ""; costPerPieceStr = (product.movingAvgCostPaise / 100.0).toString(); sellingPieceStr = (product.sellingPricePiecePaise / 100.0).toString() }
+                                                                    if (product != null) {
+                                                                        name = product.name
+                                                                        category = product.category
+                                                                        brand = product.brand ?: ""
+                                                                        costPerPieceStr = (product.movingAvgCostPaise / 100.0).toString()
+                                                                        sellingPieceStr = (product.sellingPricePiecePaise / 100.0).toString()
+                                                                    }
                                                                     confirmScan = true
                                                                 }
                                                             }
