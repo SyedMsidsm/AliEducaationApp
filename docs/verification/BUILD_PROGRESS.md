@@ -16,8 +16,8 @@
 | **P2** | IMPORT-01: Staged import correctness (CellReader, CsvReader, Plan, Commit) | COMPLETED | `c2bcb1e` | Staged pipeline, zero silent defaults, 10MB/20k limit |
 | **P3** | BARCODE-01: Generator & labels (Crockford base-32, vector labels, 4 presets) | COMPLETED | `bf2f449` | 12-char codes, legacy alias, vector PDF |
 | **P4** | UI-01: Bill History redesign & DateRangePicker fix | COMPLETED | `13c7dd4` | Non-wrapping period chips, M3 DateRangePicker, sticky headers |
-| **P5** | UI-02: Cash In / Cash Out dialogs (`CashEntryForm`) | IN PROGRESS | | Amount-first, autofocus, FlowRow categories, UPI display label |
-| **P6** | UI-03: Add / Edit Stock dialog (fullscreen, sections, live summary) | PENDING | | Exact onSave compatibility, exact paise preview math |
+| **P5** | UI-02: Cash In / Cash Out dialogs (`CashEntryForm`) | COMPLETED | `eda19f4` | Amount-first, autofocus, FlowRow categories, UPI display label |
+| **P6** | UI-03: Add / Edit Stock dialog (fullscreen, sections, live summary) | IN PROGRESS | | Exact onSave compatibility, exact paise preview math |
 | **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | PENDING | | Synonym matching, DataStore mappings, error report xlsx |
 | **P8** | IMPORT-03: Template, export, import extras | PENDING | | Formula injection protection, label printing, import history |
 | **P9** | Wrap-up & version bump | PENDING | | versionCode +1, patch version bump, clean build verify |

@@ -1,5 +1,26 @@
 package com.alieducational.app.ui.reports
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import com.alieducational.app.ui.theme.AliDimens
+import com.alieducational.app.ui.theme.LocalAliStatusColors
+
+
+
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -114,11 +135,11 @@ import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import com.alieducational.app.util.AttachmentManager
 import kotlinx.coroutines.launch
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -922,7 +943,7 @@ fun CashTrackerScreen(
         }
     }
 
-    // Add Income / Expense Dialog with Dedicated Category Selector & Photo Attachment
+    // Add Income / Expense Dialog (Refactored to CashEntryForm & Pinned Actions)
     if (showAddDialog) {
         var amountStr by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
@@ -930,26 +951,26 @@ fun CashTrackerScreen(
         var note by remember { mutableStateOf("") }
         var entryTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-        // Category selection
         val defaultCat = activeCategories.firstOrNull { it.name == "General" } ?: activeCategories.firstOrNull()
         var selectedCatId by remember { mutableStateOf(defaultCat?.id ?: "") }
         var selectedCatName by remember { mutableStateOf(defaultCat?.name ?: "General") }
 
-        val selectedPigmyScheme = remember(selectedCatId, selectedCatName, activePigmySchemes) {
-            activePigmySchemes.firstOrNull { it.id == selectedCatId || it.name.equals(selectedCatName, ignoreCase = true) }
+        var noteSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+        LaunchedEffect(description, isIncomeMode) {
+            noteSuggestions = viewModel.getNoteSuggestions(isIncomeMode, description)
         }
 
         var showCreateCategoryDialog by remember { mutableStateOf(false) }
 
-        // Photo attachment
         var attachedPhotoUri by remember { mutableStateOf<Uri?>(null) }
         var tempCameraFile by remember { mutableStateOf<File?>(null) }
 
         val cameraLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.TakePicture()
         ) { success ->
-            if (success && tempCameraFile != null && tempCameraFile!!.exists() && tempCameraFile!!.length() > 0) {
-                attachedPhotoUri = Uri.fromFile(tempCameraFile)
+            val tempFile = tempCameraFile
+            if (success && tempFile != null && tempFile.exists() && tempFile.length() > 0) {
+                attachedPhotoUri = Uri.fromFile(tempFile)
             }
         }
 
@@ -962,511 +983,285 @@ fun CashTrackerScreen(
         }
 
         val dialogContext = LocalContext.current
-        val cal = Calendar.getInstance().apply { timeInMillis = entryTimestamp }
-        val entryDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(entryTimestamp))
-        val entryTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(entryTimestamp))
-        val isFuture = entryTimestamp > System.currentTimeMillis() + 60_000L
+        val parsedPaise = CostCalculator.parseRupeesToPaise(amountStr)
+        val canSave = parsedPaise != null && parsedPaise > 0L
 
-        AlertDialog(
+        fun doSave(keepOpen: Boolean) {
+            val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
+            if (amountPaise <= 0L) return
+
+            coroutineScope.launch {
+                var persistedPath: String? = null
+                if (attachedPhotoUri != null) {
+                    persistedPath = AttachmentManager.persistImageAttachment(context, attachedPhotoUri!!)
+                }
+
+                val selectedPigmyScheme = activePigmySchemes.firstOrNull {
+                    it.id == selectedCatId || it.name.equals(selectedCatName, ignoreCase = true)
+                }
+
+                if (selectedPigmyScheme != null) {
+                    val pigmyNote = buildString {
+                        if (description.isNotBlank() && description.trim() != selectedPigmyScheme.name) {
+                            append(description.trim())
+                        }
+                        if (note.isNotBlank()) {
+                            if (isNotEmpty()) append(" - ")
+                            append(note.trim())
+                        }
+                    }.ifBlank { null }
+
+                    if (isIncomeMode) {
+                        val destination = if (paymentMode == "CASH") "CASH" else "BANK"
+                        viewModel.recordPigmyWithdrawal(
+                            schemeId = selectedPigmyScheme.id,
+                            amountPaise = amountPaise,
+                            destination = destination,
+                            notes = pigmyNote,
+                            withdrawalTimestamp = entryTimestamp,
+                            attachmentUri = persistedPath,
+                            onDone = {
+                                if (keepOpen) {
+                                    amountStr = ""
+                                    description = ""
+                                    note = ""
+                                    attachedPhotoUri = null
+                                } else {
+                                    showAddDialog = false
+                                }
+                            },
+                            onError = { errMsg ->
+                                Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    } else {
+                        val paymentSource = if (paymentMode == "CASH") "CASH" else "BANK"
+                        viewModel.recordPigmyDeposit(
+                            schemeId = selectedPigmyScheme.id,
+                            amountPaise = amountPaise,
+                            paymentSource = paymentSource,
+                            notes = pigmyNote,
+                            paidTimestamp = entryTimestamp,
+                            attachmentUri = persistedPath,
+                            onDone = {
+                                if (keepOpen) {
+                                    amountStr = ""
+                                    description = ""
+                                    note = ""
+                                    attachedPhotoUri = null
+                                } else {
+                                    showAddDialog = false
+                                }
+                            }
+                        )
+                    }
+                } else {
+                    val entryNotes = buildString {
+                        if (description.isNotBlank()) append(description.trim())
+                        if (note.isNotBlank()) {
+                            if (isNotEmpty()) append(" - ")
+                            append(note.trim())
+                        }
+                    }.ifBlank { null }
+
+                    viewModel.recordShopExpense(
+                        category = selectedCatName,
+                        amountPaise = amountPaise,
+                        isIncome = isIncomeMode,
+                        notes = entryNotes,
+                        timestamp = entryTimestamp,
+                        categoryId = selectedCatId.ifBlank { null },
+                        attachmentUri = persistedPath,
+                        paymentMethod = paymentMode,
+                        onDone = {
+                            if (keepOpen) {
+                                amountStr = ""
+                                description = ""
+                                note = ""
+                                attachedPhotoUri = null
+                            } else {
+                                showAddDialog = false
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        Dialog(
             onDismissRequest = { showAddDialog = false },
-            title = {
-                Text(
-                    text = if (isIncomeMode) "Add Income (Cash In)" else "Add Expense (Cash Out)",
-                    fontWeight = FontWeight.Bold,
-                    color = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
-                )
-            },
-            text = {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    item {
-                        // Category Selector
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.92f)
+                    .padding(AliDimens.spacingSm),
+                shape = RoundedCornerShape(AliDimens.radiusLg),
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Title Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Category",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = if (isIncomeMode) "Add Income (Cash In)" else "Add Expense (Cash Out)",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            activeCategories.filter { it.name != "Pigmy" }.forEach { cat ->
-                                FilterChip(
-                                    selected = selectedPigmyScheme == null && (selectedCatId == cat.id || selectedCatName == cat.name),
-                                    onClick = {
-                                        selectedCatId = cat.id
-                                        selectedCatName = cat.name
-                                    },
-                                    label = { Text(cat.name, fontSize = 11.5.sp) }
-                                )
-                            }
-
-                            activePigmySchemes.forEach { scheme ->
-                                FilterChip(
-                                    selected = selectedPigmyScheme?.id == scheme.id || selectedPigmyScheme?.name == scheme.name,
-                                    onClick = {
-                                        selectedCatId = scheme.id
-                                        selectedCatName = scheme.name
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_pigmy_coin),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    },
-                                    label = { Text(scheme.name, fontSize = 11.5.sp) }
-                                )
-                            }
-
-                            // Add New Category Chip / Action
-                            OutlinedButton(
-                                onClick = { showCreateCategoryDialog = true },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("New Category", fontSize = 11.sp)
-                            }
-
-                            // Remove / Manage Categories Button
-                            OutlinedButton(
-                                onClick = { showManageCategoriesDialog = true },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(32.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Remove...", fontSize = 11.sp)
-                            }
+                        IconButton(onClick = { showAddDialog = false }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close")
                         }
                     }
+                    HorizontalDivider()
 
-                    if (selectedPigmyScheme != null) {
+                    // Scrollable Form Content
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd)
+                    ) {
                         item {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_pigmy_coin),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (isIncomeMode) {
-                                            "Pigmy Withdrawal: Will withdraw from ${selectedPigmyScheme.name} into shop cash."
-                                        } else {
-                                            "Pigmy Deposit: Will deposit into ${selectedPigmyScheme.name} from shop cash."
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
+                            CashEntryForm(
+                                isIncome = isIncomeMode,
+                                amountStr = amountStr,
+                                onAmountChange = { amountStr = it },
+                                categoryName = selectedCatName,
+                                categoryId = selectedCatId,
+                                onCategoryChange = { id, name ->
+                                    selectedCatId = id
+                                    selectedCatName = name
+                                },
+                                activeCategories = activeCategories,
+                                activePigmySchemes = activePigmySchemes,
+                                onOpenManageCategories = { showManageCategoriesDialog = true },
+                                onOpenNewCategory = { showCreateCategoryDialog = true },
+                                paymentMode = paymentMode,
+                                onPaymentModeChange = { paymentMode = it },
+                                entryTimestamp = entryTimestamp,
+                                onTimestampChange = { entryTimestamp = it },
+                                description = description,
+                                onDescriptionChange = { description = it },
+                                noteSuggestions = noteSuggestions,
+                                note = note,
+                                onNoteChange = { note = it },
+                                attachedPhotoUri = attachedPhotoUri,
+                                onTakeCamera = {
+                                    val (camUri, file) = AttachmentManager.createTempCameraUri(dialogContext)
+                                    tempCameraFile = file
+                                    cameraLauncher.launch(camUri)
+                                },
+                                onPickGallery = { galleryLauncher.launch("image/*") },
+                                onRemovePhoto = { attachedPhotoUri = null }
+                            )
                         }
                     }
 
-                    item {
-                        // Date & Time pickers
-                        Text(
-                            text = "Transaction Date & Time",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    HorizontalDivider()
+
+                    // Pinned Bottom Actions
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingSm)
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
                         ) {
                             OutlinedButton(
-                                onClick = {
-                                    DatePickerDialog(
-                                        dialogContext,
-                                        { _, y, m, d ->
-                                            val c = Calendar.getInstance().apply {
-                                                timeInMillis = entryTimestamp
-                                                set(Calendar.YEAR, y)
-                                                set(Calendar.MONTH, m)
-                                                set(Calendar.DAY_OF_MONTH, d)
-                                            }
-                                            entryTimestamp = c.timeInMillis
-                                        },
-                                        cal.get(Calendar.YEAR),
-                                        cal.get(Calendar.MONTH),
-                                        cal.get(Calendar.DAY_OF_MONTH)
-                                    ).show()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1.1f)
+                                onClick = { showAddDialog = false },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AliDimens.radiusSm)
                             ) {
-                                Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(entryDateStr, fontSize = 12.sp, maxLines = 1)
+                                Text("Cancel")
                             }
-
-                            OutlinedButton(
-                                onClick = {
-                                    TimePickerDialog(
-                                        dialogContext,
-                                        { _, hour, minute ->
-                                            val c = Calendar.getInstance().apply {
-                                                timeInMillis = entryTimestamp
-                                                set(Calendar.HOUR_OF_DAY, hour)
-                                                set(Calendar.MINUTE, minute)
-                                            }
-                                            entryTimestamp = c.timeInMillis
-                                        },
-                                        cal.get(Calendar.HOUR_OF_DAY),
-                                        cal.get(Calendar.MINUTE),
-                                        false
-                                    ).show()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(0.9f)
-                            ) {
-                                Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(entryTimeStr, fontSize = 12.sp, maxLines = 1)
-                            }
-                        }
-
-                        if (isFuture) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp)
-                            ) {
-                                Text(
-                                    text = "⚠️ Notice: This entry has a future date/time. It will be recorded with this timestamp.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.padding(8.dp)
+                            Button(
+                                onClick = { doSave(keepOpen = false) },
+                                enabled = canSave,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AliDimens.radiusSm),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                                 )
-                            }
-                        }
-                    }
-
-                    item {
-                        OutlinedTextField(
-                            value = amountStr,
-                            onValueChange = { amountStr = it },
-                            label = { Text("Amount (₹) *") },
-                            placeholder = { Text("0") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    item {
-                        var noteSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
-                        LaunchedEffect(description, isIncomeMode) {
-                            noteSuggestions = viewModel.getNoteSuggestions(isIncomeMode, description)
-                        }
-                        OutlinedTextField(
-                            value = description,
-                            onValueChange = { description = it },
-                            label = { Text("Description / Particulars (Optional)") },
-                            placeholder = { Text(if (isIncomeMode) "e.g. Counter Sales, Customer Payment" else "e.g. Office Rent, Electricity Bill, Tea") },
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (noteSuggestions.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                noteSuggestions.forEach { suggestion ->
-                                    SuggestionChip(
-                                        onClick = { description = suggestion },
-                                        label = { Text(suggestion, fontSize = 11.sp) }
-                                    )
-                                }
+                                Text("Save", fontWeight = FontWeight.Bold)
                             }
                         }
-                    }
-
-                    item {
-                        // Payment Mode Chips
-                        Text(
-                            text = "Payment Mode",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        TextButton(
+                            onClick = { doSave(keepOpen = true) },
+                            enabled = canSave,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            listOf("CASH" to "Cash", "GPAY" to "GPAY / UPI", "BANK" to "Bank").forEach { (key, label) ->
-                                FilterChip(
-                                    selected = paymentMode == key,
-                                    onClick = { paymentMode = key },
-                                    label = { Text(label, fontSize = 12.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-
-                    item {
-                        OutlinedTextField(
-                            value = note,
-                            onValueChange = { note = it },
-                            label = { Text("Extra Note (Optional)") },
-                            placeholder = { Text("Optional details / voucher #") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    item {
-                        // Optional Photo Attachment Section
-                        Text(
-                            text = "Receipt / Evidence Photo (Optional)",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        if (attachedPhotoUri != null) {
-                            // Show thumbnail with actions
-                            Card(
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Filled.Image,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Column {
-                                            Text("Photo Attached", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                            Text("Ready to save", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(onClick = {
-                                            val (camUri, file) = AttachmentManager.createTempCameraUri(dialogContext)
-                                            tempCameraFile = file
-                                            cameraLauncher.launch(camUri)
-                                        }) {
-                                            Text("Replace", fontSize = 11.sp)
-                                        }
-                                        IconButton(onClick = { attachedPhotoUri = null }) {
-                                            Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val (camUri, file) = AttachmentManager.createTempCameraUri(dialogContext)
-                                        tempCameraFile = file
-                                        cameraLauncher.launch(camUri)
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Take Photo", fontSize = 12.sp)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { galleryLauncher.launch("image/*") },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Filled.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Choose Photo", fontSize = 12.sp)
-                                }
-                            }
+                            Text("Save & add another")
                         }
                     }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val amountPaise = CostCalculator.parseRupeesToPaise(amountStr) ?: 0L
-                        if (amountPaise <= 0) return@Button
+            }
 
-                        val effectiveDescription = if (description.isNotBlank()) description.trim() else selectedCatName
+            // Sub-dialog: Add New Category
+            if (showCreateCategoryDialog) {
+                var newCatName by remember { mutableStateOf("") }
+                var catError by remember { mutableStateOf<String?>(null) }
 
-                        coroutineScope.launch {
-                            var persistedPath: String? = null
-                            if (attachedPhotoUri != null) {
-                                persistedPath = AttachmentManager.persistImageAttachment(context, attachedPhotoUri!!)
-                            }
-
-                            if (selectedPigmyScheme != null) {
-                                val pigmyNote = buildString {
-                                    if (description.isNotBlank() && description.trim() != selectedPigmyScheme.name) {
-                                        append(description.trim())
-                                    }
-                                    if (note.isNotBlank()) {
-                                        if (isNotEmpty()) append(" - ")
-                                        append(note.trim())
-                                    }
-                                }.ifBlank { null }
-
-                                if (isIncomeMode) {
-                                    val destination = if (paymentMode == "CASH") "CASH" else "BANK"
-                                    viewModel.recordPigmyWithdrawal(
-                                        schemeId = selectedPigmyScheme.id,
-                                        amountPaise = amountPaise,
-                                        destination = destination,
-                                        notes = pigmyNote,
-                                        withdrawalTimestamp = entryTimestamp,
-                                        attachmentUri = persistedPath,
-                                        onDone = { showAddDialog = false },
-                                        onError = { errMsg ->
-                                            Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
-                                        }
-                                    )
-                                } else {
-                                    val paymentSource = if (paymentMode == "CASH") "CASH" else "BANK"
-                                    viewModel.recordPigmyDeposit(
-                                        schemeId = selectedPigmyScheme.id,
-                                        amountPaise = amountPaise,
-                                        paymentSource = paymentSource,
-                                        notes = pigmyNote,
-                                        paidTimestamp = entryTimestamp,
-                                        attachmentUri = persistedPath,
-                                        onDone = { showAddDialog = false }
-                                    )
-                                }
-                            } else {
-                                val entryNotes = buildString {
-                                    if (description.isNotBlank()) append(description.trim())
-                                    if (note.isNotBlank()) {
-                                        if (isNotEmpty()) append(" - ")
-                                        append(note.trim())
-                                    }
-                                }.ifBlank { null }
-
-                                viewModel.recordShopExpense(
-                                    category = selectedCatName,
-                                    amountPaise = amountPaise,
-                                    isIncome = isIncomeMode,
-                                    notes = entryNotes,
-                                    timestamp = entryTimestamp,
-                                    categoryId = selectedCatId.ifBlank { null },
-                                    attachmentUri = persistedPath,
-                                    paymentMethod = paymentMode,
-                                    onDone = { showAddDialog = false }
-                                )
+                AlertDialog(
+                    onDismissRequest = { showCreateCategoryDialog = false },
+                    title = { Text("New Category") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Create a new organizational category for cash entries.")
+                            OutlinedTextField(
+                                value = newCatName,
+                                onValueChange = {
+                                    newCatName = it
+                                    catError = null
+                                },
+                                label = { Text("Category Name *") },
+                                placeholder = { Text("e.g. Repairs, Shipping, Tea") },
+                                singleLine = true,
+                                isError = catError != null,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (catError != null) {
+                                Text(catError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isIncomeMode) Color(0xFF2E7D32) else Color(0xFFD32F2F)
-                    )
-                ) {
-                    Text("Save", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showAddDialog = false }) {
-                    Text("Cancel")
-                }
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val trimmed = newCatName.trim()
+                                if (trimmed.isBlank()) {
+                                    catError = "Category name cannot be empty"
+                                    return@Button
+                                }
+                                if (activeCategories.any { it.name.equals(trimmed, ignoreCase = true) }) {
+                                    catError = "Category with this name already exists"
+                                    return@Button
+                                }
+                                viewModel.createCashCategory(trimmed) { newId ->
+                                    selectedCatId = newId
+                                    selectedCatName = trimmed
+                                    showCreateCategoryDialog = false
+                                }
+                            }
+                        ) {
+                            Text("Create & Select")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCreateCategoryDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
-        )
-
-        // Sub-dialog: Add New Category (Preserves parent form intact)
-        if (showCreateCategoryDialog) {
-            var newCatName by remember { mutableStateOf("") }
-            var catError by remember { mutableStateOf<String?>(null) }
-
-            AlertDialog(
-                onDismissRequest = { showCreateCategoryDialog = false },
-                title = { Text("New Category") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Create a new organizational category for cash entries.")
-                        OutlinedTextField(
-                            value = newCatName,
-                            onValueChange = {
-                                newCatName = it
-                                catError = null
-                            },
-                            label = { Text("Category Name *") },
-                            placeholder = { Text("e.g. Repairs, Shipping, Tea") },
-                            singleLine = true,
-                            isError = catError != null,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (catError != null) {
-                            Text(catError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val trimmed = newCatName.trim()
-                            if (trimmed.isBlank()) {
-                                catError = "Category name cannot be empty"
-                                return@Button
-                            }
-                            if (activeCategories.any { it.name.equals(trimmed, ignoreCase = true) }) {
-                                catError = "Category with this name already exists"
-                                return@Button
-                            }
-                            viewModel.createCashCategory(trimmed) { newId ->
-                                selectedCatId = newId
-                                selectedCatName = trimmed
-                                showCreateCategoryDialog = false
-                            }
-                        }
-                    ) {
-                        Text("Create & Select")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showCreateCategoryDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
         }
     }
 
@@ -1670,214 +1465,148 @@ fun CashTrackerScreen(
         )
     }
 
-    // ── EDIT TRANSACTION DIALOG (Section 3) ──────────────────────
+    // ── EDIT TRANSACTION DIALOG (Section 3 - Refactored to CashEntryForm) ──────
     itemToEdit?.let { targetEntry ->
-        var editAmountStr by remember { mutableStateOf((targetEntry.amountPaise / 100.0).toString().removeSuffix(".0")) }
-        var editCategory by remember { mutableStateOf(targetEntry.category) }
+        var editAmountStr by remember {
+            mutableStateOf(
+                if (targetEntry.amountPaise % 100L == 0L) {
+                    (targetEntry.amountPaise / 100L).toString()
+                } else {
+                    String.format(Locale.US, "%.2f", targetEntry.amountPaise / 100.0)
+                }
+            )
+        }
+        var editCategoryName by remember { mutableStateOf(targetEntry.category) }
+        var editCategoryId by remember {
+            mutableStateOf(
+                targetEntry.categoryId ?: activeCategories.firstOrNull { it.name.equals(targetEntry.category, ignoreCase = true) }?.id ?: ""
+            )
+        }
         var editPaymentMode by remember { mutableStateOf(targetEntry.paymentMethod) }
-        var editNotes by remember { mutableStateOf(targetEntry.notes ?: "") }
+        var editDescription by remember { mutableStateOf(targetEntry.notes ?: "") }
+        var editNote by remember { mutableStateOf("") }
         var editTimestamp by remember { mutableLongStateOf(targetEntry.timestamp) }
         var editNoteSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
 
-        val editDialogContext = LocalContext.current
-        val editCal = Calendar.getInstance().apply { timeInMillis = editTimestamp }
-        val editDateStr = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(editTimestamp))
-        val editTimeStr = SimpleDateFormat("hh:mm a", Locale.US).format(Date(editTimestamp))
-
-        LaunchedEffect(editNotes) {
-            editNoteSuggestions = viewModel.getNoteSuggestions(targetEntry.isIncome, editNotes)
+        LaunchedEffect(editDescription) {
+            editNoteSuggestions = viewModel.getNoteSuggestions(targetEntry.isIncome, editDescription)
         }
 
-        AlertDialog(
+        val canSaveEdit = CostCalculator.parseRupeesToPaise(editAmountStr)?.let { it > 0L } == true
+
+        Dialog(
             onDismissRequest = { itemToEdit = null },
-            title = {
-                Text(
-                    text = "Edit Transaction",
-                    fontWeight = FontWeight.Bold,
-                    color = if (targetEntry.isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F)
-                )
-            },
-            text = {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    item {
-                        OutlinedTextField(
-                            value = editAmountStr,
-                            onValueChange = { editAmountStr = it },
-                            label = { Text("Amount (₹) *") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    item {
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.88f)
+                    .padding(AliDimens.spacingSm),
+                shape = RoundedCornerShape(AliDimens.radiusLg),
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Category",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "Edit Transaction",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = if (targetEntry.isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                         )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            activeCategories.forEach { cat ->
-                                FilterChip(
-                                    selected = editCategory == cat.name,
-                                    onClick = { editCategory = cat.name },
-                                    label = { Text(cat.name, fontSize = 11.5.sp) }
-                                )
-                            }
+                        IconButton(onClick = { itemToEdit = null }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close")
                         }
                     }
+                    HorizontalDivider()
 
-                    item {
-                        Text(
-                            text = "Payment Mode",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf("CASH" to "Cash", "GPAY" to "GPAY / UPI", "BANK" to "Bank").forEach { (key, label) ->
-                                FilterChip(
-                                    selected = editPaymentMode.equals(key, ignoreCase = true),
-                                    onClick = { editPaymentMode = key },
-                                    label = { Text(label, fontSize = 12.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-
-                    item {
-                        Text(
-                            text = "Transaction Date & Time",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    DatePickerDialog(
-                                        editDialogContext,
-                                        { _, y, m, d ->
-                                            val c = Calendar.getInstance().apply {
-                                                timeInMillis = editTimestamp
-                                                set(Calendar.YEAR, y)
-                                                set(Calendar.MONTH, m)
-                                                set(Calendar.DAY_OF_MONTH, d)
-                                            }
-                                            editTimestamp = c.timeInMillis
-                                        },
-                                        editCal.get(Calendar.YEAR),
-                                        editCal.get(Calendar.MONTH),
-                                        editCal.get(Calendar.DAY_OF_MONTH)
-                                    ).show()
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd)
+                    ) {
+                        item {
+                            CashEntryForm(
+                                isIncome = targetEntry.isIncome,
+                                amountStr = editAmountStr,
+                                onAmountChange = { editAmountStr = it },
+                                categoryName = editCategoryName,
+                                categoryId = editCategoryId,
+                                onCategoryChange = { id, name ->
+                                    editCategoryId = id
+                                    editCategoryName = name
                                 },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1.1f)
-                            ) {
-                                Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(editDateStr, fontSize = 12.sp, maxLines = 1)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    TimePickerDialog(
-                                        editDialogContext,
-                                        { _, hour, minute ->
-                                            val c = Calendar.getInstance().apply {
-                                                timeInMillis = editTimestamp
-                                                set(Calendar.HOUR_OF_DAY, hour)
-                                                set(Calendar.MINUTE, minute)
-                                            }
-                                            editTimestamp = c.timeInMillis
-                                        },
-                                        editCal.get(Calendar.HOUR_OF_DAY),
-                                        editCal.get(Calendar.MINUTE),
-                                        false
-                                    ).show()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(0.9f)
-                            ) {
-                                Icon(Icons.Filled.AccessTime, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(editTimeStr, fontSize = 12.sp, maxLines = 1)
-                            }
+                                activeCategories = activeCategories,
+                                activePigmySchemes = activePigmySchemes,
+                                onOpenManageCategories = { showManageCategoriesDialog = true },
+                                onOpenNewCategory = {},
+                                paymentMode = editPaymentMode,
+                                onPaymentModeChange = { editPaymentMode = it },
+                                entryTimestamp = editTimestamp,
+                                onTimestampChange = { editTimestamp = it },
+                                description = editDescription,
+                                onDescriptionChange = { editDescription = it },
+                                noteSuggestions = editNoteSuggestions,
+                                note = editNote,
+                                onNoteChange = { editNote = it },
+                                attachedPhotoUri = null,
+                                onTakeCamera = {},
+                                onPickGallery = {},
+                                onRemovePhoto = {}
+                            )
                         }
                     }
 
-                    item {
-                        OutlinedTextField(
-                            value = editNotes,
-                            onValueChange = { editNotes = it },
-                            label = { Text("Description / Notes") },
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (editNoteSuggestions.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                editNoteSuggestions.forEach { suggestion ->
-                                    SuggestionChip(
-                                        onClick = { editNotes = suggestion },
-                                        label = { Text(suggestion, fontSize = 11.sp) }
-                                    )
+                    HorizontalDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd),
+                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                    ) {
+                        OutlinedButton(
+                            onClick = { itemToEdit = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = {
+                                val parsedPaise = CostCalculator.parseRupeesToPaise(editAmountStr) ?: 0L
+                                if (parsedPaise <= 0L) {
+                                    Toast.makeText(context, "Enter a valid positive amount", Toast.LENGTH_SHORT).show()
+                                    return@Button
                                 }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val parsed = editAmountStr.toDoubleOrNull() ?: 0.0
-                        if (parsed <= 0.0) {
-                            Toast.makeText(editDialogContext, "Enter a valid positive amount", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        val amountPaise = (parsed * 100).toLong()
-                        viewModel.updateShopExpense(
-                            id = targetEntry.id,
-                            amountPaise = amountPaise,
-                            category = editCategory,
-                            paymentMethod = editPaymentMode,
-                            notes = editNotes.trim().ifBlank { null },
-                            timestamp = editTimestamp,
-                            attachmentUri = targetEntry.attachmentUri
+                                viewModel.updateShopExpense(
+                                    id = targetEntry.id,
+                                    amountPaise = parsedPaise,
+                                    category = editCategoryName,
+                                    paymentMethod = editPaymentMode,
+                                    notes = editDescription.trim().ifBlank { null },
+                                    timestamp = editTimestamp,
+                                    attachmentUri = targetEntry.attachmentUri
+                                ) {
+                                    itemToEdit = null
+                                }
+                            },
+                            enabled = canSaveEdit,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
                         ) {
-                            itemToEdit = null
+                            Text("Save Changes", fontWeight = FontWeight.Bold)
                         }
                     }
-                ) {
-                    Text("Save Changes")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { itemToEdit = null }) {
-                    Text("Cancel")
                 }
             }
-        )
+        }
     }
 
     // Void / Delete Entry Dialog
@@ -2448,4 +2177,401 @@ fun CashTrackerExportPreviewDialog(
             }
         }
     )
+}
+
+
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun CashEntryForm(
+    isIncome: Boolean,
+    amountStr: String,
+    onAmountChange: (String) -> Unit,
+    categoryName: String,
+    categoryId: String,
+    onCategoryChange: (id: String, name: String) -> Unit,
+    activeCategories: List<CashCategoryEntity>,
+    activePigmySchemes: List<PigmySchemeEntity>,
+    onOpenManageCategories: () -> Unit,
+    onOpenNewCategory: () -> Unit,
+    paymentMode: String,
+    onPaymentModeChange: (String) -> Unit,
+    entryTimestamp: Long,
+    onTimestampChange: (Long) -> Unit,
+    description: String,
+    onDescriptionChange: (String) -> Unit,
+    noteSuggestions: List<String>,
+    note: String,
+    onNoteChange: (String) -> Unit,
+    attachedPhotoUri: Uri?,
+    onTakeCamera: () -> Unit,
+    onPickGallery: () -> Unit,
+    onRemovePhoto: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+    val parsedPaise = CostCalculator.parseRupeesToPaise(amountStr)
+    val isAmountValid = parsedPaise != null && parsedPaise > 0L
+    val isAmountTouched = amountStr.isNotEmpty()
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(AliDimens.spacingMd)
+    ) {
+        // 1. Amount First
+        OutlinedTextField(
+            value = amountStr,
+            onValueChange = onAmountChange,
+            label = { Text("Amount (₹) *") },
+            placeholder = { Text("0.00") },
+            textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+            isError = isAmountTouched && !isAmountValid,
+            supportingText = {
+                if (isAmountValid) {
+                    Text(
+                        CostCalculator.formatPaiseToRupees(parsedPaise!!),
+                        fontWeight = FontWeight.Bold,
+                        color = if (isIncome) Color(0xFF2E7D32) else Color(0xFFD32F2F)
+                    )
+                } else if (isAmountTouched) {
+                    Text("Enter a valid positive amount", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .semantics { contentDescription = "Amount in rupees" }
+        )
+
+        // 2. Categories as FlowRow chips
+        Column(verticalArrangement = Arrangement.spacedBy(AliDimens.spacingXs)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Category",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = onOpenManageCategories,
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("⚙ Manage", fontSize = 12.sp)
+                }
+            }
+
+            val selectedPigmyScheme = remember(categoryId, categoryName, activePigmySchemes) {
+                activePigmySchemes.firstOrNull { it.id == categoryId || it.name.equals(categoryName, ignoreCase = true) }
+            }
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                activeCategories.filter { it.name != "Pigmy" }.forEach { cat ->
+                    FilterChip(
+                        selected = selectedPigmyScheme == null && (categoryId == cat.id || categoryName == cat.name),
+                        onClick = { onCategoryChange(cat.id, cat.name) },
+                        label = { Text(cat.name, fontSize = AliDimens.minChipTextSize) }
+                    )
+                }
+
+                activePigmySchemes.forEach { scheme ->
+                    FilterChip(
+                        selected = selectedPigmyScheme?.id == scheme.id || selectedPigmyScheme?.name == scheme.name,
+                        onClick = { onCategoryChange(scheme.id, scheme.name) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_pigmy_coin),
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        label = { Text(scheme.name, fontSize = AliDimens.minChipTextSize) }
+                    )
+                }
+
+                FilterChip(
+                    selected = false,
+                    onClick = onOpenNewCategory,
+                    leadingIcon = {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    },
+                    label = { Text("New", fontSize = AliDimens.minChipTextSize) }
+                )
+            }
+
+            if (selectedPigmyScheme != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(AliDimens.radiusSm),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(AliDimens.spacingSm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_pigmy_coin),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(AliDimens.spacingSm))
+                        Text(
+                            text = if (isIncome) {
+                                "Pigmy Withdrawal: Will withdraw from ${selectedPigmyScheme.name} into shop cash."
+                            } else {
+                                "Pigmy Deposit: Will deposit into ${selectedPigmyScheme.name} from shop cash."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Payment Mode Segmented Control
+        Column(verticalArrangement = Arrangement.spacedBy(AliDimens.spacingXs)) {
+            Text(
+                text = "Payment Mode",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                val paymentOptions = listOf("CASH" to "Cash", "GPAY" to "UPI", "BANK" to "Bank")
+                paymentOptions.forEachIndexed { index, (key, label) ->
+                    SegmentedButton(
+                        selected = paymentMode.equals(key, ignoreCase = true),
+                        onClick = { onPaymentModeChange(key) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = paymentOptions.size)
+                    ) {
+                        Text(label, maxLines = 1, softWrap = false, fontSize = AliDimens.minChipTextSize)
+                    }
+                }
+            }
+        }
+
+        // 4. Compact Date and Time Row
+        val context = LocalContext.current
+        val cal = remember(entryTimestamp) { Calendar.getInstance().apply { timeInMillis = entryTimestamp } }
+        val entryDateStr = remember(entryTimestamp) { SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(entryTimestamp)) }
+        val entryTimeStr = remember(entryTimestamp) { SimpleDateFormat("hh:mm a", Locale.US).format(Date(entryTimestamp)) }
+        val isFuture = entryTimestamp > System.currentTimeMillis() + 60_000L
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(AliDimens.radiusSm))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(horizontal = AliDimens.spacingMd, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CalendarToday, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "$entryDateStr • $entryTimeStr",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        DatePickerDialog(
+                            context,
+                            { _, y, m, d ->
+                                val c = Calendar.getInstance().apply {
+                                    timeInMillis = entryTimestamp
+                                    set(Calendar.YEAR, y)
+                                    set(Calendar.MONTH, m)
+                                    set(Calendar.DAY_OF_MONTH, d)
+                                }
+                                TimePickerDialog(
+                                    context,
+                                    { _, hour, minute ->
+                                        c.set(Calendar.HOUR_OF_DAY, hour)
+                                        c.set(Calendar.MINUTE, minute)
+                                        onTimestampChange(c.timeInMillis)
+                                    },
+                                    c.get(Calendar.HOUR_OF_DAY),
+                                    c.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            },
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH),
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text("Change", fontSize = 12.sp)
+                }
+            }
+
+            if (isFuture) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(AliDimens.radiusSm),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⚠️ Notice: This entry has a future date/time. It will be recorded with this timestamp.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(AliDimens.spacingSm)
+                    )
+                }
+            }
+        }
+
+        // 5. Description / Particulars
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedTextField(
+                value = description,
+                onValueChange = onDescriptionChange,
+                label = { Text("Description (Optional)") },
+                placeholder = { Text(if (isIncome) "e.g. Counter Sales, Customer Payment" else "e.g. Office Rent, Electricity, Tea") },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (noteSuggestions.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    noteSuggestions.forEach { suggestion ->
+                        SuggestionChip(
+                            onClick = { onDescriptionChange(suggestion) },
+                            label = { Text(suggestion, fontSize = 11.sp) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 6. Collapsible More Details (Extra Note, Receipt Photo)
+        var expandedDetails by remember { mutableStateOf(attachedPhotoUri != null || note.isNotBlank()) }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AliDimens.radiusSm))
+                .clickable { expandedDetails = !expandedDetails }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (expandedDetails) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "More details (extra note, receipt photo)",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        if (expandedDetails) {
+            OutlinedTextField(
+                value = note,
+                onValueChange = onNoteChange,
+                label = { Text("Extra Note (Optional)") },
+                placeholder = { Text("Optional details / voucher #") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(
+                text = "Receipt / Evidence Photo (Optional)",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (attachedPhotoUri != null) {
+                Card(
+                    shape = RoundedCornerShape(AliDimens.radiusSm),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(AliDimens.spacingSm),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Image,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Photo Attached", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("Ready to save", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onTakeCamera) {
+                                Text("Replace", fontSize = 11.sp)
+                            }
+                            IconButton(onClick = onRemovePhoto) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Remove photo", tint = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                ) {
+                    OutlinedButton(
+                        onClick = onTakeCamera,
+                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Take Photo", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                    }
+
+                    OutlinedButton(
+                        onClick = onPickGallery,
+                        shape = RoundedCornerShape(AliDimens.radiusSm),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Choose Photo", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+        }
+    }
 }
