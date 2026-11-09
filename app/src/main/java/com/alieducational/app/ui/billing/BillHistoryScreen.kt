@@ -1,8 +1,6 @@
 package com.alieducational.app.ui.billing
 
-import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,9 +30,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoneyOff
 import androidx.compose.material.icons.filled.Payment
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Search
@@ -41,7 +40,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -57,7 +57,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -75,12 +78,27 @@ import com.alieducational.app.data.local.entity.SaleLineEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import com.alieducational.app.ui.BulkResult
+import com.alieducational.app.ui.theme.AliDimens
+import com.alieducational.app.ui.theme.LocalAliStatusColors
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+fun utcPickerMillisToLocalStart(ms: Long): Long =
+    Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate()
+        .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+fun utcPickerMillisToLocalEnd(ms: Long): Long =
+    Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate()
+        .plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() - 1
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun BillHistoryScreen(
     viewModel: AliViewModel,
@@ -98,6 +116,7 @@ fun BillHistoryScreen(
 
     var showVoidConfirmDialog by remember { mutableStateOf(false) }
     var bulkResult by remember { mutableStateOf<BulkResult?>(null) }
+    var showDateRangePicker by remember { mutableStateOf(false) }
 
     BackHandler {
         if (selectedBillIds.isNotEmpty()) {
@@ -111,7 +130,7 @@ fun BillHistoryScreen(
     var selectedPeriod by remember { mutableStateOf("Today") } // Today, This Week, This Month, All Time, Custom
     var selectedStatus by remember { mutableStateOf("All") } // All, Paid, Due, Voided
 
-    // Custom date range bounds
+    // Custom date range bounds (in local epoch millis)
     var customStartDate by remember { mutableStateOf<Long?>(null) }
     var customEndDate by remember { mutableStateOf<Long?>(null) }
 
@@ -120,53 +139,55 @@ fun BillHistoryScreen(
 
     // Calculate time interval
     val now = System.currentTimeMillis()
-    val calendar = Calendar.getInstance()
-    val (startTime, endTime) = when (selectedPeriod) {
-        "Today" -> {
-            calendar.timeInMillis = now
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val start = calendar.timeInMillis
-            calendar.set(Calendar.HOUR_OF_DAY, 23)
-            calendar.set(Calendar.MINUTE, 59)
-            calendar.set(Calendar.SECOND, 59)
-            calendar.set(Calendar.MILLISECOND, 999)
-            Pair(start, calendar.timeInMillis)
+    val (startTime, endTime) = remember(selectedPeriod, customStartDate, customEndDate, now) {
+        val calendar = Calendar.getInstance()
+        when (selectedPeriod) {
+            "Today" -> {
+                calendar.timeInMillis = now
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                val start = calendar.timeInMillis
+                calendar.set(Calendar.HOUR_OF_DAY, 23)
+                calendar.set(Calendar.MINUTE, 59)
+                calendar.set(Calendar.SECOND, 59)
+                calendar.set(Calendar.MILLISECOND, 999)
+                Pair(start, calendar.timeInMillis)
+            }
+            "This Week" -> {
+                calendar.timeInMillis = now
+                calendar.set(Calendar.DAY_OF_WEEK, calendar.firstDayOfWeek)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                val start = calendar.timeInMillis
+                Pair(start, now)
+            }
+            "This Month" -> {
+                calendar.timeInMillis = now
+                calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                val start = calendar.timeInMillis
+                Pair(start, now)
+            }
+            "Custom" -> {
+                val s = customStartDate ?: 0L
+                val e = customEndDate ?: Long.MAX_VALUE
+                Pair(s, e)
+            }
+            else -> Pair(0L, Long.MAX_VALUE) // All Time
         }
-        "This Week" -> {
-            calendar.timeInMillis = now
-            calendar.set(Calendar.DAY_OF_WEEK, calendar.firstDayOfWeek)
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val start = calendar.timeInMillis
-            Pair(start, now)
-        }
-        "This Month" -> {
-            calendar.timeInMillis = now
-            calendar.set(Calendar.DAY_OF_MONTH, 1)
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val start = calendar.timeInMillis
-            Pair(start, now)
-        }
-        "Custom" -> {
-            val s = customStartDate ?: 0L
-            val e = customEndDate ?: Long.MAX_VALUE
-            Pair(s, e)
-        }
-        else -> Pair(0L, Long.MAX_VALUE) // All Time
     }
 
     val displayDateRangeText = remember(selectedPeriod, startTime, endTime) {
         val df = SimpleDateFormat("dd MMM yyyy", Locale.US)
         when (selectedPeriod) {
-            "Today" -> df.format(Date())
+            "Today" -> "Today • ${df.format(Date(now))}"
             "This Week", "This Month", "Custom" -> {
                 if (startTime == 0L && endTime == Long.MAX_VALUE) "All Time"
                 else "${df.format(Date(startTime))} - ${df.format(Date(minOf(endTime, now)))}"
@@ -175,21 +196,27 @@ fun BillHistoryScreen(
         }
     }
 
-    // Filtered sales
-    val filteredSales = remember(allSales, startTime, endTime, searchQuery, selectedStatus) {
+    // Time + Search filtered sales (used for counts)
+    val timeAndSearchFilteredSales = remember(allSales, startTime, endTime, searchQuery) {
         allSales.filter { sale ->
             val matchesTime = sale.timestamp in startTime..endTime
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 sale.receiptNumber.contains(searchQuery, ignoreCase = true) ||
                         (sale.customerName?.contains(searchQuery, ignoreCase = true) == true)
             }
-            val matchesStatus = when (selectedStatus) {
+            matchesTime && matchesSearch
+        }
+    }
+
+    // Filtered sales including status
+    val filteredSales = remember(timeAndSearchFilteredSales, selectedStatus) {
+        timeAndSearchFilteredSales.filter { sale ->
+            when (selectedStatus) {
                 "Paid" -> !sale.isVoided && sale.remainingCreditPaise == 0L
                 "Due" -> !sale.isVoided && sale.remainingCreditPaise > 0L
                 "Voided" -> sale.isVoided
                 else -> true
             }
-            matchesTime && matchesSearch && matchesStatus
         }
     }
 
@@ -197,12 +224,38 @@ fun BillHistoryScreen(
         filteredSales.take(displayLimit)
     }
 
+    // Status counts for chips
+    val allCount = timeAndSearchFilteredSales.size
+    val paidCount = remember(timeAndSearchFilteredSales) {
+        timeAndSearchFilteredSales.count { !it.isVoided && it.remainingCreditPaise == 0L }
+    }
+    val dueCount = remember(timeAndSearchFilteredSales) {
+        timeAndSearchFilteredSales.count { !it.isVoided && it.remainingCreditPaise > 0L }
+    }
+    val voidedCount = remember(timeAndSearchFilteredSales) {
+        timeAndSearchFilteredSales.count { it.isVoided }
+    }
+
     val completedBills = filteredSales.filter { !it.isVoided }
     val totalBilledPaise = completedBills.sumOf { it.netTotalPaise }
     val totalCollectedPaise = completedBills.sumOf { it.amountReceivedPaise }
     val totalDuesPaise = completedBills.sumOf { it.remainingCreditPaise }
 
+    val statusColors = LocalAliStatusColors.current
+
+    // Grouping by local date
+    val groupedSales = remember(visibleSales) {
+        visibleSales.groupBy { sale ->
+            Instant.ofEpochMilli(sale.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+        }
+    }
+
+    val todayDate = remember { LocalDate.now() }
+    val yesterdayDate = remember { LocalDate.now().minusDays(1) }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US) }
+
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (selectedBillIds.isNotEmpty()) {
                 TopAppBar(
@@ -281,59 +334,61 @@ fun BillHistoryScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(horizontal = AliDimens.spacingLg),
+                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
             ) {
                 item {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(AliDimens.spacingXs))
 
-                    // Period Selector Chips
-                    Row(
+                    // Period Selector Chips (Non-wrapping LazyRow)
+                    LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
                     ) {
-                        listOf("Today", "This Week", "This Month", "All Time", "Custom").forEach { period ->
+                        items(listOf("Today", "This Week", "This Month", "All Time")) { period ->
                             FilterChip(
                                 selected = selectedPeriod == period,
+                                onClick = { selectedPeriod = period },
+                                label = { Text(period, maxLines = 1, softWrap = false, fontSize = AliDimens.minChipTextSize) }
+                            )
+                        }
+                        item {
+                            val customChipLabel = if (customStartDate != null && customEndDate != null && selectedPeriod == "Custom") {
+                                val df = SimpleDateFormat("dd MMM", Locale.US)
+                                "${df.format(Date(customStartDate!!))} - ${df.format(Date(customEndDate!!))}"
+                            } else {
+                                "Custom"
+                            }
+                            FilterChip(
+                                selected = selectedPeriod == "Custom",
                                 onClick = {
-                                    selectedPeriod = period
-                                    if (period == "Custom" && customStartDate == null) {
-                                        val c = Calendar.getInstance()
-                                        DatePickerDialog(
-                                            context,
-                                            { _, y, m, d ->
-                                                val startCal = Calendar.getInstance().apply {
-                                                    set(y, m, d, 0, 0, 0)
-                                                    set(Calendar.MILLISECOND, 0)
-                                                }
-                                                customStartDate = startCal.timeInMillis
-
-                                                DatePickerDialog(
-                                                    context,
-                                                    { _, ey, em, ed ->
-                                                        val endCal = Calendar.getInstance().apply {
-                                                            set(ey, em, ed, 23, 59, 59)
-                                                            set(Calendar.MILLISECOND, 999)
-                                                        }
-                                                        customEndDate = endCal.timeInMillis
-                                                    },
-                                                    y, m, d
-                                                ).show()
-                                            },
-                                            c.get(Calendar.YEAR),
-                                            c.get(Calendar.MONTH),
-                                            c.get(Calendar.DAY_OF_MONTH)
-                                        ).show()
-                                    }
+                                    showDateRangePicker = true
                                 },
-                                label = { Text(period, fontSize = 12.sp) }
+                                leadingIcon = {
+                                    Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                trailingIcon = if (selectedPeriod == "Custom" && customStartDate != null) {
+                                    {
+                                        IconButton(
+                                            onClick = {
+                                                customStartDate = null
+                                                customEndDate = null
+                                                selectedPeriod = "Today"
+                                            },
+                                            modifier = Modifier.size(16.dp)
+                                        ) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Clear custom date", modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                } else null,
+                                label = { Text(customChipLabel, maxLines = 1, softWrap = false, fontSize = AliDimens.minChipTextSize) }
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(AliDimens.spacingSm))
 
-                    // Search & Status Row
+                    // Search Field
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -343,132 +398,222 @@ fun BillHistoryScreen(
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Clear")
+                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
                                 }
                             }
                         },
                         singleLine = true,
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(AliDimens.radiusSm)
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AliDimens.spacingSm))
 
-                    // Status Chips
-                    Row(
+                    // Status Chips with counts
+                    LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
                     ) {
-                        listOf("All", "Paid", "Due", "Voided").forEach { st ->
+                        val statusItems = listOf(
+                            Pair("All", allCount),
+                            Pair("Paid", paidCount),
+                            Pair("Due", dueCount),
+                            Pair("Voided", voidedCount)
+                        )
+                        items(statusItems) { (st, count) ->
                             FilterChip(
                                 selected = selectedStatus == st,
                                 onClick = { selectedStatus = st },
-                                label = { Text(st, fontSize = 12.sp) }
+                                label = { Text("$st ($count)", maxLines = 1, softWrap = false, fontSize = AliDimens.minChipTextSize) }
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AliDimens.spacingSm))
 
-                    // Financial Metrics Banner
+                    // Financial Hero Summary Card (Clickable to filter to Due)
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selectedStatus = if (selectedStatus == "Due") "All" else "Due"
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        ),
+                        shape = RoundedCornerShape(AliDimens.radiusMd)
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column(modifier = Modifier.padding(AliDimens.spacingLg)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("Bills", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(
-                                        "${completedBills.size}",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                        "NET BILLED",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text("Net Billed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(
                                         CostCalculator.formatPaiseToRupees(totalBilledPaise),
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
+                                Text(
+                                    "${completedBills.size} bills",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(AliDimens.spacingSm))
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(AliDimens.spacingSm))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text("Total Collected", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                                    Text("Collected", style = MaterialTheme.typography.labelSmall, color = statusColors.paidFg)
                                     Text(
                                         CostCalculator.formatPaiseToRupees(totalCollectedPaise),
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF2E7D32)
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = statusColors.paidFg
                                     )
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text("Remaining Dues", style = MaterialTheme.typography.labelSmall, color = if (totalDuesPaise > 0) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Remaining Dues", style = MaterialTheme.typography.labelSmall, color = statusColors.dueFg)
                                     Text(
                                         CostCalculator.formatPaiseToRupees(totalDuesPaise),
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (totalDuesPaise > 0) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = if (totalDuesPaise > 0) statusColors.dueFg else MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(AliDimens.spacingXs))
                 }
 
-                // List of Bills
+                // List of Bills or Empty State
                 if (filteredSales.isEmpty()) {
                     item {
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                .padding(vertical = AliDimens.spacingLg),
+                            shape = RoundedCornerShape(AliDimens.radiusMd),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                    .padding(AliDimens.spacingXl),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(AliDimens.spacingMd)
                             ) {
-                                Text(
-                                    text = "No bills found in this period or filter.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                Icon(
+                                    Icons.Filled.Receipt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                 )
+                                Text(
+                                    text = if (selectedPeriod == "Today") "No bills today" else "No bills found for the selected filter",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                ) {
+                                    if (selectedPeriod != "This Week") {
+                                        Button(
+                                            onClick = { selectedPeriod = "This Week" },
+                                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                                        ) {
+                                            Text("View this week")
+                                        }
+                                    }
+                                    if (searchQuery.isNotEmpty() || selectedStatus != "All" || selectedPeriod != "Today") {
+                                        OutlinedButton(
+                                            onClick = {
+                                                searchQuery = ""
+                                                selectedStatus = "All"
+                                                selectedPeriod = "All Time"
+                                            },
+                                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                                        ) {
+                                            Text("Clear filters")
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 } else {
-                    items(visibleSales, key = { it.id }) { sale ->
-                        val isSelected = selectedBillIds.contains(sale.id)
-                        BillHistoryRow(
-                            sale = sale,
-                            isSelected = isSelected,
-                            isInSelectionMode = selectedBillIds.isNotEmpty(),
-                            onToggleSelect = { viewModel.toggleBillSelection(sale.id) },
-                            onLongClick = {
-                                if (isOwner) {
-                                    viewModel.toggleBillSelection(sale.id)
+                    // Grouped by day with stickyHeaders
+                    groupedSales.forEach { (localDate, daySales) ->
+                        val dayLabel = when (localDate) {
+                            todayDate -> "Today"
+                            yesterdayDate -> "Yesterday"
+                            else -> localDate.format(dateFormatter)
+                        }
+                        val dayTotalPaise = daySales.filter { !it.isVoided }.sumOf { it.netTotalPaise }
+
+                        stickyHeader(key = "header_${localDate}") {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = AliDimens.spacingXs),
+                                color = MaterialTheme.colorScheme.background
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(AliDimens.radiusSm))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .padding(horizontal = AliDimens.spacingMd, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = dayLabel,
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = CostCalculator.formatPaiseToRupees(dayTotalPaise),
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
-                            },
-                            onClick = { selectedSaleForDetail = sale },
-                            onRepay = { repaymentSaleTarget = sale },
-                            onOpenCustomer = {
-                                sale.customerId?.let { cId -> onNavigateToCustomerAccount(cId) }
                             }
-                        )
+                        }
+
+                        items(daySales, key = { it.id }) { sale ->
+                            val isSelected = selectedBillIds.contains(sale.id)
+                            BillHistoryRow(
+                                sale = sale,
+                                isSelected = isSelected,
+                                isInSelectionMode = selectedBillIds.isNotEmpty(),
+                                onToggleSelect = { viewModel.toggleBillSelection(sale.id) },
+                                onLongClick = {
+                                    if (isOwner) {
+                                        viewModel.toggleBillSelection(sale.id)
+                                    }
+                                },
+                                onClick = { selectedSaleForDetail = sale },
+                                onRepay = { repaymentSaleTarget = sale },
+                                onOpenCustomer = {
+                                    sale.customerId?.let { cId -> onNavigateToCustomerAccount(cId) }
+                                }
+                            )
+                        }
                     }
 
                     if (filteredSales.size > displayLimit) {
@@ -476,7 +621,7 @@ fun BillHistoryScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
+                                    .padding(vertical = AliDimens.spacingMd),
                                 contentAlignment = Alignment.Center
                             ) {
                                 OutlinedButton(
@@ -490,9 +635,55 @@ fun BillHistoryScreen(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(AliDimens.spacingXl))
                 }
             }
+        }
+    }
+
+    // Material 3 Date Range Picker Dialog
+    if (showDateRangePicker) {
+        val dateRangePickerState = rememberDateRangePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDateRangePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val startUtc = dateRangePickerState.selectedStartDateMillis
+                        val endUtc = dateRangePickerState.selectedEndDateMillis
+                        if (startUtc != null && endUtc != null) {
+                            customStartDate = utcPickerMillisToLocalStart(startUtc)
+                            customEndDate = utcPickerMillisToLocalEnd(endUtc)
+                            selectedPeriod = "Custom"
+                            showDateRangePicker = false
+                        }
+                    },
+                    enabled = dateRangePickerState.selectedStartDateMillis != null &&
+                            dateRangePickerState.selectedEndDateMillis != null
+                ) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDateRangePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DateRangePicker(
+                state = dateRangePickerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp),
+                title = {
+                    Text(
+                        "Select Date Range",
+                        modifier = Modifier.padding(start = 24.dp, top = 16.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
         }
     }
 
@@ -514,11 +705,11 @@ fun BillHistoryScreen(
                     ) {
                         Text(sale.receiptNumber, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         if (sale.isVoided) {
-                            Text("VOIDED", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("VOIDED", color = statusColors.voidFg, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         } else if (sale.remainingCreditPaise > 0) {
-                            Text("DUE", color = Color(0xFFD32F2F), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("DUE", color = statusColors.dueFg, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         } else {
-                            Text("PAID", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("PAID", color = statusColors.paidFg, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                     val dateFormatted = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date(sale.timestamp))
@@ -528,7 +719,7 @@ fun BillHistoryScreen(
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
                 ) {
                     // Customer Row
                     Row(
@@ -592,8 +783,8 @@ fun BillHistoryScreen(
                     }
                     if (sale.discountValuePaise > 0) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Discount:", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
-                            Text("-${CostCalculator.formatPaiseToRupees(sale.discountValuePaise)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
+                            Text("Discount:", style = MaterialTheme.typography.bodySmall, color = statusColors.paidFg)
+                            Text("-${CostCalculator.formatPaiseToRupees(sale.discountValuePaise)}", style = MaterialTheme.typography.bodySmall, color = statusColors.paidFg)
                         }
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -606,8 +797,8 @@ fun BillHistoryScreen(
                     }
                     if (sale.remainingCreditPaise > 0) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Remaining Due:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = Color(0xFFD32F2F))
-                            Text(CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = Color(0xFFD32F2F))
+                            Text("Remaining Due:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = statusColors.dueFg)
+                            Text(CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = statusColors.dueFg)
                         }
                     }
                 }
@@ -650,7 +841,7 @@ fun BillHistoryScreen(
                     )
                     Text(
                         "Remaining Due on Bill: ${CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise)}",
-                        color = Color(0xFFD32F2F),
+                        color = statusColors.dueFg,
                         fontWeight = FontWeight.Bold
                     )
 
@@ -884,6 +1075,28 @@ fun BillHistoryRow(
     onOpenCustomer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val statusColors = LocalAliStatusColors.current
+
+    val stripeColor = when {
+        sale.isVoided -> statusColors.voidFg
+        sale.remainingCreditPaise > 0 -> statusColors.dueFg
+        else -> statusColors.paidFg
+    }
+
+    val (pillBg, pillFg, pillText) = when {
+        sale.isVoided -> Triple(statusColors.voidBg, statusColors.voidFg, "Voided")
+        sale.remainingCreditPaise > 0 -> Triple(
+            statusColors.dueBg,
+            statusColors.dueFg,
+            "Due ${CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise)}"
+        )
+        else -> Triple(statusColors.paidBg, statusColors.paidFg, "Paid")
+    }
+
+    val timeFormatted = remember(sale.timestamp) {
+        SimpleDateFormat("hh:mm a", Locale.US).format(Date(sale.timestamp))
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -899,128 +1112,170 @@ fun BillHistoryRow(
             ),
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-            else MaterialTheme.colorScheme.surface
+            else MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(AliDimens.radiusMd)
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth()
         ) {
-            if (isInSelectionMode) {
-                Checkbox(
-                    checked = isSelected,
-                    onCheckedChange = { onToggleSelect() }
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Receipt,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        sale.receiptNumber,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                if (sale.isVoided) {
-                    Text(
-                        "VOIDED",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                } else if (sale.remainingCreditPaise > 0) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            "DUE ${CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise)}",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFFC62828)
-                        )
-                    }
-                } else {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            "PAID",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF2E7D32)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
+            // 4 dp Status Stripe
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(stripeColor)
+            )
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(AliDimens.spacingMd),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        sale.customerName ?: "Walk-in Customer",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurface
+                if (isInSelectionMode) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelect() }
                     )
-                    val dateFormatted = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.US).format(Date(sale.timestamp))
-                    Text(
-                        dateFormatted,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(modifier = Modifier.width(AliDimens.spacingSm))
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        CostCalculator.formatPaiseToRupees(sale.netTotalPaise),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Paid: ${CostCalculator.formatPaiseToRupees(sale.amountReceivedPaise)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (sale.remainingCreditPaise > 0 && !sale.isVoided && sale.customerId != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    OutlinedButton(
-                        onClick = onRepay,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(36.dp)
+                Column(modifier = Modifier.weight(1f)) {
+                    // Top line: Receipt # • Time and Status Pill
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Record Repayment", fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                sale.receiptNumber,
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                " • $timeFormatted",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Status Pill with icon + text
+                        Surface(
+                            shape = RoundedCornerShape(AliDimens.radiusPill),
+                            color = pillBg
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                when {
+                                    sale.isVoided -> {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = pillFg
+                                        )
+                                    }
+                                    sale.remainingCreditPaise > 0 -> {
+                                        Icon(
+                                            Icons.Filled.Payment,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = pillFg
+                                        )
+                                    }
+                                    else -> {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(12.dp),
+                                            tint = pillFg
+                                        )
+                                    }
+                                }
+                                Text(
+                                    pillText,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = pillFg
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Middle line: Customer name and Amount
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            sale.customerName ?: "Walk-in Customer",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Text(
+                            CostCalculator.formatPaiseToRupees(sale.netTotalPaise),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Bottom line: Payment Method icon/label and Received amount
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val methodLabel = when (sale.paymentMethod) {
+                            "GPAY", "UPI" -> "UPI"
+                            "CARD" -> "Card"
+                            "BANK" -> "Bank"
+                            "CREDIT" -> "Credit"
+                            else -> "Cash"
+                        }
+                        Text(
+                            "• $methodLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (sale.remainingCreditPaise > 0) {
+                            Text(
+                                "Paid: ${CostCalculator.formatPaiseToRupees(sale.amountReceivedPaise)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (sale.remainingCreditPaise > 0 && !sale.isVoided && sale.customerId != null) {
+                        Spacer(modifier = Modifier.height(AliDimens.spacingSm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            OutlinedButton(
+                                onClick = onRepay,
+                                shape = RoundedCornerShape(AliDimens.radiusSm),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Icon(Icons.Filled.Payment, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Record Repayment", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
-        }
         }
     }
 }
