@@ -3,6 +3,8 @@
 Prepared 8 November 2026 from a static read of `SyedMsidsm/AliEducaationApp` (app version 1.0.15, Room schema 8).
 This document is written so a fast AI coding assistant can execute it **one small task at a time**. Every task names the files, the exact problem, the approach, a ready-to-paste prompt, and the checks that prove it is done.
 
+> **Updated 9 November 2026:** Section 9 (at the end) adds the barcode generator, a stock-import upgrade, a redesign of Bill History / Cash In-Out / Add Stock, and new tests. Remaining original tasks (TEST-04 to TEST-10 and CI) are unchanged.
+
 > **Read this first — limits of this review.** It is a static review. The code was not compiled and no test was run (the review environment could not reach the Android SDK). Every code snippet below is a *starting point* that must be compiled and tested. Each item carries a confidence tag:
 > **[Verified]** = I read the exact lines. **[Likely]** = strongly implied by the code but needs a device check. **[Check]** = I have not confirmed; the task starts by confirming.
 
@@ -1035,3 +1037,472 @@ Not read in depth: cost and rounding rules in `CostCalculator`, the Accounts and
 | TEST-01…10 | Testing programme | — | L | — | Several (see 5.2) |
 
 **Recommended first week:** SEC-01 → SEC-02 → SEC-08 → TEST-01 → SEC-03 → FEAT-02a/b (logo fix is quick and visible) → SYNC-01a (quick patch). Everything else follows the phase table in section 0.3.
+
+---
+---
+
+# 9. ADDENDUM — 9 November 2026: barcode generator, stock-import upgrade, UI redesign
+
+New tasks added after you shared four screenshots (Add Stock dialog, Bill History, Cash In dialog) and the Antigravity progress report. Everything in Sections 0–8 still applies (master rules, Definition of Done, review checklist). Task IDs added here: **UI-00, UI-01, UI-02, UI-03, BARCODE-01, IMPORT-01, IMPORT-02, IMPORT-03, TEST-11, TEST-12, TEST-13.**
+
+## 9.0 Read this first
+
+1. **GitHub still holds only the original commits.** I could not see the work Antigravity did locally (security, sync, database, bulk void, logo). I reviewed the *original* code for this addendum. Therefore **every task below must begin with "open the local file and confirm what is there now"**. In particular, FEAT-01 added multi-select/bulk void to Bill History and the Cash tracker; the redesign tasks below must **keep that behaviour** and only restyle around it.
+2. **Remaining tasks from your Antigravity report are unchanged:** TEST-04 → TEST-10 and the CI workflow. They stay in the plan.
+3. **Recommended order from here** (one task, one branch, one session each):
+
+| Step | Task | Why now |
+|---|---|---|
+| 1 | TEST-04 (sync fault injection) | Protects money integrity; already queued |
+| 2 | TEST-05 (security tests) | Locks in the security fixes already made |
+| 3 | **UI-00** theme tokens | Every redesign task below depends on it |
+| 4 | **IMPORT-01** (import bug fixes) | Stops silent data corruption — more important than looks |
+| 5 | **BARCODE-01** | Small, visible, high value in daily use |
+| 6 | **UI-01** Bill History | Fixes a visible bug (squashed "Custom" chip) |
+| 7 | **UI-02** Cash In/Out dialogs | |
+| 8 | **UI-03** Add/Edit Stock dialog | Uses the barcode generator from step 5 |
+| 9 | **IMPORT-02**, then **IMPORT-03** | New import features |
+| 10 | TEST-06 → TEST-10, CI, then TEST-11 → TEST-13 | Finish the test programme |
+
+Rule of thumb: **correctness work (IMPORT-01, tests) before appearance work**, but UI-00 first because it is tiny and unblocks the rest.
+
+---
+
+## 9.1 What your screenshots and the code show
+
+| # | Screen | Observation | Cause (verified in code) | Task |
+|---|---|---|---|---|
+| 1 | Bill History | **"Custom" chip is squashed and its text wraps one letter per line** | `BillHistoryScreen.kt` puts 5 chips in a plain `Row` that cannot scroll; the last chip gets whatever width is left | UI-01 |
+| 2 | Bill History | Tapping "Custom" a second time does nothing, so a chosen range cannot be changed | The date pickers open only when `customStartDate == null` | UI-01 |
+| 3 | Bill History | Big blank white band above the title | Top-bar and system-bar insets are applied on top of each other (`TopAppBar` + `Scaffold` padding) | UI-01 |
+| 4 | Bill History | Plain "No bills found" card; no way out | No empty-state actions | UI-01 |
+| 5 | Bill History | Status colours (`0xFFFFEBEE`, `0xFFE8F5E9`…) are hard-coded | Will look wrong in dark mode | UI-00/01 |
+| 6 | Cash In dialog | **Dialog background is lavender**, while the app is warm cream/gold | `LightColorScheme` never sets `surfaceContainerHigh`, so Material's default purple-grey is used for every dialog | UI-00 |
+| 7 | Cash In dialog | Category chips are cut off ("Salary" clipped) with no hint they scroll | Horizontally scrolling `Row`, no fade/indicator | UI-02 |
+| 8 | Cash In dialog | **"GPAY / UPI" wraps onto two lines**; "Choose Photo" wraps | Three equal-weight chips at 12 sp inside a narrow dialog; two equal buttons | UI-02 |
+| 9 | Cash In dialog | A red **"Remove…" button sits inline** next to "New Category" in the category row | Destructive action next to selection chips invites mis-taps | UI-02 |
+| 10 | Cash In dialog | The most important field (Amount) is the 4th item, below date/time | Field order | UI-02 |
+| 11 | Add Stock dialog | **No "Generate barcode" button when adding a new product** | The button exists only inside `if (existingProduct != null)`, because the shop barcode is derived from the product's database id, which does not exist yet | BARCODE-01 |
+| 12 | Add Stock dialog | **Printed shop barcodes are very dense** | See 9.6: 39-character payload at about 0.12 mm per bar | BARCODE-01 |
+| 13 | Add Stock dialog | "Bill / Invoice No." is cut off at the bottom; the form is a long scroll inside a small dialog | `AlertDialog` with a scrolling `Column` | UI-03 |
+| 14 | Add Stock dialog | Labels are ambiguous: "Pcs", "Base Cost", "Margin (%)" sits beside "Wholesale" | Layout/labels | UI-03 |
+| 15 | Add Stock dialog | Live profit preview uses `(landedCost * 100).toLong()` (truncating floating-point). The *saved* values use exact `BigDecimal`, so no money is wrong, but the preview can be a paisa off | Display math | UI-03 |
+| 16 | Stock import | Silent data corruption cases (formula cells, text numbers, leading-zero barcodes, header-row mismatch) | See 9.7 | IMPORT-01 |
+
+---
+
+## 9.2 UI-00 — Theme tokens so dialogs match the app  · Branch `ui-00-theme-tokens`
+
+**Problem.** `ui/theme/Theme.kt` defines `background`, `surface` and a few others but not the `surfaceContainer*` family. Material 3 dialogs, bottom sheets, menus and cards read `surfaceContainerHigh`, so in light mode they fall back to Material's lavender (`#ECE6F0`), as in your Cash In screenshot. Status colours are hard-coded per screen, so dark mode is unreliable.
+
+**Fix.** Add the container colours to both schemes, and add a small set of semantic status colours that have light and dark variants.
+
+```kotlin
+// ui/theme/Color.kt  — proposed values: look at them on a real phone and adjust before committing
+val LightSurfaceContainerLowest  = Color(0xFFFFFFFF)
+val LightSurfaceContainerLow     = Color(0xFFFBF9F4)
+val LightSurfaceContainer        = Color(0xFFF7F4EC)
+val LightSurfaceContainerHigh    = Color(0xFFF2EEE4)   // dialogs, sheets
+val LightSurfaceContainerHighest = Color(0xFFEBE6DA)
+
+val DarkSurfaceContainerLowest   = Color(0xFF0D100D)
+val DarkSurfaceContainerLow      = Color(0xFF181D19)
+val DarkSurfaceContainer         = Color(0xFF1C211D)
+val DarkSurfaceContainerHigh     = Color(0xFF242A25)   // dialogs, sheets (green-tinted, matches DarkSurface)
+val DarkSurfaceContainerHighest  = Color(0xFF2C332D)
+
+@Immutable
+data class AliStatusColors(
+    val paidBg: Color, val paidFg: Color,
+    val dueBg: Color,  val dueFg: Color,
+    val voidBg: Color, val voidFg: Color
+)
+val LocalAliStatusColors = staticCompositionLocalOf {
+    AliStatusColors(Color(0xFFE8F5E9), Color(0xFF2E7D32), Color(0xFFFFEBEE), Color(0xFFC62828), Color(0xFFECEFF1), Color(0xFF546E7A))
+}
+```
+In `Theme.kt` pass `surfaceContainerLowest … surfaceContainerHighest` into both `lightColorScheme(...)` and `darkColorScheme(...)`, and provide dark values of `AliStatusColors` (for example paid `0xFF1B3A22`/`0xFF81C784`, due `0xFF3E1F1F`/`0xFFEF9A9A`, void `0xFF2B3236`/`0xFFB0BEC5`) through `CompositionLocalProvider` in `AliEducationalTheme`.
+
+**Also define spacing/shape constants** in one place (`AliDimens`: 4/8/12/16/24 dp; corner radii 8/12/16/28) and use them in the new screens. Minimum chip/button text size 13 sp and touch target 48 dp.
+
+**Check the colour contrast** of every pair you introduce (text on container ≥ 4.5:1; the tool at webaim.org/resources/contrastchecker is enough). Do not trust the numbers above blindly.
+
+```text
+TASK UI-00. Files: ui/theme/Color.kt, ui/theme/Theme.kt only.
+1) Add the surfaceContainerLowest..Highest colors from the plan to LightColorScheme and DarkColorScheme.
+2) Add AliStatusColors + LocalAliStatusColors with light and dark variants, provided inside AliEducationalTheme based on darkTheme.
+3) Add object AliDimens with the spacing and corner constants from the plan.
+Do not change any screen in this task. Add a Compose UI test that renders an AlertDialog in light and dark theme and asserts it composes without error.
+Manual check (owner): open any existing dialog in light mode — it should be warm cream, not lavender.
+```
+
+---
+
+## 9.3 UI-01 — Bill History redesign  · Branch `ui-01-bill-history`
+
+**Goals.** Fix the bugs in rows 1–5 above, make the list quicker to scan, and keep every existing function (period filters, search, status filter, open receipt, repay, open customer, **and the multi-select / bulk-void mode from FEAT-01**).
+
+**Layout (wireframe):**
+```text
+┌────────────────────────────────────┐
+│ ←  Bill History              ⋮     │  one 56 dp bar, no extra gap
+│     Today · 09 Nov 2026            │
+├────────────────────────────────────┤
+│ [Today] [Week] [Month] [All] [📅 Custom ▾]   ← ONE scrollable row, never wraps
+│ 🔍 Search receipt # or customer      ✕
+│ [All 12] [Paid 9] [Due 3] [Voided 0]          ← with counts
+│ ┌────────────────────────────────┐
+│ │ NET BILLED            ₹4,250.00│  hero number
+│ │ 12 bills                       │
+│ │ ─────────────────────────────  │
+│ │ Collected ₹3,900   Dues ₹350   │
+│ └────────────────────────────────┘
+│ TODAY                    ₹4,250.00     ← sticky date header with day total
+│ ┃ AE-0123 · 02:14 PM        [✓ Paid] │  4 dp status stripe on the left
+│ ┃ Walk-in customer             ₹250  │
+│ ┃ 💵 Cash · 3 items                  │
+│ ┃ AE-0122 · 01:02 PM   [Due ₹350]    │
+│ …                                    │
+└────────────────────────────────────┘
+```
+
+**Changes, in the order I would implement them:**
+1. **Chip row that cannot squash.** Use a `LazyRow` (or `Row(horizontalScroll)`) with `FilterChip(label = { Text(p, maxLines = 1, softWrap = false) })`. Show the chosen custom range *inside* the chip ("12 Oct – 18 Oct") and an ✕ to clear it.
+2. **Custom range** with Material 3 `DateRangePicker` in a `DatePickerDialog` instead of two chained legacy dialogs; tapping the chip again always reopens it. **Pitfall:** the Material pickers return **UTC midnight** milliseconds. Convert to local-day boundaries or bills near midnight will be dropped:
+   ```kotlin
+   fun utcPickerMillisToLocalStart(ms: Long): Long =
+       Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate()
+           .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+   fun utcPickerMillisToLocalEnd(ms: Long): Long =
+       Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate()
+           .plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() - 1
+   ```
+   Write a unit test for these two functions including the 23:59 and 00:00 edge cases.
+3. **Header gap.** Apply window insets once: either let `TopAppBar` own the status-bar inset and give the `Scaffold` `contentWindowInsets = WindowInsets(0)`, or the reverse; verify on a device with a punch-hole camera (your S24 Ultra) and a gesture-navigation phone.
+4. **Summary card:** net billed as the large number; collected and remaining dues below; due amount in the status colour; tap the card to filter to "Due".
+5. **Grouped list:** group by local day with a header (Today, Yesterday, `07 Nov`) and a day total. `stickyHeader` may need `@OptIn(ExperimentalFoundationApi::class)`.
+6. **Row card:** status stripe + pill using `LocalAliStatusColors` (icon **and** text, never colour alone), time next to the receipt number, payment-mode icon, item count, amount aligned right in a tabular-looking bold style. Keep the whole row tappable; keep the existing repay and customer shortcuts.
+7. **Empty state:** icon, "No bills today", and two buttons: **View this week** and **Clear filters** (only the ones that apply).
+8. **Selection mode** (from FEAT-01): keep it. Show the contextual top bar ("3 selected · Select all · ✕") in place of the normal bar, and tint selected rows.
+9. **Performance:** do not add all-time loading; respect PERF-01 (date-range queries, "Load more").
+
+```text
+TASK UI-01 (do in 3 small sessions; one commit each).
+FIRST open the current local ui/billing/BillHistoryScreen.kt and list which features exist (filters, search, status chips, bulk selection, repay, open customer). Do not remove any.
+01a: Replace the period Row with a non-wrapping scrollable chip row; label maxLines=1 softWrap=false; custom chip shows the chosen range and an X to clear; re-tapping reopens the picker. Replace the two legacy DatePickerDialogs with DateRangePicker + the UTC->local conversion helpers from the plan, with unit tests.
+01b: Fix the top gap (insets applied once). Rebuild the summary card (hero net billed) and add status counts to the status chips. Use AliDimens and LocalAliStatusColors from UI-00; remove the hard-coded status colors.
+01c: Group by day with sticky headers and day totals; redesign BillHistoryRow (stripe, pill with icon+text, time, payment icon); add the empty state with two actions. Keep selection mode working.
+After each: Compose UI tests (chips never wrap at font scale 1.3; Custom re-opens; empty state buttons work), and manual screenshots in light AND dark at normal and large text.
+```
+
+**Done when.** At normal and large text sizes nothing wraps letter-by-letter, the custom range can be changed repeatedly, bills near midnight land on the correct day, and light/dark both look intentional.
+
+---
+
+## 9.4 UI-02 — Cash In / Cash Out dialogs  · Branch `ui-02-cash-dialogs`
+
+**Goals.** Fix rows 6–10, make adding an entry fast (the amount first, one thumb), keep every existing option (category, date/time, description with suggestions, payment mode, extra note, receipt photo, Pigmy scheme behaviour, edit dialog).
+
+**Wireframe (Cash In; Cash Out uses the red accent):**
+```text
+┌ Add Income (Cash In) ─────────────────┐   green title bar/accent
+│  ₹  [ 0.00                       ]     │   AMOUNT FIRST: large, autofocus, decimal keypad
+│     ₹ 12,500.00                        │   live formatted preview (Indian grouping)
+│                                        │
+│  Category                       ✎ Manage│  ← manage opens the existing dialog
+│  [Electricity] [General✓] [Rent]       │  wrapped chips (FlowRow), no hidden scroll
+│  [Salary] [Sales] [＋ New]              │
+│                                        │
+│  Payment   ┌Cash┬UPI┬Bank┐             │  segmented control, one line each
+│                                        │
+│  📅 Today, 09 Nov · 02:15 AM   Change  │  one compact line
+│                                        │
+│  Description (optional)                │
+│  [Sales] [Kuree]  ← suggestions        │
+│  ▸ More details (note, receipt photo)  │  collapsed; opens Extra note + Add receipt
+│                                        │
+│          [Cancel]   [ Save ]           │  sticky bottom row
+│          Save & add another            │
+└────────────────────────────────────────┘
+```
+
+**Changes:**
+1. **Container:** `AlertDialog` colours come from UI-00 (no more lavender). Prefer a full-width `Dialog(properties = DialogProperties(usePlatformDefaultWidth = false))` or a `ModalBottomSheet` so there is room; Save/Cancel stay **pinned** and visible while the content scrolls.
+2. **Amount first:** large `OutlinedTextField`, `KeyboardType.Decimal`, `ImeAction.Next`, requested focus on open, error text if empty or ≤ 0, Save disabled until valid. Validate with `CostCalculator.parseRupeesToPaise` (exact), never with `Double`.
+3. **Categories as wrapped chips** (`FlowRow`) instead of a hidden horizontal scroll. Move **"Remove…" out of the chip row**; put a small ✎ Manage action in the header that opens the existing manage dialog. Pigmy scheme chips keep their icon and the explanatory card.
+4. **Payment mode** as `SingleChoiceSegmentedButtonRow` with three single-line segments: Cash / UPI / Bank (rename "GPAY / UPI" to "UPI"; keep the stored key `GPAY` unchanged so existing data and the Excel import/export mapping do not change).
+5. **Date and time** on one compact line with a "Change" action opening the existing pickers.
+6. **Receipt photo:** one "Add receipt" row with two icon buttons (Camera, Gallery) that never wrap; show the thumbnail and a remove ✕ after selection. Keep the existing attachment code path (`AttachmentManager`).
+7. **"Save & add another"** keeps the dialog open, clears amount and description, keeps category/payment/date.
+8. **Accessibility:** all touch targets ≥ 48 dp; chips ≥ 13 sp; the amount field announces "Amount in rupees".
+9. Apply the **same layout to the Edit dialog** (`CashTrackerScreen.kt` around line 1594) so adding and editing feel identical. Add and edit should share one composable to prevent the two drifting apart again.
+
+```text
+TASK UI-02 (2 sessions).
+FIRST open local ui/reports/CashTrackerScreen.kt, list every field/option in the Add dialog and the Edit dialog, and confirm none will be lost.
+02a: Extract a shared composable CashEntryForm used by both Add and Edit. Layout per the plan wireframe: amount first, FlowRow categories (move the red Remove button into a Manage action), segmented payment mode (label UPI, key stays GPAY), compact date/time line, collapsed "More details" containing extra note and the receipt buttons. Behaviour and saved data must be IDENTICAL (same ViewModel calls, same stored values).
+02b: Pinned Save/Cancel bar and "Save & add another"; amount validation with CostCalculator.parseRupeesToPaise; accessibility sizes.
+Tests: Compose tests - Save disabled for empty/zero/"abc"; categories wrap and none is clipped at font scale 1.3; "UPI" segment is one line; Pigmy scheme selected shows the info card; saving writes the same ShopExpenseEntity values as before (compare with the old code path in a unit test using a fake ViewModel).
+```
+
+**Done when.** No chip is clipped or wrapped, the red Remove button is gone from the chip row, amount is the first field, and the saved records are identical to before.
+
+---
+
+## 9.5 UI-03 — Add / Edit Stock & Product dialog  · Branch `ui-03-stock-dialog`
+
+**Goals.** Fix rows 11, 13, 14, 15; keep the `onSave(...)` signature unchanged so there is **no ViewModel, repository or database change** (lowest possible risk); add the barcode generator from BARCODE-01.
+
+**Wireframe (full-screen dialog; dark and light via the theme):**
+```text
+┌ ✕  Add Stock & Product        [Save] ┐  (Save also pinned at the bottom)
+│ PRODUCT                                │
+│  [ Product name *                  ]   │
+│  [ Barcode   ✨Generate  ▣Scan     ]   │  generate + scan icons in the field
+│   ┌ barcode preview (Code 128) ┐ 🖨 Print labels
+│  [ Category ▾ ]   [ Brand ]            │  category = dropdown of existing + "New"
+│ STOCK                                  │
+│  [ Quantity received (pcs) ] [ Low-stock alert ]
+│  (edit mode: "In stock now: 24 pcs" and the field is "Add to stock (pcs)")
+│ PRICING                                │
+│  [ Cost price ₹/pc * ]  [ Selling ₹/pc * ]  [ Wholesale ₹/pc ]
+│  (Gross margin | Markup on cost)  [ Margin % ]
+│  ┌ Profit ₹5.00/pc · 33.3% margin ┐  warning chip if selling < cost
+│ ▸ SUPPLIER BILL (optional)  — opens automatically when quantity > 0
+│  [ Supplier ▾ ] [ Bill / Invoice No. ] [ Transport ₹ ] [Paid now ▢ ▾ method]
+├────────────────────────────────────────┤
+│ Stock value ₹1,200 · Profit ₹250   [Cancel] [Save]  ← sticky summary + actions
+└────────────────────────────────────────┘
+```
+
+**Changes:**
+1. **Full-screen dialog with sections** (Product, Stock, Pricing, Supplier bill) and a sticky bottom bar showing a live summary and Save. No more clipped "Bill / Invoice No.".
+2. **Clear labels:** "Quantity received (pcs)", "Low-stock alert", "Cost price (₹/pc)", "Selling price (₹/pc)". Put the margin controls under pricing; do not place Margin % beside Wholesale.
+3. **Number fields:** default to blank with a `0` placeholder (no need to delete a leading "0"), `KeyboardType.Decimal` for prices and `Number` for counts, `ImeAction.Next`, select-all on focus.
+4. **Exact preview math.** Replace every `(x * 100).toLong()` in the dialog with paise arithmetic (`parseRupeesToPaise` once, then `Long` maths) or `BigDecimal`. A tiny helper `paiseOrNull(String)` is enough. Add a unit test: cost `19.99`, selling `29.99` shows profit exactly ₹10.00 and 33.3 %.
+5. **Category dropdown** (exposed dropdown with the existing categories plus "New category…") instead of free text, to stop "Stationery"/"Stationary" duplicates.
+6. **Supplier-bill section** collapsed by default when editing price only, auto-expanded when quantity > 0.
+7. **Warnings, not blocks:** selling below cost, selling = 0, cost = 0 with quantity > 0, a barcode already used by another product (show the product name).
+8. **Discard protection:** if any field changed, back/close asks "Discard changes?" (the dialog already blocks outside-tap dismissal; this adds a deliberate confirmation).
+9. **Edit-mode clarity:** **[Check]** confirm in the code whether "Pcs" in edit mode *adds* to stock; show "In stock now: N pcs" and label the field accordingly.
+10. **Barcode block** exactly as in BARCODE-01.
+
+```text
+TASK UI-03 (3 sessions).
+FIRST open local ui/stock/StockScreen.kt IntegratedAddStockProductDialog and list every state variable and the exact onSave signature. The signature must NOT change.
+03a: Convert to a full-screen Dialog (usePlatformDefaultWidth=false) with sections Product / Stock / Pricing / Supplier bill and a pinned bottom bar (Cancel, Save, live summary). Same fields, same onSave call, same validations.
+03b: Rename labels per the plan; number-field behaviour (blank+placeholder, keyboard types, ImeAction.Next, select-all on focus); replace (x*100).toLong() with exact paise math and add the unit tests from the plan; category dropdown from existing categories.
+03c: Warnings (selling<cost etc.), supplier-bill auto-expand, discard confirmation, edit-mode "In stock now" line (after confirming the Pcs semantics).
+Tests: Compose tests for validation, warnings, Save disabled states, that onSave receives the same values as before for 5 sample inputs (compare to the previous implementation's output via a pure function), and rotation keeps typed values.
+```
+
+**Done when.** The whole form is reachable without a clipped field at normal and large text, the saved product is identical to before for the same inputs, and the preview never differs by a paisa from the saved margin.
+
+---
+
+## 9.6 BARCODE-01 — Barcode generator in Add Stock + printable-quality labels  · Branch `barcode-01-generator`
+
+### What exists today (verified)
+- `BarcodeGeneratorService` already renders **Code 128** barcodes (ZXing, fully offline) and builds an **A4 PDF label sheet (3 × 8)**; `AppRepository.generateAndRegisterBarcode` registers the code in `product_barcodes` and refuses to overwrite a manufacturer barcode; the Edit dialog shows **"Generate Shop Barcode"** or **"Print / Export Barcode Labels"**.
+- **Gap 1:** in the *Add* dialog there is no Generate button, because the payload is derived from the product id (`AE-P<uuid-without-dashes>-PC`), which only exists after saving.
+- **Gap 2 (important): the generated payload is too long to print and scan reliably.** It is 39 characters (`AE-P` + 32 hex + `-PC`). A Code 128 symbol needs 11 modules per character, so about 464 modules; drawn into the 164-pt-wide area on the label that is **about 0.12 mm per bar** (my calculation from the code; measure it on paper). Retail guidance is typically 0.25 mm or more; phone cameras and cheap scanners will struggle, especially with home-printer ink spread. The human-readable text under the bars (`AE-P…`, 8.5 pt) is also wider than the label cell. **[Likely]** — confirm by printing one label and scanning it from 15 cm with the app's own scanner and with a cheap USB/Bluetooth scanner if you have one.
+- **Gap 3:** labels draw a *bitmap* stretched to size, which blurs bar edges when printed; vector bars are sharper.
+- **Gap 4:** the label PDF prints N copies of **one** product; there is no multi-product sheet.
+
+### Design
+
+**1. Short, random shop codes (new codes only).** The code does not need to *contain* the product id; the database already maps barcode → product (`product_barcodes`, unique index on `barcode`). Use `AE-P` + 8 characters from Crockford base-32 (no I, L, O, U), generated from 40 random bits, and check it is unused (retry up to 5 times):
+
+```kotlin
+object ShopBarcode {
+    private const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"   // 32 symbols
+    fun newPayload(unitType: String = "PIECE", packQty: Int = 1,
+                   rng: java.security.SecureRandom = java.security.SecureRandom()): String {
+        val b = ByteArray(5).also(rng::nextBytes)
+        var v = 0L; for (x in b) v = (v shl 8) or (x.toLong() and 0xFF)
+        val core = "AE-P" + (0 until 8).map { ALPHABET[((v shr (5 * (7 - it))) and 31).toInt()] }.joinToString("")
+        return if (unitType.equals("PACK", true) && packQty > 1) "$core-PK$packQty" else core
+    }
+}
+```
+- Piece code: 12 characters → about 167 modules → **about 0.34 mm** at 164 pt. Pack code: about 16 characters → about 0.26 mm.
+- **Existing long codes keep working** for scanning and lookup (`startsWith("AE-P")` checks still match). **First `grep -rn '"-PC"\|"-PK\|-PC\b\|-PK' app/src`** to confirm nothing parses the old suffix; if something does, update it to accept both.
+- For a product that only has a legacy long code, offer **"Add short barcode"**, which registers a second row in `product_barcodes` for the same product (the table already supports several barcodes per product) so old printed stickers still scan. `generateAndRegisterBarcode` currently returns the existing AE-P code if one exists; adjust so a short alias can be created.
+
+**2. Generate in the Add dialog.** Inside the barcode field show two trailing icons: **✨ Generate** and **▣ Scan**. Generate calls a new ViewModel function `suggestShopBarcode(unitType, packQty, onResult)` that creates a payload and verifies it is unused through the existing `lookupBarcode` + `productDao.getProductByBarcode`. The code is placed in the field. **No product row is created yet**; `addOrUpdateProductWithStock` already registers the barcode in `product_barcodes` on Save (verified), so saving completes the registration. Hide Generate when the field already contains a code (never overwrite a manufacturer barcode). After generating, show the **preview card** and a **"Print labels after saving"** toggle that opens the label dialog for the new product.
+
+**3. Better labels.**
+- Draw bars as **vector rectangles** from the ZXing `BitMatrix` (encode with width `0`, height `1` to get one pixel per module), scale by an exact multiple so the **module width is at least 0.25 mm**; compute and show a warning when a payload cannot meet that on the chosen label size.
+- Auto-shrink the human-readable text to fit the cell (`Paint.measureText`) and never overflow it.
+- **Label size presets:** A4 3 × 8 (current), A4 4 × 10 small stickers, and thermal **50 × 25 mm** and **38 × 25 mm** (decision for you: which printer/paper do you actually use?).
+- **Multi-product sheet:** pick several products, set copies each (default = quantity received), build one PDF. Entry point from the product list multi-select and from the import result (IMPORT-03).
+- Keep a quiet zone of at least 10 modules left and right.
+
+**4. Checks when a code is typed or scanned.** For 13-digit numeric codes validate the EAN-13 check digit and *warn* (do not block) if it is wrong; strip hidden/zero-width characters and surrounding spaces; shop codes are upper-cased.
+
+**5. Bulk helper.** In the product list: select items → **"Generate barcodes for items without one"** (owner-only, step-up auth, one transaction per product so one failure does not block the rest) → **Print labels**.
+
+### Tasks
+```text
+TASK BARCODE-01a (pure logic, JVM tests). Create domain/barcode/ShopBarcode.kt with newPayload() as in the plan, plus fun moduleWidthMm(payload: String, printableWidthPt: Float): Float using (payload.length + 2) * 11 + 13 modules (add 20 modules if you also count the quiet zones in the drawn width), and fun isEan13Valid(code: String): Boolean.
+Before coding, run grep for "-PC" and "-PK" and report any code that parses those suffixes.
+Tests: 10,000 generated codes are all 12 chars for pieces and unique; alphabet only; pack suffix present; moduleWidthMm(newPayload(), 164f) >= 0.30f; moduleWidthMm of a 39-char legacy code < 0.15f (documents the old problem); EAN-13 valid/invalid vectors (4006381333931 valid, 4006381333932 invalid).
+
+TASK BARCODE-01b (repository + ViewModel). Add AliViewModel.suggestShopBarcode(unitType, packQty, onResult) that retries up to 5 times until lookupBarcode returns null and productDao.getProductByBarcode returns null. Change AppRepository.generateAndRegisterBarcode to use ShopBarcode.newPayload for NEW codes (keep legacy codes valid) and to allow a short alias when the only existing AE-P code is a legacy long one. Keep requireOwner(). Tests (in-memory Room): collision retry works with a fake RNG; a manufacturer barcode is never overwritten; alias creation adds a second product_barcodes row; scanning either code resolves to the same product.
+
+TASK BARCODE-01c (UI in Add dialog). In IntegratedAddStockProductDialog add the Generate icon to the barcode field (hidden when the field is non-blank), the preview card using BarcodeGeneratorService.generateBarcodeBitmap, and the "Print labels after saving" toggle. Do not change the onSave signature. Test: Generate fills the field with a code starting AE-P; the saved product has that barcode in products AND product_barcodes; Generate not shown for a typed manufacturer barcode.
+
+TASK BARCODE-01d (labels). Rewrite generateLabelsPdf to draw vector bars, auto-fit text, support presets (A4 3x8, A4 4x10, 50x25 mm, 38x25 mm) and a list of (product, barcode, price, copies) items. Add a unit test that the PDF is created and a Paint.measureText-based test that the human-readable text always fits. Owner step: print one sheet on your real printer and scan 5 labels with the app scanner.
+```
+
+**Decision for you:** the label printer and sticker size you really use; and whether you want to keep printing the old long codes (not recommended).
+
+---
+
+## 9.7 IMPORT — Stock import from Excel: fixes and recommended features
+
+### What the importer does today (verified by reading)
+CSV and Excel (`.xlsx`/`.xls` via Apache POI), sheet picker, 15-row preview with automatic header-row guess, **manual** column mapping for 12 fields (name, category, brand, SKU, barcode, base unit, pack size, opening quantity, purchase cost, piece price, pack price, low-stock), duplicate detection by SKU → barcode → case-insensitive name, an "update existing" switch (adds quantity, moving-average cost, new prices), a guard that refuses cash-ledger files, an "already imported" check that blocks the **exact same file + mapping**, Owner-only, and one database transaction for the whole file.
+
+### IMPORT-01 — Bugs to fix first (silent data corruption)  · Branch `import-01-correctness`
+
+| # | Problem (file `ImportExportService.kt`) | Effect on your stock | Confidence |
+|---|---|---|---|
+| a | **Formula cells:** the formula branch returns `cell.numericCellValue.toString()`, so a quantity produced by a formula (`=B2*C2`) becomes `"1200.0"`; the importer then does `toIntOrNull() ?: 0` | Quantity, pack size and low-stock silently become **0 / 1 / 5** | **[Verified by reading]** — write the failing test first |
+| b | **Numbers stored as numbers lose leading zeros:** the numeric branch does `toLong().toString()` | A barcode such as `0123456789012` becomes `123456789012`; scans will not match | **[Verified by reading]** |
+| c | **Unparseable values silently become zero:** `parseRupeesToPaise(...) ?: 0L`, `toIntOrNull() ?: 0`. The parser rejects `.50`, `19.999`, `12 /-`, `N/A`, `1.2E3`, negatives | Products imported with cost/price/quantity **0** and no error shown | **[Verified]** |
+| d | **Header row mismatch:** the preview guesses the header row, but `importProducts` takes no header-row index and always treats the *first non-blank row* as the header | A sheet with a title line above the headers imports the real header row as a product (and shifts everything) | **[Likely]** — confirm with a test file |
+| e | **One bad row cancels everything:** `require(errors.isEmpty())` rolls back the whole file and shows all errors joined into one message | Users cannot fix and continue; large files are painful | **[Verified]** |
+| f | **Re-importing an edited file in update mode adds the quantities again** (the duplicate-file guard only catches an identical file + mapping) | Stock doubles after the second import | **[Verified]** |
+| g | **Duplicate rows inside the same file** are not reported; the second row finds the first one "existing" | Skipped silently or double-added depending on mode | **[Likely]** |
+| h | **CSV reader** uses the default charset, does not remove a UTF-8 BOM (first header becomes `\uFEFFName`), reads line by line (quoted multi-line fields break), comma only (semicolon files become one column), and Windows-1252 exports garble names | Wrong or missing columns | **[Verified]** |
+| i | The importer **does not register `product_barcodes`** rows (lookup still works through the product's primary barcode, so scanning is fine) | Barcode-collision checks (which read `product_barcodes`) miss imported codes; pack barcodes cannot be imported | **[Verified]** |
+| j | Whole workbook is loaded into memory (see PERF-02) | Out-of-memory on very large sheets | **[Likely]** |
+
+**Approach — split the importer into pure, testable stages:**
+1. **Read** (Excel/CSV → rows of typed cells). Use POI `DataFormatter` so the *displayed* text is read (keeps leading zeros that the cell format shows; reads formula results correctly with a `FormulaEvaluator`), plus a robust CSV reader: BOM stripping, quote/escape handling including multi-line fields, delimiter sniffing (`,` `;` tab), charset fallback (UTF-8, then Windows-1252). Pass the **header row index** from the preview into the import.
+2. **Parse** each field with a function that returns a **value or an error** (never a silent default): `parseQty`, `parseMoney` (accepts `₹`, `Rs`, `/-`, Indian grouping `1,20,000`, `.50`, trailing `.0`; rejects text and negatives; warns on > 2 decimals), `parsePackSize`, `parseBarcode` (text, trim, strip hidden characters, optional EAN check).
+3. **Plan** (no database writes): produce a `PlannedRow` for every row: `NEW`, `UPDATE`, `SKIP_DUPLICATE`, `ERROR`, with a list of issues (error/warning, field, message), the existing product it matched and *why* (SKU/barcode/name), and detection of duplicates **within the file**.
+4. **Commit**: apply the plan in one transaction, either **all-or-nothing** (current behaviour, default) or **valid rows only** (new option, with the skipped rows listed). Register `product_barcodes` for every imported barcode and write stock movements with the batch id as `referenceId`.
+
+```kotlin
+enum class RowStatus { NEW, UPDATE, SKIP_DUPLICATE, ERROR }
+enum class Severity { ERROR, WARNING }
+data class RowIssue(val severity: Severity, val field: String, val message: String)
+data class PlannedRow(
+    val rowNumber: Int, val status: RowStatus, val issues: List<RowIssue>,
+    val matchedProductId: String?, val matchedBy: String?   // "SKU" | "Barcode" | "Name"
+)
+sealed interface Parsed<out T> { data class Ok<T>(val v: T) : Parsed<T>; data class Err(val msg: String) : Parsed<Nothing> }
+```
+
+**Prompts (4 sessions). Always start each with the failing fixture test.**
+```text
+TASK IMPORT-01a (cell reading and number parsing). Files: data/service/ImportExportService.kt plus new data/service/import/CellReader.kt and ImportParsers.kt.
+First create test workbooks in code with Apache POI (tests build .xlsx files in memory): (1) a qty column filled with formulas =B2*C2, (2) barcodes stored as NUMBERS with leading zeros and as TEXT, (3) prices written as "₹ 1,20,000", "12.50", ".50", "19.999", "12 /-", "N/A", "-5", (4) quantity "12 pcs", "1,200", "12.0".
+Write tests asserting the CURRENT code gives wrong results (qty 0 etc.) and show them failing against the intended behaviour. Then implement CellReader (DataFormatter + FormulaEvaluator) and parseQty/parseMoney/parsePackSize returning Parsed<T> (Ok or Err with a human message). No silent defaults anywhere. Do not change the database logic in this task.
+
+TASK IMPORT-01b (header row and CSV). Pass the detected header row index from previewFile into importProducts via ColumnMapping (new field headerRowIndex, default 0 for backward compatibility). Replace readAllCsv/parseCsvLine/previewCsv with one CsvReader supporting BOM, quoted multi-line fields, escaped quotes, delimiter sniffing and charset fallback. Tests with files: title row above headers; BOM file; semicolon file; Windows-1252 file with ₹ and accented names; quoted field containing a newline.
+
+TASK IMPORT-01c (plan then commit). Introduce PlannedRow/RowStatus/RowIssue and function planImport(rows, mapping, existingLookup): List<PlannedRow> that touches NO database writes (existing lookups are read-only suspend calls). Detect duplicates within the file (same barcode, SKU or normalized name). Then commit(plan, mode, validRowsOnly) in one db.withTransaction. Keep all-or-nothing as the default. Tests: 5-row file with 1 bad row => all-or-nothing rolls back with a per-row error list; validRowsOnly imports 4 and reports 1; duplicate rows inside the file are flagged; totals in the result equal what the database contains.
+
+TASK IMPORT-01d (barcodes and re-import safety). On commit, register product_barcodes for imported barcodes (skip when the barcode already maps to a DIFFERENT product and report that as an ERROR row). Make update mode explicit: the existing "update existing" switch becomes an enum ImportMode { NEW_ONLY, ADD_STOCK, SET_STOCK, PRICES_ONLY, DETAILS_ONLY }. SET_STOCK writes a STOCK_ADJUSTMENT movement for the difference (can be negative). Show a confirmation total (see IMPORT-02). Tests: importing the same edited file twice in ADD_STOCK mode is blocked by a clear warning/confirmation; SET_STOCK twice is idempotent.
+```
+
+### IMPORT-02 — Recommended new features  · Branch `import-02-features`
+
+My ranking, with reasons. **Must** = fixes real daily pain/risk; **Should** = clear time saver; **Later** = valuable but needs a decision or more work.
+
+| Rank | Feature | Why it matters | Priority |
+|---|---|---|---|
+| 1 | **Validation preview before importing**: every row with status (New / Update / Duplicate / Error / Warning), filters, counts, and a plain summary: *"This will add 1,240 pcs worth ₹86,300 at cost; 12 new, 40 updates, 3 skipped, 2 errors"* | You see problems *before* stock changes; replaces the "rolled back, read this long message" experience | **Must** |
+| 2 | **Import modes**: *Add new items only* · *Add to stock* · *Set stock to counted quantity (stock-take)* · *Update prices only* · *Update details only* | Today "update" always adds quantity, so re-importing an edited sheet doubles stock | **Must** |
+| 3 | **Error report you can fix and re-upload**: export the failed rows to an Excel file with an extra "Problem" column | Fix the sheet in Excel instead of guessing | **Must** |
+| 4 | **Template download**: an `.xlsx` with the right headers, 3 example rows, a drop-down for category, and an "Instructions" sheet; plus **Export current stock to Excel** (same columns) so you can edit and re-import with *Update* | Eliminates mapping mistakes; round trip workflow | **Must** |
+| 5 | **Auto-detect columns** from header names with synonyms (Item / Product / Particulars → Name; Qty / Stock / Quantity / Pcs → Opening quantity; MRP / Rate / S.P. / Selling → Selling price; Cost / Purchase / C.P. → Cost; EAN / Barcode / Code → Barcode; Wholesale; Brand; Category) with a confidence badge, and **remember the mapping** per file layout (`headers hash`) | Mapping becomes one tap for repeat suppliers | **Should** |
+| 6 | **Extra columns**: Wholesale price; **Boxes + Pack size → pieces**; **Pack price → piece price** when only the pack price is given; low-stock alert | The Add dialog has wholesale and packs but the importer does not | **Should** |
+| 7 | **Missing selling price? Apply default margin** (choose Gross margin or Markup on cost and a %, same rule as the Add dialog), shown as a column in the preview | Faster pricing of new stock | **Should** |
+| 8 | **Auto-generate shop barcodes for rows without one** (BARCODE-01) and offer a **label sheet** for all newly generated codes | Items arrive ready to scan | **Should** |
+| 9 | **Near-duplicate detection**: normalise names (case, spaces, punctuation, "pcs"/"pc") and flag likely matches ("Classmate Notebook 200pg" vs "Classmate Note Book 200 pages") as **Review**, never auto-merge | Prevents catalogue clutter | **Should** |
+| 10 | **Price and cost change review** for updates: old → new, % change, warning for selling < cost or change above a threshold you set | Catches typing mistakes in the sheet | **Should** |
+| 11 | **Barcode checks**: EAN-13 check digit warning; same barcode on two different products in the file or database; leading-zero preservation | Barcode quality | **Should** |
+| 12 | **Progress bar with cancel** and a hard limit (size/rows) with a friendly message; import runs in the background so rotating the phone does not interrupt it | Big sheets | **Should** |
+| 13 | **Import history** screen: file name, time, counts, mode, who imported, **share the error report** | Audit trail (a table already exists: `import_batches`) | **Should** |
+| 14 | **Undo last import** (only while none of the imported products has been sold or adjusted since): reverses the stock movements that carry the batch id | Safety net for a wrong file | **Later** |
+| 15 | **Multi-sheet import** ("one sheet per category": sheet name becomes the category) | Common in shop spreadsheets | **Later** |
+| 16 | **Purchase mode**: supplier and invoice-number columns create a proper purchase bill, supplier dues and landed cost (transport share) instead of an opening-stock movement | Accurate cost and supplier accounts, but it changes accounting; needs your decision | **Later (decision)** |
+
+**Recommended import flow (5 steps):**
+```text
+1 Choose file   → 2 Check columns (auto-detected, editable, "use saved mapping")
+→ 3 Review (row table with status filter + summary line + "Download error report")
+→ 4 Options (mode, valid-rows-only, default margin, generate barcodes)   [step-up auth before commit]
+→ 5 Result (counts, what changed, share report, "Print labels for new items", Undo if enabled)
+```
+
+```text
+TASK IMPORT-02a (auto-mapping + saved mappings). Pure Kotlin AutoMapper.suggest(headers): Map<field, Pair<columnIndex, confidence>> with a synonym table in a Kotlin file (English only for now), and a DataStore or Room-free storage of mappings keyed by a hash of the normalized headers (use existing DataStore; no migration). Tests with 10 realistic header sets (including "Item Name", "S.P.", "C.P.", "Qty in pcs", "EAN").
+TASK IMPORT-02b (review screen). Build the Review step from the PlannedRow list: summary line, status filter chips, a row list showing issues, and "Export error report (.xlsx)" using the existing Excel writer utilities. Total value line must be computed with Long paise arithmetic.
+TASK IMPORT-02c (modes + options step). Wire ImportMode and validRowsOnly; require SEC-03 step-up auth before commit; add confirmation text with totals.
+TASK IMPORT-02d (extra columns). Wholesale, boxes x pack size, pack price -> piece price, default margin for missing selling price (reuse CostCalculator pricing functions; do not duplicate formulas).
+TASK IMPORT-02e (near-duplicates + price review). Name normalizer + similarity (token overlap or trigram; no new library) producing Review warnings; old->new price table for updates.
+```
+
+### IMPORT-03 — Template, export, barcodes-on-import, history  · Branch `import-03-extras`
+```text
+TASK IMPORT-03a. Add "Download template" and "Export current stock" (owner-only). Use Apache POI already in the project. SECURITY: any cell text that starts with = + - or @ must be written with a leading apostrophe or as an explicit text cell to prevent spreadsheet formula injection. Test it with a product named "=HYPERLINK(...)".
+TASK IMPORT-03b. Optional "Generate shop barcodes for rows without barcode" in the import options (uses BARCODE-01's ShopBarcode, collision-checked inside the same transaction) and, in the result step, a "Print labels" button that opens the multi-product label sheet.
+TASK IMPORT-03c. Import history list from import_batches (read-only screen) with the stored counts; add columns only if a migration is unavoidable (then it joins the next DB migration, never its own surprise migration).
+TASK IMPORT-03d (Later). Undo last import by reversing movements carrying the batch id, allowed only when the affected products have no later movements.
+```
+
+**Decisions for you before IMPORT-02:** (1) whether to build *Purchase mode* (accounting change); (2) the default match priority (SKU → barcode → name is current); (3) maximum file size and rows (suggested 10 MB / 20,000 rows); (4) whether "valid rows only" should be the default instead of all-or-nothing (I recommend keeping all-or-nothing as the default because it is safer for money).
+
+---
+
+## 9.8 New tests for these tasks
+
+**TEST-11 — Import fixtures and invariants**  · Branch `test-11-import`
+- Generate workbooks in code (POI) for every case in IMPORT-01 plus: merged header cells, hidden sheet, empty sheet, 20,000 rows, Indian number formats, text with leading/trailing spaces, emoji and Urdu names, a file with a title row, a cash-ledger file (must be refused).
+- **Invariants after any import:** (1) number of products = before + NEW rows; (2) for every product, stock = sum of its movements; (3) totals shown in the preview equal totals in the database after commit; (4) all-or-nothing leaves the database byte-for-byte unchanged on failure (compare row counts and a checksum of the key tables); (5) re-running the same import in `SET_STOCK` mode changes nothing; (6) importing, then undo (if built) restores stock.
+- Property test: random mixes of NEW/UPDATE/duplicate/error rows with a fixed seed; the plan's counts must equal the commit result's counts.
+
+**TEST-12 — Barcode quality**  · Branch `test-12-barcode`
+- Uniqueness (10,000+), format, `moduleWidthMm` ≥ 0.30 mm for new piece codes on every label preset, text fits in the label, PDF opens (page count correct for N copies), EAN-13 vectors, legacy codes still resolve, alias codes resolve to the same product, Add-mode save registers `product_barcodes`.
+- **Round-trip decode test:** render the barcode bitmap with `BarcodeGeneratorService`, decode it with the same ZXing `MultiFormatReader` the scanner uses (JVM-friendly with `BufferedImage`-free luminance source), assert the decoded text equals the payload for 200 random codes, and also after downscaling the bitmap to 50 % and adding mild blur, to approximate poor printing. Use this test to *prove* the old 39-character code fails at a size where the new 12-character code passes (a failing test for the old format documents the improvement).
+
+**TEST-13 — Screens in light and dark**  · Branch `test-13-ui-matrix`
+- For Bill History, Cash In, Cash Out, Edit cash entry, Add Stock, Edit Stock, Import steps: Compose UI tests that render at **font scale 1.0 and 1.3**, in **light and dark**, and assert: no text node is wrapped letter-by-letter (the "Custom" bug: assert the chip's width ≥ its text width), required buttons are visible without scrolling (Save/Cancel), no touch target < 48 dp, and that empty/error states appear.
+- Optional (new dependency, approve first): screenshot testing such as Paparazzi, to compare images between commits. Without it, take the manual screenshots in 5.9 and keep them in `docs/verification/screens/`.
+
+---
+
+## 9.9 Decisions needed before the new tasks (the assistant must not guess)
+
+1. **Label printer/sticker size** (A4 sheet, or thermal 50 × 25 / 38 × 25 mm?) — BARCODE-01d.
+2. **Keep legacy long barcodes printable?** Recommended: add short alias codes, keep old ones scannable.
+3. **Colours:** approve the proposed cream/charcoal container colours (UI-00) after seeing them on your phone.
+4. **"GPAY" label:** rename the visible text to "UPI" while keeping the stored key `GPAY` (recommended), or keep both words.
+5. **Import:** purchase mode yes/no; maximum file size/rows; default mode; whether to allow "valid rows only".
+6. **Category handling in Add Stock:** dropdown of existing categories only, or free text with suggestions?
+7. **Should Billing-role phones be able to add products at all?** (Today `addOrUpdateProductWithStock` requires the Owner role.)
+
+## 9.10 Task index additions
+
+| ID | Title | Severity | Size | Depends on | New dependency? |
+|---|---|---|---|---|---|
+| UI-00 | Theme container colours + status colours | Medium | S | — | No |
+| UI-01a–c | Bill History redesign + range picker fix | Medium (visible bug) | M | UI-00, FEAT-01 | No |
+| UI-02a–b | Cash In/Out dialogs | Medium | M | UI-00 | No |
+| UI-03a–c | Add/Edit Stock dialog | Medium | L | UI-00, BARCODE-01c | No |
+| BARCODE-01a–d | Short codes, Add-mode generate, vector labels | High (usability) | M–L | — | No |
+| IMPORT-01a–d | Import correctness fixes | **High (silent corruption)** | L | — | No |
+| IMPORT-02a–e | Import features (review, modes, mapping, extras) | Medium | L | IMPORT-01, SEC-03 | No |
+| IMPORT-03a–d | Template/export, barcodes on import, history, undo | Medium | M | IMPORT-02, BARCODE-01 | No |
+| TEST-11 | Import fixtures and invariants | — | M | IMPORT-01 | No |
+| TEST-12 | Barcode quality + round-trip decode | — | M | BARCODE-01 | No |
+| TEST-13 | Light/dark/large-text screen tests | — | M | UI-01…03 | Optional (Paparazzi) |
+
+**What this addendum did not verify:** the layout was reasoned from your screenshots and the *original* source, not from the new local code; I did not run the app; barcode print quality and the "0.12 mm" figure are calculations that must be confirmed on paper with your printer and scanner; the proposed colours and wireframes are starting points, not finished design.
+
+---
