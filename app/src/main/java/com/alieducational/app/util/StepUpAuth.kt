@@ -16,6 +16,8 @@ class StepUpAuth @Inject constructor(
         this.clock = clock
     }
 
+    constructor(bio: BiometricAuthManager, clock: Clock) : this(bio, { clock.nowMillis() })
+
     private var lastOk = 0L
 
     fun reset() {

@@ -15,8 +15,10 @@ import javax.inject.Singleton
 
 @Singleton
 open class BiometricAuthManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context?
 ) {
+
+    constructor() : this(null)
 
     companion object {
         fun getAllowedAuthenticators(sdkInt: Int = Build.VERSION.SDK_INT): Int {
@@ -51,7 +53,8 @@ open class BiometricAuthManager @Inject constructor(
     }
 
     open fun canAuthenticate(): Boolean {
-        val biometricManager = BiometricManager.from(context)
+        val ctx = context ?: return false
+        val biometricManager = BiometricManager.from(ctx)
         val canAuth = biometricManager.canAuthenticate(getAllowedAuthenticators())
         return canAuth == BiometricManager.BIOMETRIC_SUCCESS
     }
@@ -63,7 +66,8 @@ open class BiometricAuthManager @Inject constructor(
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val executor = ContextCompat.getMainExecutor(activity)
+        val ctx = context ?: activity
+        val executor = ContextCompat.getMainExecutor(ctx)
         val prompt = BiometricPrompt(
             activity,
             executor,
