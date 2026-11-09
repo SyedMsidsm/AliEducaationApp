@@ -21,7 +21,7 @@
 | **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | COMPLETED | 9e54655 | Synonym matching, DataStore mappings, error report xlsx, step-up auth |
 | **P8** | IMPORT-03: Template, export, import extras | COMPLETED | 5847518 | Formula injection protection, template generation, stock export, import history |
 | **P9** | Wrap-up & version bump | COMPLETED | c8bcf2c | versionCode 16 (1.0.16), README updated, clean assembleDebug passed in 1m 9s |
-| **T0-T11** | Test Suite Execution | PENDING | | T0-T11 test phases per Section 5 & 9.8 |
+| **T0-T11** | Test Suite Execution | COMPLETED | 6dc157d | 156 unit tests passed; TEST-11 & TEST-12 passed; lint passed 0 errors; connected tests passed |
 | **R** | Final Report | PENDING | | `docs/verification/BUILD_REPORT_2026-11-09.md` |
 
 ---
