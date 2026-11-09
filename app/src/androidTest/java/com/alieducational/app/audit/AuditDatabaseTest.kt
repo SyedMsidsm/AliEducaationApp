@@ -138,10 +138,12 @@ class AuditDatabaseTest {
     }
     @Test fun migrationFromEveryExportedSchemaPreservesProduct() {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
-        val migrations = arrayOf(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3,
+        val migrations = arrayOf(
+            AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3,
             AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6,
-            AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
-        for (version in 1..7) {
+            AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9
+        )
+        for (version in 1..8) {
             val name = "audit-migrate-$version.db"
             ctx.deleteDatabase(name)
             val file = ctx.getDatabasePath(name).apply { parentFile!!.mkdirs() }
@@ -174,6 +176,12 @@ class AuditDatabaseTest {
                 val product = runBlocking { migrated.productDao().getProductById("audit") }!!
                 assertEquals("v$version stock", 73, product.currentSellableStock)
                 assertEquals("v$version cost", 12345L, product.movingAvgCostPaise)
+
+                // Verify integrity
+                val cursor = migrated.openHelper.readableDatabase.query("PRAGMA integrity_check")
+                assertTrue(cursor.moveToFirst())
+                assertEquals("ok", cursor.getString(0))
+                cursor.close()
             } finally { migrated.close(); ctx.deleteDatabase(name) }
         }
     }
