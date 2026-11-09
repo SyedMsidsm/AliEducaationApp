@@ -295,8 +295,14 @@ fun StockScreen(
                 selectedProductForEdit = null
             },
             onGenerateBarcode = { prodId, onDone ->
-                viewModel.generateShopBarcode(prodId, "PIECE", 1) { entity ->
-                    onDone(entity.barcode)
+                if (prodId.isNotBlank()) {
+                    viewModel.generateShopBarcode(prodId, "PIECE", 1) { entity ->
+                        onDone(entity.barcode)
+                    }
+                } else {
+                    viewModel.suggestShopBarcode("PIECE", 1) { code ->
+                        onDone(code)
+                    }
                 }
             },
             onExportLabels = { prod ->
@@ -335,6 +341,7 @@ fun StockScreen(
         var copiesCountStr by remember { mutableStateOf("24") }
         var selectedUnitLabel by remember { mutableStateOf("Piece") }
         var labelPrice by remember { mutableStateOf(exportProd.sellingPricePiecePaise) }
+        var selectedPreset by remember { mutableStateOf(com.alieducational.app.data.service.LabelPreset.A4_3X8) }
         val exportContext = LocalContext.current
 
         val barcodeBitmap = remember(exportBarcode) {
@@ -393,6 +400,20 @@ fun StockScreen(
                         )
                     }
 
+                    Text("Label Size / Layout", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        com.alieducational.app.data.service.LabelPreset.values().forEach { preset ->
+                            FilterChip(
+                                selected = selectedPreset == preset,
+                                onClick = { selectedPreset = preset },
+                                label = { Text(preset.title, fontSize = 10.sp) }
+                            )
+                        }
+                    }
+
                     OutlinedTextField(
                         value = copiesCountStr,
                         onValueChange = { copiesCountStr = it.filter { ch -> ch.isDigit() } },
@@ -409,13 +430,18 @@ fun StockScreen(
                         val copies = (copiesCountStr.toIntOrNull() ?: 24).coerceIn(1, 100)
                         val price = if (includePriceOnLabel) labelPrice else null
                         try {
-                            val pdfFile = barcodeService.generateLabelsPdf(
+                            val pdfFile = barcodeService.generateMultiLabelsPdf(
                                 context = exportContext,
-                                productName = exportProd.name,
-                                barcode = exportBarcode,
-                                unitLabel = selectedUnitLabel,
-                                pricePaise = price,
-                                copies = copies
+                                items = listOf(
+                                    com.alieducational.app.data.service.LabelItem(
+                                        productName = exportProd.name,
+                                        barcode = exportBarcode,
+                                        unitLabel = selectedUnitLabel,
+                                        pricePaise = price,
+                                        copies = copies
+                                    )
+                                ),
+                                preset = selectedPreset
                             )
                             val uri = FileProvider.getUriForFile(
                                 exportContext,
@@ -613,6 +639,7 @@ fun IntegratedAddStockProductDialog(
 
     var name by remember { mutableStateOf(existingProduct?.name ?: "") }
     var barcode by remember { mutableStateOf(existingProduct?.barcode ?: "") }
+    var printLabelsAfterSave by remember { mutableStateOf(false) }
     var category by remember { mutableStateOf(existingProduct?.category ?: "Stationery") }
     var brand by remember { mutableStateOf(existingProduct?.brand ?: "") }
 
@@ -710,32 +737,90 @@ fun IntegratedAddStockProductDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // 2. Barcode (Optional) with working Camera Scanner button
+                // 2. Barcode (Optional) with Generate and Camera Scanner buttons
                 OutlinedTextField(
                     value = barcode,
                     onValueChange = { barcode = it },
                     label = { Text("Barcode (Optional)") },
                     placeholder = { Text("Scan or enter barcode") },
                     trailingIcon = {
-                        IconButton(
-                            onClick = {
-                                if (hasCameraPermission) {
-                                    showBarcodeScanner = true
-                                } else {
-                                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (barcode.isBlank()) {
+                                IconButton(
+                                    onClick = {
+                                        onGenerateBarcode(existingProduct?.id ?: "") { generated ->
+                                            if (generated.isNotBlank()) barcode = generated
+                                        }
+                                    }
+                                ) {
+                                    Text("✨", fontSize = 16.sp)
                                 }
                             }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.QrCodeScanner,
-                                contentDescription = "Scan Barcode",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            IconButton(
+                                onClick = {
+                                    if (hasCameraPermission) {
+                                        showBarcodeScanner = true
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.QrCodeScanner,
+                                    contentDescription = "Scan Barcode",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (barcode.isNotBlank() && barcode.startsWith("AE-P")) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            val previewBitmap = remember(barcode) {
+                                try {
+                                    BarcodeGeneratorService().generateBarcodeBitmap(barcode, 360, 90)
+                                } catch (_: Exception) { null }
+                            }
+                            if (previewBitmap != null) {
+                                Image(
+                                    bitmap = previewBitmap.asImageBitmap(),
+                                    contentDescription = "Barcode Preview",
+                                    modifier = Modifier.height(50.dp).fillMaxWidth()
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(barcode, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                if (barcode.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { printLabelsAfterSave = !printLabelsAfterSave }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Checkbox(
+                            checked = printLabelsAfterSave,
+                            onCheckedChange = { printLabelsAfterSave = it }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Print labels after saving", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
 
                 if (existingProduct != null) {
                     if (barcode.isBlank()) {
@@ -1093,6 +1178,19 @@ fun IntegratedAddStockProductDialog(
                         isPaidNow,
                         billPaymentMethod
                     )
+                    if (printLabelsAfterSave && barcode.isNotBlank()) {
+                        val tempProd = ProductEntity(
+                            id = scannedProduct?.id ?: existingProduct?.id ?: java.util.UUID.randomUUID().toString(),
+                            name = name.trim(),
+                            category = category.trim().ifBlank { "Stationery" },
+                            brand = brand.trim().ifBlank { null },
+                            barcode = barcode.trim().ifBlank { null },
+                            packSize = packSize,
+                            sellingPricePiecePaise = sellingPaise,
+                            movingAvgCostPaise = costPaise
+                        )
+                        onExportLabels(tempProd)
+                    }
                 }
             ) {
                 Text("Save")

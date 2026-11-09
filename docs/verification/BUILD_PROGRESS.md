@@ -13,9 +13,9 @@
 |---|---|---|---|---|
 | **P0** | Setup, baseline verification, progress file | COMPLETED | `227cdd8` | Baseline compile passed; target files inspected |
 | **P1** | UI-00: Theme tokens (`surfaceContainer*`, `AliStatusColors`, `AliDimens`) | COMPLETED | `c7e4f55` | Warm cream in light mode, dark charcoal in dark mode |
-| **P2** | IMPORT-01: Staged import correctness (CellReader, CsvReader, Plan, Commit) | COMPLETED | Pending | Staged pipeline, zero silent defaults, 10MB/20k limit |
-| **P3** | BARCODE-01: Generator & labels (Crockford base-32, vector labels, 4 presets) | IN PROGRESS | | 12-char codes, legacy alias, vector PDF |
-| **P4** | UI-01: Bill History redesign & DateRangePicker fix | PENDING | | Non-wrapping period chips, M3 DateRangePicker, sticky headers |
+| **P2** | IMPORT-01: Staged import correctness (CellReader, CsvReader, Plan, Commit) | COMPLETED | `c2bcb1e` | Staged pipeline, zero silent defaults, 10MB/20k limit |
+| **P3** | BARCODE-01: Generator & labels (Crockford base-32, vector labels, 4 presets) | COMPLETED | Pending | 12-char codes, legacy alias, vector PDF |
+| **P4** | UI-01: Bill History redesign & DateRangePicker fix | IN PROGRESS | | Non-wrapping period chips, M3 DateRangePicker, sticky headers |
 | **P5** | UI-02: Cash In / Cash Out dialogs (`CashEntryForm`) | PENDING | | Amount-first, autofocus, FlowRow categories, UPI display label |
 | **P6** | UI-03: Add / Edit Stock dialog (fullscreen, sections, live summary) | PENDING | | Exact onSave compatibility, exact paise preview math |
 | **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | PENDING | | Synonym matching, DataStore mappings, error report xlsx |

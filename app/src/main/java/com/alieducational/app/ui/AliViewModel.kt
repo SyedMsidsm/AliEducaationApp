@@ -1030,6 +1030,17 @@ class AliViewModel @Inject constructor(
         return repository.getNoteSuggestions(isIncome, query)
     }
 
+    fun suggestShopBarcode(
+        unitType: String = "PIECE",
+        packQty: Int = 1,
+        onResult: (String) -> Unit
+    ) {
+        viewModelScope.launch(operationHandler) {
+            val code = repository.suggestShopBarcode(unitType, packQty)
+            onResult(code)
+        }
+    }
+
     fun generateShopBarcode(
         productId: String,
         unitType: String = "PIECE",
@@ -1039,6 +1050,22 @@ class AliViewModel @Inject constructor(
         viewModelScope.launch(operationHandler) {
             val entity = repository.generateAndRegisterBarcode(productId, unitType, packQty)
             onResult(entity)
+        }
+    }
+
+    fun generateBarcodesForMissing(
+        productIds: List<String>,
+        onDone: (Int) -> Unit = {}
+    ) {
+        viewModelScope.launch(operationHandler) {
+            var count = 0
+            for (id in productIds) {
+                try {
+                    repository.generateAndRegisterBarcode(id, "PIECE", 1)
+                    count++
+                } catch (_: Exception) {}
+            }
+            onDone(count)
         }
     }
 

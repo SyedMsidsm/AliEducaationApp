@@ -1527,6 +1527,21 @@ class AppRepository @Inject constructor(
         return result
     }
 
+    suspend fun suggestShopBarcode(
+        unitType: String = "PIECE",
+        packQty: Int = 1
+    ): String {
+        for (attempt in 1..5) {
+            val candidate = com.alieducational.app.domain.barcode.ShopBarcode.newPayload(unitType, packQty)
+            val existingInProducts = productDao.getProductByBarcode(candidate)
+            val existingInAux = productBarcodeDao.findByBarcode(candidate)
+            if (existingInProducts == null && existingInAux == null) {
+                return candidate
+            }
+        }
+        return com.alieducational.app.domain.barcode.ShopBarcode.newPayload(unitType, packQty)
+    }
+
     suspend fun generateAndRegisterBarcode(
         productId: String,
         unitType: String = "PIECE",
@@ -1538,9 +1553,14 @@ class AppRepository @Inject constructor(
 
         require(!product.isArchived && unitType in setOf("PIECE", "PACK") && (unitType != "PACK" || packQty > 1)) { "Invalid product or pack" }
         require(product.barcode.isNullOrBlank() || product.barcode.startsWith("AE-P")) { "Keep the manufacturer barcode; shop generation is only for items without one" }
-        val prior = productBarcodeDao.getBarcodesForProduct(productId).firstOrNull { it.unitType == unitType && (unitType != "PACK" || it.packQuantity == packQty) && it.barcode.startsWith("AE-P") }
-        if (prior != null) return@withTransaction prior
-        val code = barcodeGeneratorService.createBarcodePayload(productId, unitType, packQty)
+
+        val barcodesForProduct = productBarcodeDao.getBarcodesForProduct(productId)
+            .filter { it.unitType == unitType && (unitType != "PACK" || it.packQuantity == packQty) && it.barcode.startsWith("AE-P") }
+
+        val shortPrior = barcodesForProduct.firstOrNull { it.barcode.length <= 16 }
+        if (shortPrior != null) return@withTransaction shortPrior
+
+        val code = suggestShopBarcode(unitType, packQty)
         val existing = productBarcodeDao.findByBarcode(code)
         if (existing != null) {
             require(existing.productId == productId) { "Barcode collision; generation aborted" }
@@ -1555,7 +1575,7 @@ class AppRepository @Inject constructor(
         )
         productBarcodeDao.insertBarcode(entity)
 
-        if (product.barcode.isNullOrBlank() && unitType == "PIECE") {
+        if (unitType == "PIECE" && (product.barcode.isNullOrBlank() || product.barcode.startsWith("AE-P"))) {
             productDao.updateProduct(product.copy(barcode = code, updatedAt = System.currentTimeMillis()))
         }
 
