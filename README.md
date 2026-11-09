@@ -4,11 +4,20 @@ Android shop-management application and its design, requirements and testing doc
 
 ## Current application
 
-The root Gradle project is the current application copied from the working Antigravity project on 7 November 2026. Its configuration declares version **1.0.15 (15)**, Room schema **9**, minimum SDK **26**, target/compile SDK **36**, and JVM target **17**.
+The root Gradle project is the current application copied from the working Antigravity project on 7 November 2026. Its configuration declares version **1.0.16 (16)**, Room schema **9**, minimum SDK **26**, target/compile SDK **36**, and JVM target **17**.
 
 Source includes inventory and purchasing, billing and held bills, customer/supplier accounts, cash and expenses, service billing, Pigmy savings, reports, receipts, spreadsheet import/export, backup/recovery, local two-phone synchronization and a slim launcher widget.
 
 Presence in source is not certification that every workflow is correct or verified on a phone. This publication does not run a new Android build or install an update.
+
+
+### Section 9 Upgrades (November 2026)
+- **UI-00 Theme Tokens**: Container colors (`surfaceContainerLowest` through `Highest`), semantic status colors (`AliStatusColors`), and layout dimensions (`AliDimens`).
+- **UI-01 Bill History**: Redesigned history list with period filters, Material 3 DateRangePicker dialog, daily sticky headers with daily totals, and tabular layout.
+- **UI-02 Cash In/Out Dialogs**: Autofocus amount-first entry, dynamic paise preview, category chips, and UPI display label.
+- **UI-03 Add/Edit Stock Dialog**: Fullscreen dialog with structured sections (Product, Stock, Pricing, Supplier Bill), landed cost calculation, and discard protection.
+- **BARCODE-01 Short Shop Barcodes**: 12-character Crockford Base-32 (`AE-P...`) piece/pack codes with backward-compatible alias resolution and vector PDF label sheets.
+- **IMPORT-01..03 Staged Import**: Staged catalog import pipeline with 5-step wizard, automatic column mapping with confidence badges, saved layout persistence, formula injection protection, stock export, and import history.
 
 ## Repository map
 

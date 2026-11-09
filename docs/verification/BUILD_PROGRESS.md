@@ -19,8 +19,8 @@
 | **P5** | UI-02: Cash In / Cash Out dialogs (`CashEntryForm`) | COMPLETED | `eda19f4` | Amount-first, autofocus, FlowRow categories, UPI display label |
 | **P6** | UI-03: Add / Edit Stock dialog (fullscreen, sections, live summary) | COMPLETED | `afdf978` | Exact onSave compatibility, exact paise preview math |
 | **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | COMPLETED | 9e54655 | Synonym matching, DataStore mappings, error report xlsx, step-up auth |
-| **P8** | IMPORT-03: Template, export, import extras | COMPLETED | Pending commit | Formula injection protection, template generation, stock export, import history |
-| **P9** | Wrap-up & version bump | IN PROGRESS | | versionCode +1, patch version bump, clean build verify |
+| **P8** | IMPORT-03: Template, export, import extras | COMPLETED | 5847518 | Formula injection protection, template generation, stock export, import history |
+| **P9** | Wrap-up & version bump | COMPLETED | c8bcf2c | versionCode 16 (1.0.16), README updated, clean assembleDebug passed in 1m 9s |
 | **T0-T11** | Test Suite Execution | PENDING | | T0-T11 test phases per Section 5 & 9.8 |
 | **R** | Final Report | PENDING | | `docs/verification/BUILD_REPORT_2026-11-09.md` |
 
@@ -54,3 +54,15 @@
 
 1. **ProductEntity Wholesale Price Field**:
    - `ProductEntity` defines `wholesalePricePiecePaise: Long = 0L` rather than `wholesalePricePaise`. Adapted `ImportExportService` to use `wholesalePricePiecePaise` to maintain exact Room entity compatibility without requiring database migration.
+
+2. **Pigmy Scheme Entity Type in Cash Tracker**:
+   - `CashTrackerScreen.kt` references `PigmySchemeEntity` for daily schemes (rather than `PigmyAccountEntity`). The unified `CashEntryForm` maps schemes and accounts via `PigmySchemeEntity` without database modifications.
+
+3. **Column Mapping Persistence via DataStore**:
+   - Staged import column mappings are persisted directly in `AppPreferences` via AndroidX DataStore keyed by SHA-256 header hash (`import_mapping_${hash}`). This avoids introducing a new Room entity or database migration while providing reliable layout recall across app sessions.
+
+4. **Stock Quantity Increment Semantics**:
+   - In `StockScreen.kt`, `addOrUpdateProductWithStock` treats incoming quantity as an increment to existing stock (`currentSellableStock + qty`). The edit dialog clearly labels the field "Add to stock (pcs)" and shows an "In stock now: N pcs" badge to ensure users are aware that entered quantity adds to current inventory.
+
+5. **Legacy Barcode Compatibility & Aliasing**:
+   - New barcode generation generates 12-character Crockford Base-32 payloads (`AE-P...`). Existing 39-character barcodes remain fully readable and valid, and short codes can be added as aliases via `product_barcodes`.
