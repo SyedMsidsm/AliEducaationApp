@@ -388,4 +388,16 @@ class AppPreferences @Inject constructor(
             preferences[Keys.RECEIPT_LANGUAGE] = language
         }
     }
+
+    suspend fun saveImportMapping(headersHash: String, mappingJson: String) {
+        val key = stringPreferencesKey("import_mapping_$headersHash")
+        context.dataStore.edit { preferences ->
+            preferences[key] = mappingJson
+        }
+    }
+
+    suspend fun getImportMapping(headersHash: String): String? {
+        val key = stringPreferencesKey("import_mapping_$headersHash")
+        return context.dataStore.data.first()[key]
+    }
 }

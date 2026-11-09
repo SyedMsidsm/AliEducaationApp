@@ -25,6 +25,10 @@ import kotlinx.coroutines.withContext
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import java.io.InputStream
+import java.io.File
+import java.io.FileOutputStream
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import com.alieducational.app.domain.barcode.ShopBarcode
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
@@ -87,7 +91,9 @@ data class PlannedRow(
     val issues: List<RowIssue>,
     val matchedProductId: String?,
     val matchedBy: String?, // "SKU" | "Barcode" | "Name"
-    val parsedData: ParsedProductData? = null
+    val parsedData: ParsedProductData? = null,
+    val oldSellingPiecePaise: Long? = null,
+    val oldCostPaise: Long? = null
 )
 
 enum class ImportMode {
@@ -354,6 +360,31 @@ class ImportExportService @Inject constructor(
         }
     }
 
+    suspend fun loadAllRows(
+        uri: Uri,
+        fileName: String,
+        sheetIndex: Int = 0
+    ): Pair<List<String>, List<List<String>>> = withContext(Dispatchers.IO) {
+        val all = readRows(uri, fileName, sheetIndex)
+        if (all.isEmpty()) return@withContext Pair(emptyList(), emptyList())
+        var headerIndex = 0
+        for (i in 0 until minOf(10, all.size)) {
+            val cols = all[i]
+            val nonBlank = cols.count { it.isNotBlank() }
+            val hasKeywords = cols.any { c ->
+                val l = c.lowercase(Locale.ROOT)
+                l.contains("name") || l.contains("product") || l.contains("item") ||
+                        l.contains("price") || l.contains("cost") || l.contains("stock") ||
+                        l.contains("sku") || l.contains("barcode")
+            }
+            if (hasKeywords && nonBlank >= 2) {
+                headerIndex = i
+                break
+            }
+        }
+        Pair(all[headerIndex], all)
+    }
+
     /**
      * Stage 3: Pure planning of the import (NO database writes).
      * Validates fields, checks for duplicates inside the file, matches existing DB products,
@@ -362,7 +393,10 @@ class ImportExportService @Inject constructor(
     suspend fun planImport(
         rows: List<List<String>>,
         mapping: ColumnMapping,
-        mode: ImportMode = ImportMode.ADD_STOCK
+        mode: ImportMode = ImportMode.ADD_STOCK,
+        defaultMarginPercent: Double? = null,
+        defaultMarginType: String = "MARKUP",
+        generateMissingBarcodes: Boolean = false
     ): List<PlannedRow> = withContext(Dispatchers.IO) {
         val pDao = productDao
         val bDao = effectiveBarcodeDao
@@ -470,8 +504,42 @@ class ImportExportService @Inject constructor(
                 }
             }
 
-            if (sellingPiecePaise > 0L && costPaise > 0L && sellingPiecePaise < costPaise) {
-                issues.add(RowIssue(Severity.WARNING, "sellingPricePiece", "Selling price (₹${sellingPiecePaise / 100.0}) is below cost (₹${costPaise / 100.0})"))
+            val boxes = if (mapping.boxesBroughtIndex in row.indices) {
+                when (val res = ImportParsers.parseQty(row[mapping.boxesBroughtIndex], defaultIfEmpty = 0)) {
+                    is Parsed.Ok -> res.v
+                    is Parsed.Err -> {
+                        issues.add(RowIssue(Severity.WARNING, "boxes", res.msg))
+                        0
+                    }
+                }
+            } else 0
+            val effectiveQty = if (boxes > 0 && packSize > 0) boxes * packSize else openingQty
+
+            var effectiveSellingPiece = sellingPiecePaise
+            var effectiveSellingPack = sellingPackPaise
+
+            if (effectiveSellingPiece == 0L && effectiveSellingPack > 0L && packSize > 0) {
+                effectiveSellingPiece = (effectiveSellingPack / packSize).coerceAtLeast(0L)
+            } else if (effectiveSellingPiece == 0L && costPaise > 0L && defaultMarginPercent != null && defaultMarginPercent > 0.0) {
+                val mode = if (defaultMarginType == "GROSS_MARGIN") CostCalculator.PricingMode.GROSS_MARGIN else CostCalculator.PricingMode.MARKUP
+                effectiveSellingPiece = CostCalculator.calculatePriceFromPercentage(costPaise, defaultMarginPercent, mode) ?: costPaise
+                effectiveSellingPack = effectiveSellingPiece * packSize
+            }
+
+            var finalBarcode = barcode
+            if (finalBarcode.isNullOrBlank() && generateMissingBarcodes) {
+                var candidate = ShopBarcode.newPayload(unitType = "PIECE", packQty = 1)
+                var tries = 0
+                while ((productsByBarcode.containsKey(candidate) || seenBarcodesInFile.containsKey(candidate)) && tries < 10) {
+                    candidate = ShopBarcode.newPayload(unitType = "PIECE", packQty = 1)
+                    tries++
+                }
+                finalBarcode = candidate
+                seenBarcodesInFile[candidate] = fileRowNum
+            }
+
+            if (effectiveSellingPiece > 0L && costPaise > 0L && effectiveSellingPiece < costPaise) {
+                issues.add(RowIssue(Severity.WARNING, "sellingPricePiece", "Selling price (₹${effectiveSellingPiece / 100.0}) is below cost (₹${costPaise / 100.0})"))
             }
 
             // In-file duplicate detection
@@ -549,18 +617,29 @@ class ImportExportService @Inject constructor(
                 else -> RowStatus.UPDATE
             }
 
+            if (matchedProduct == null && nameRaw.isNotBlank()) {
+                val normNew = normalizeNameForNearDuplicate(nameRaw)
+                val nearMatch = existingProducts.firstOrNull { existing ->
+                    val normEx = normalizeNameForNearDuplicate(existing.name)
+                    normEx == normNew || isNearDuplicate(normNew, normEx)
+                }
+                if (nearMatch != null) {
+                    issues.add(RowIssue(Severity.WARNING, "name", "Possible duplicate of existing product '${nearMatch.name}'"))
+                }
+            }
+
             val parsedData = ParsedProductData(
                 name = nameRaw,
                 category = category,
                 brand = brand,
                 sku = skuRaw,
-                barcode = barcode,
+                barcode = finalBarcode,
                 baseUnit = baseUnit,
                 packSize = packSize,
-                quantity = openingQty,
+                quantity = effectiveQty,
                 costPaise = costPaise,
-                sellingPiecePaise = sellingPiecePaise,
-                sellingPackPaise = sellingPackPaise,
+                sellingPiecePaise = effectiveSellingPiece,
+                sellingPackPaise = effectiveSellingPack,
                 wholesalePaise = wholesalePaise,
                 lowStock = lowStock
             )
@@ -572,7 +651,9 @@ class ImportExportService @Inject constructor(
                     issues = issues,
                     matchedProductId = matchedProduct?.id,
                     matchedBy = matchedBy,
-                    parsedData = parsedData
+                    parsedData = parsedData,
+                    oldSellingPiecePaise = matchedProduct?.sellingPricePiecePaise,
+                    oldCostPaise = matchedProduct?.movingAvgCostPaise
                 )
             )
         }
@@ -993,5 +1074,74 @@ class ImportExportService @Inject constructor(
         workbook.close()
         stream.close()
         return rows
+    }
+
+    fun exportErrorReport(
+        headers: List<String>,
+        allRows: List<List<String>>,
+        plan: List<PlannedRow>,
+        fileName: String = "import_errors.xlsx"
+    ): File? {
+        val errorOrWarningRows = plan.filter { it.issues.isNotEmpty() }
+        if (errorOrWarningRows.isEmpty()) return null
+
+        val workbook = XSSFWorkbook()
+        val sheet = workbook.createSheet("Import Issues")
+
+        val headerRow = sheet.createRow(0)
+        var colIdx = 0
+        headerRow.createCell(colIdx++).setCellValue("Row Number")
+        headerRow.createCell(colIdx++).setCellValue("Status")
+        headers.forEach { h ->
+            headerRow.createCell(colIdx++).setCellValue(h)
+        }
+        headerRow.createCell(colIdx++).setCellValue("Issues")
+
+        errorOrWarningRows.forEachIndexed { rowOutIdx, pRow ->
+            val excelRow = sheet.createRow(rowOutIdx + 1)
+            var cIdx = 0
+            excelRow.createCell(cIdx++).setCellValue(pRow.rowNumber.toDouble())
+            excelRow.createCell(cIdx++).setCellValue(pRow.status.name)
+
+            val originalRow = allRows.getOrNull(pRow.rowNumber - 1)
+            headers.indices.forEach { hIdx ->
+                val cellVal = originalRow?.getOrNull(hIdx) ?: ""
+                excelRow.createCell(cIdx++).setCellValue(cellVal)
+            }
+
+            val issuesStr = pRow.issues.joinToString("; ") { "[${it.severity}] ${it.field}: ${it.message}" }
+            excelRow.createCell(cIdx++).setCellValue(issuesStr)
+        }
+
+        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outFile = File(outDir, "import_errors_${System.currentTimeMillis()}.xlsx")
+        return try {
+            FileOutputStream(outFile).use { fos ->
+                workbook.write(fos)
+            }
+            workbook.close()
+            outFile
+        } catch (_: Exception) {
+            try { workbook.close() } catch (_: Exception) {}
+            null
+        }
+    }
+
+    private fun normalizeNameForNearDuplicate(name: String): String {
+        return name.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]"), " ")
+            .split(" ")
+            .filter { it.isNotBlank() && it !in setOf("pc", "pcs", "pk", "pack", "pkt", "box", "boxes") }
+            .joinToString(" ")
+    }
+
+    private fun isNearDuplicate(a: String, b: String): Boolean {
+        if (a == b) return true
+        val tokensA = a.split(" ").filter { it.isNotBlank() }.toSet()
+        val tokensB = b.split(" ").filter { it.isNotBlank() }.toSet()
+        if (tokensA.isEmpty() || tokensB.isEmpty()) return false
+        val intersection = tokensA.intersect(tokensB).size
+        val union = tokensA.union(tokensB).size
+        return (intersection.toDouble() / union.toDouble()) >= 0.75
     }
 }

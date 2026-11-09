@@ -32,6 +32,8 @@ import com.alieducational.app.data.service.CashTrackerImportPreview
 import com.alieducational.app.data.service.ColumnMapping
 import com.alieducational.app.data.service.ImportExportService
 import com.alieducational.app.data.service.ImportResult
+import com.alieducational.app.data.service.ImportMode
+import com.alieducational.app.data.service.PlannedRow
 import com.alieducational.app.data.service.OwnerSyncService
 import com.alieducational.app.data.service.ReceiptService
 import com.alieducational.app.data.service.SpreadsheetPreview
@@ -1413,6 +1415,83 @@ class AliViewModel @Inject constructor(
 
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    private val _plannedRows = MutableStateFlow<List<PlannedRow>>(emptyList())
+    val plannedRows: StateFlow<List<PlannedRow>> = _plannedRows.asStateFlow()
+
+    suspend fun loadSpreadsheetRows(uri: Uri, fileName: String, sheetIndex: Int = 0): Pair<List<String>, List<List<String>>> {
+        return importExportService.loadAllRows(uri, fileName, sheetIndex)
+    }
+
+    suspend fun planImport(
+        rows: List<List<String>>,
+        mapping: ColumnMapping,
+        mode: ImportMode = ImportMode.ADD_STOCK,
+        defaultMarginPercent: Double? = null,
+        defaultMarginType: String = "MARKUP",
+        generateBarcodes: Boolean = false
+    ): List<PlannedRow> {
+        val plan = importExportService.planImport(
+            rows = rows,
+            mapping = mapping,
+            mode = mode,
+            defaultMarginPercent = defaultMarginPercent,
+            defaultMarginType = defaultMarginType,
+            generateMissingBarcodes = generateBarcodes
+        )
+        _plannedRows.value = plan
+        return plan
+    }
+
+    fun commitImport(
+        plan: List<PlannedRow>,
+        mode: ImportMode,
+        validRowsOnly: Boolean,
+        fileName: String,
+        mapping: ColumnMapping,
+        onDone: (ImportResult) -> Unit = {}
+    ) {
+        if (_isImporting.value) return
+        viewModelScope.launch(operationHandler) {
+            _isImporting.value = true
+            try {
+                val result = importExportService.commit(
+                    plan = plan,
+                    mode = mode,
+                    validRowsOnly = validRowsOnly,
+                    fileName = fileName,
+                    mapping = mapping
+                )
+                _importResult.value = result
+                onDone(result)
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
+    fun exportImportErrorReport(
+        headers: List<String>,
+        allRows: List<List<String>>,
+        plan: List<PlannedRow>,
+        fileName: String
+    ): File? {
+        return importExportService.exportErrorReport(headers, allRows, plan, fileName)
+    }
+
+    suspend fun saveImportMapping(headersHash: String, mappingJson: String) {
+        preferences.saveImportMapping(headersHash, mappingJson)
+    }
+
+    suspend fun getSavedImportMapping(headersHash: String): String? {
+        return preferences.getImportMapping(headersHash)
+    }
+
+    fun resetImport() {
+        _previewData.value = null
+        _importResult.value = null
+        _plannedRows.value = emptyList()
+    }
 
     fun previewSpreadsheet(uri: Uri, fileName: String, sheetIndex: Int = 0) {
         viewModelScope.launch(operationHandler) {
