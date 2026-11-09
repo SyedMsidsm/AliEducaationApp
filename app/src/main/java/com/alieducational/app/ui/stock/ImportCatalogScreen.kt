@@ -93,6 +93,8 @@ fun ImportCatalogScreen(
     var defaultMarginType by remember { mutableStateOf("MARKUP") } // MARKUP or GROSS_MARGIN
     var generateMissingBarcodes by remember { mutableStateOf(true) }
     var showPinFallbackDialog by remember { mutableStateOf(false) }
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    val importBatches by viewModel.allImportBatches.collectAsState()
 
     // Review state
     var reviewStatusFilter by remember { mutableStateOf("ALL") }
@@ -273,6 +275,11 @@ fun ImportCatalogScreen(
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { showHistoryDialog = true }) {
+                        Icon(Icons.Filled.History, contentDescription = "Import History")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground
@@ -317,6 +324,36 @@ fun ImportCatalogScreen(
                                         val pair = viewModel.loadSpreadsheetRows(uri, selectedFileName, newIdx)
                                         headers = pair.first
                                         allLoadedRows = pair.second
+                                    }
+                                }
+                            },
+                            onDownloadTemplate = {
+                                val tFile = viewModel.downloadImportTemplate()
+                                if (tFile != null) {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tFile)
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Share Catalog Template"))
+                                } else {
+                                    Toast.makeText(context, "Failed to create template", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onExportCurrentStock = {
+                                coroutineScope.launch {
+                                    val sFile = viewModel.exportCurrentStockToExcel()
+                                    if (sFile != null) {
+                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", sFile)
+                                        val intent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, "Share Current Stock"))
+                                    } else {
+                                        Toast.makeText(context, "No stock available to export", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },
@@ -495,6 +532,13 @@ fun ImportCatalogScreen(
                     }
                 )
             }
+
+            if (showHistoryDialog) {
+                ImportHistoryDialog(
+                    batches = importBatches,
+                    onDismiss = { showHistoryDialog = false }
+                )
+            }
         }
     }
 }
@@ -569,6 +613,8 @@ fun Step1ChooseFile(
     selectedSheetIndex: Int,
     onPickFile: () -> Unit,
     onSelectSheet: (Int) -> Unit,
+    onDownloadTemplate: () -> Unit,
+    onExportCurrentStock: () -> Unit,
     onNext: () -> Unit
 ) {
     val isCash = previewData?.isCashLedger == true
@@ -626,6 +672,53 @@ fun Step1ChooseFile(
                         Icon(Icons.Filled.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(if (selectedFileName.isBlank()) "Browse File" else "Change File")
+                    }
+                }
+            }
+        }
+
+        // Quick Tools: Template & Stock Export
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(AliDimens.radiusMd)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Quick Tools & Stock Export",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Download a clean Excel template with sample rows and instructions, or export current stock to edit and re-import.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDownloadTemplate,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                        ) {
+                            Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Template (.xlsx)", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = onExportCurrentStock,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                        ) {
+                            Icon(Icons.Filled.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Export Stock", fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -1715,4 +1808,76 @@ fun ColumnDropdownSelector(
             }
         }
     }
+}
+
+// TODO(next run): undo last import, purchase mode, multi-sheet
+
+@Composable
+fun ImportHistoryDialog(
+    batches: List<com.alieducational.app.data.local.entity.ImportBatchEntity>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Import History", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            if (batches.isEmpty()) {
+                Text(
+                    text = "No import batches recorded yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(batches) { batch ->
+                        val dateStr = remember(batch.timestamp) {
+                            java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+                                .format(java.util.Date(batch.timestamp))
+                        }
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(AliDimens.radiusSm)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = batch.fileName,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = dateStr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Imported: ${batch.importedCount} • Skipped: ${batch.skippedCount} • Total rows: ${batch.totalRows}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }

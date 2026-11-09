@@ -18,9 +18,9 @@
 | **P4** | UI-01: Bill History redesign & DateRangePicker fix | COMPLETED | `13c7dd4` | Non-wrapping period chips, M3 DateRangePicker, sticky headers |
 | **P5** | UI-02: Cash In / Cash Out dialogs (`CashEntryForm`) | COMPLETED | `eda19f4` | Amount-first, autofocus, FlowRow categories, UPI display label |
 | **P6** | UI-03: Add / Edit Stock dialog (fullscreen, sections, live summary) | COMPLETED | `afdf978` | Exact onSave compatibility, exact paise preview math |
-| **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | COMPLETED | Pending commit | Synonym matching, DataStore mappings, error report xlsx, step-up auth |
-| **P8** | IMPORT-03: Template, export, import extras | IN PROGRESS | | Formula injection protection, label printing, import history |
-| **P9** | Wrap-up & version bump | PENDING | | versionCode +1, patch version bump, clean build verify |
+| **P7** | IMPORT-02: Validated import flow & features (5-step wizard, auto-mapper) | COMPLETED | 9e54655 | Synonym matching, DataStore mappings, error report xlsx, step-up auth |
+| **P8** | IMPORT-03: Template, export, import extras | COMPLETED | Pending commit | Formula injection protection, template generation, stock export, import history |
+| **P9** | Wrap-up & version bump | IN PROGRESS | | versionCode +1, patch version bump, clean build verify |
 | **T0-T11** | Test Suite Execution | PENDING | | T0-T11 test phases per Section 5 & 9.8 |
 | **R** | Final Report | PENDING | | `docs/verification/BUILD_REPORT_2026-11-09.md` |
 

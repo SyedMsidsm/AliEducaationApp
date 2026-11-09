@@ -1144,4 +1144,143 @@ class ImportExportService @Inject constructor(
         val union = tokensA.union(tokensB).size
         return (intersection.toDouble() / union.toDouble()) >= 0.75
     }
+    // TODO(next run): undo last import, purchase mode, multi-sheet
+
+    fun sanitizeForSpreadsheet(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.startsWith("=") || trimmed.startsWith("+") || trimmed.startsWith("-") || trimmed.startsWith("@")) {
+            return "'$trimmed"
+        }
+        return value
+    }
+
+    fun generateTemplate(): File? {
+        val workbook = XSSFWorkbook()
+        val catalogSheet = workbook.createSheet("Product Catalog Template")
+
+        val headerFont = workbook.createFont().apply { bold = true }
+        val headerStyle = workbook.createCellStyle().apply { setFont(headerFont) }
+
+        val headers = listOf(
+            "Product Name *", "Category", "Brand", "SKU", "Barcode",
+            "Opening Stock (Pcs)", "Boxes", "Pack Size", "Purchase Cost (Rs)",
+            "Selling Price Piece (Rs)", "Selling Price Pack (Rs)", "Wholesale Price (Rs)", "Low Stock Alert"
+        )
+
+        val hRow = catalogSheet.createRow(0)
+        headers.forEachIndexed { idx, title ->
+            val cell = hRow.createCell(idx)
+            cell.setCellValue(title)
+            cell.cellStyle = headerStyle
+        }
+
+        val examples = listOf(
+            listOf("Classmate Notebook 200pg", "Notebooks", "Classmate", "CN-200", "AE-P10293847", "50", "2", "25", "45.00", "60.00", "1500.00", "52.00", "10"),
+            listOf("Cello Gripper Pen Blue", "Pens", "Cello", "CG-BLU", "8901234567890", "120", "1", "120", "8.00", "10.00", "1200.00", "9.00", "20"),
+            listOf("Doms Neon Eraser", "Erasers", "Doms", "DE-NEON", "", "200", "4", "50", "3.50", "5.00", "250.00", "4.00", "15")
+        )
+
+        examples.forEachIndexed { rIdx, rowValues ->
+            val row = catalogSheet.createRow(rIdx + 1)
+            rowValues.forEachIndexed { cIdx, value ->
+                val cell = row.createCell(cIdx)
+                val safeVal = sanitizeForSpreadsheet(value)
+                val num = safeVal.toDoubleOrNull()
+                if (num != null && cIdx in 5..12) {
+                    cell.setCellValue(num)
+                } else {
+                    cell.setCellValue(safeVal)
+                }
+            }
+        }
+
+        val infoSheet = workbook.createSheet("Instructions")
+        val infoHeader = infoSheet.createRow(0)
+        val infoCell = infoHeader.createCell(0)
+        infoCell.setCellValue("Ali Educational - Product Import Guidelines")
+        infoCell.cellStyle = headerStyle
+
+        val instructions = listOf(
+            "1. Product Name is required for every row.",
+            "2. Category: If the category does not exist, it will be automatically created.",
+            "3. Barcode: Leave empty if you want the app to auto-generate short Crockford barcodes (AE-P...).",
+            "4. Opening Stock (Pcs): Total loose pieces to add into sellable inventory.",
+            "5. Boxes and Pack Size: If Boxes > 0, total pieces = Boxes × Pack Size.",
+            "6. Prices: Numbers in Rupees (e.g. 50.00 or 50). Paise are automatically calculated without loss.",
+            "7. Low Stock Alert: Threshold below which the app alerts for reordering (Default: 5).",
+            "8. Security: Do not start product names or codes with =, +, -, or @ formulas."
+        )
+
+        instructions.forEachIndexed { idx, text ->
+            val row = infoSheet.createRow(idx + 2)
+            row.createCell(0).setCellValue(text)
+        }
+
+        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outFile = File(outDir, "product_catalog_template.xlsx")
+        return try {
+            FileOutputStream(outFile).use { fos ->
+                workbook.write(fos)
+            }
+            workbook.close()
+            outFile
+        } catch (_: Exception) {
+            try { workbook.close() } catch (_: Exception) {}
+            null
+        }
+    }
+
+    suspend fun exportCurrentStock(): File? = withContext(Dispatchers.IO) {
+        val pDao = productDao ?: return@withContext null
+        val products = pDao.getAllProducts().first()
+        if (products.isEmpty()) return@withContext null
+
+        val workbook = XSSFWorkbook()
+        val sheet = workbook.createSheet("Current Stock")
+
+        val headerFont = workbook.createFont().apply { bold = true }
+        val headerStyle = workbook.createCellStyle().apply { setFont(headerFont) }
+
+        val headers = listOf(
+            "Product Name", "Category", "Brand", "SKU", "Barcode",
+            "Current Stock (pcs)", "Pack Size", "Cost Price (Rs)",
+            "Selling Price Piece (Rs)", "Selling Price Pack (Rs)", "Wholesale Price (Rs)", "Low Stock Alert"
+        )
+
+        val hRow = sheet.createRow(0)
+        headers.forEachIndexed { idx, title ->
+            val cell = hRow.createCell(idx)
+            cell.setCellValue(title)
+            cell.cellStyle = headerStyle
+        }
+
+        products.forEachIndexed { rIdx, p ->
+            val row = sheet.createRow(rIdx + 1)
+            row.createCell(0).setCellValue(sanitizeForSpreadsheet(p.name))
+            row.createCell(1).setCellValue(sanitizeForSpreadsheet(p.category))
+            row.createCell(2).setCellValue(sanitizeForSpreadsheet(p.brand ?: ""))
+            row.createCell(3).setCellValue(sanitizeForSpreadsheet(p.sku ?: ""))
+            row.createCell(4).setCellValue(sanitizeForSpreadsheet(p.barcode ?: ""))
+            row.createCell(5).setCellValue(p.currentSellableStock.toDouble())
+            row.createCell(6).setCellValue(p.packSize.toDouble())
+            row.createCell(7).setCellValue(p.movingAvgCostPaise / 100.0)
+            row.createCell(8).setCellValue(p.sellingPricePiecePaise / 100.0)
+            row.createCell(9).setCellValue(p.sellingPricePackPaise / 100.0)
+            row.createCell(10).setCellValue(p.wholesalePricePiecePaise / 100.0)
+            row.createCell(11).setCellValue(p.lowStockThreshold.toDouble())
+        }
+
+        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outFile = File(outDir, "current_stock_${System.currentTimeMillis()}.xlsx")
+        return@withContext try {
+            FileOutputStream(outFile).use { fos ->
+                workbook.write(fos)
+            }
+            workbook.close()
+            outFile
+        } catch (_: Exception) {
+            try { workbook.close() } catch (_: Exception) {}
+            null
+        }
+    }
 }

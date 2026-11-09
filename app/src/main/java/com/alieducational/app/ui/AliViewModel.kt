@@ -1418,6 +1418,16 @@ class AliViewModel @Inject constructor(
 
     private val _plannedRows = MutableStateFlow<List<PlannedRow>>(emptyList())
     val plannedRows: StateFlow<List<PlannedRow>> = _plannedRows.asStateFlow()
+    val allImportBatches: StateFlow<List<com.alieducational.app.data.local.entity.ImportBatchEntity>> = repository.allImportBatches
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun downloadImportTemplate(): File? {
+        return importExportService.generateTemplate()
+    }
+
+    suspend fun exportCurrentStockToExcel(): File? {
+        return importExportService.exportCurrentStock()
+    }
 
     suspend fun loadSpreadsheetRows(uri: Uri, fileName: String, sheetIndex: Int = 0): Pair<List<String>, List<List<String>>> {
         return importExportService.loadAllRows(uri, fileName, sheetIndex)

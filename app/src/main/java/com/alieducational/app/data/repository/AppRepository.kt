@@ -120,6 +120,7 @@ class AppRepository @Inject constructor(
     val totalProductCount: Flow<Int> = productDao.getTotalProductCount()
     val recentStockMovements: Flow<List<StockMovementEntity>> = stockMovementDao.getRecentMovements()
     val allHeldBills: Flow<List<HeldBillEntity>> = heldBillDao.getAllHeldBills()
+    val allImportBatches: Flow<List<com.alieducational.app.data.local.entity.ImportBatchEntity>> = db.importBatchDao().getAllBatches()
 
     fun searchProducts(query: String): Flow<List<ProductEntity>> = productDao.searchProducts(query)
     fun getProductsByCategory(category: String): Flow<List<ProductEntity>> = productDao.getProductsByCategory(category)
