@@ -78,7 +78,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,6 +103,17 @@ import com.alieducational.app.data.local.entity.SupplierEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.ui.AliViewModel
 import com.alieducational.app.ui.billing.BarcodeAnalyzer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.DropdownMenu
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -118,13 +129,16 @@ fun StockScreen(
     androidx.activity.compose.BackHandler {
         onNavigateBack()
     }
+    val context = LocalContext.current
     val allProducts by viewModel.allProducts.collectAsState()
     val allSuppliers by viewModel.allSuppliers.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("All") } // "All", "Low Stock"
+    var selectedFilter by remember { mutableStateOf("All") } // "All", "Low Stock", "Archived"
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedProductForEdit by remember { mutableStateOf<ProductEntity?>(null) }
-    var showBarcodeLabelExport by remember { mutableStateOf<ProductEntity?>(null) }
+    var showMultiBarcodeExportDialog by remember { mutableStateOf(false) }
+    var preSelectedBarcodeProducts by remember { mutableStateOf<List<ProductEntity>>(emptyList()) }
+    var productToDelete by remember { mutableStateOf<ProductEntity?>(null) }
     val barcodeService = remember { BarcodeGeneratorService() }
 
     val widgetAction by viewModel.widgetActionTrigger.collectAsState()
@@ -144,8 +158,9 @@ fun StockScreen(
                 product.category.contains(searchQuery, ignoreCase = true)
 
         val matchesFilter = when (selectedFilter) {
-            "Low Stock" -> product.currentSellableStock <= product.lowStockThreshold
-            else -> true
+            "Low Stock" -> !product.isArchived && product.currentSellableStock <= product.lowStockThreshold
+            "Archived" -> product.isArchived
+            else -> !product.isArchived
         }
 
         matchesSearch && matchesFilter
@@ -165,33 +180,46 @@ fun StockScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Integrated Top Action Buttons: Add Stock & Product + Import
+            // Integrated Top Action Buttons: Add Stock & Product + Import + Labels
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
                     onClick = { showAddDialog = true },
-                    modifier = Modifier.weight(1.2f),
+                    modifier = Modifier.weight(1.1f),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Add Stock & Product", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Add Stock", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
 
                 OutlinedButton(
                     onClick = onNavigateToImport,
-                    modifier = Modifier.weight(0.9f),
+                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Import Excel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Import", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        preSelectedBarcodeProducts = emptyList()
+                        showMultiBarcodeExportDialog = true
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Filled.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Labels", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 }
             }
 
@@ -223,10 +251,11 @@ fun StockScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 item {
+                    val activeCount = allProducts.count { !it.isArchived }
                     FilterChip(
                         selected = selectedFilter == "All",
                         onClick = { selectedFilter = "All" },
-                        label = { Text("All (${allProducts.size})") },
+                        label = { Text("All ($activeCount)") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -234,7 +263,7 @@ fun StockScreen(
                     )
                 }
                 item {
-                    val lowStockCount = allProducts.count { it.currentSellableStock <= it.lowStockThreshold }
+                    val lowStockCount = allProducts.count { !it.isArchived && it.currentSellableStock <= it.lowStockThreshold }
                     FilterChip(
                         selected = selectedFilter == "Low Stock",
                         onClick = { selectedFilter = "Low Stock" },
@@ -242,6 +271,18 @@ fun StockScreen(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
                             selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    )
+                }
+                item {
+                    val archivedCount = allProducts.count { it.isArchived }
+                    FilterChip(
+                        selected = selectedFilter == "Archived",
+                        onClick = { selectedFilter = "Archived" },
+                        label = { Text("Archived ($archivedCount)") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     )
                 }
@@ -281,13 +322,72 @@ fun StockScreen(
                     items(filteredProducts) { product ->
                         ProductItemCard(
                             product = product,
-                            onClick = { selectedProductForEdit = product }
+                            onClick = { selectedProductForEdit = product },
+                            onPrintLabels = {
+                                preSelectedBarcodeProducts = listOf(product)
+                                showMultiBarcodeExportDialog = true
+                            },
+                            onArchiveOrDelete = { productToDelete = product },
+                            onRestore = {
+                                viewModel.unarchiveProduct(product.id) {
+                                    android.widget.Toast.makeText(context, "Product '${product.name}' restored", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         )
                     }
                     item { Spacer(modifier = Modifier.height(72.dp)) }
                 }
             }
         }
+    }
+
+    // Product Archive/Delete Confirmation Dialog
+    productToDelete?.let { prod ->
+        val dialogContext = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { productToDelete = null },
+            title = { Text("Archive or Delete Product?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Product: ${prod.name}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (prod.currentSellableStock > 0 || prod.currentDamagedStock > 0) {
+                        Text(
+                            text = "• This product has physical stock (${prod.currentSellableStock} sellable, ${prod.currentDamagedStock} damaged).\n• It will be safely archived (preserving stock value, past bills and reports). To remove physical units, use Stock Adjustment.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Text(
+                            text = "• If this product has historical transactions (sales or purchases), it will be safely archived.\n• If it is completely unused with no history, it will be permanently deleted.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.removeProduct(prod.id) { res ->
+                            android.widget.Toast.makeText(dialogContext, res.message, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                        productToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Confirm", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Integrated Add / Edit Product & Stock Dialog
@@ -319,7 +419,8 @@ fun StockScreen(
                 }
             },
             onExportLabels = { prod ->
-                showBarcodeLabelExport = prod
+                preSelectedBarcodeProducts = listOf(prod)
+                showMultiBarcodeExportDialog = true
             },
             onSave = { existingId, name, barcode, category, brand, packSize, boxesBrought, loosePieces, costPaise, sellingPaise, wholesalePaise, lowStock, supplierName, billNo, transportPaise, isPaidNow, billPaymentMethod ->
                 viewModel.addOrUpdateProductWithStock(
@@ -347,140 +448,15 @@ fun StockScreen(
         )
     }
 
-    // ── BARCODE LABEL EXPORT DIALOG (Section 16) ───────────────────
-    showBarcodeLabelExport?.let { exportProd ->
-        var exportBarcode by remember(exportProd.id) { mutableStateOf(exportProd.barcode ?: "") }
-        var includePriceOnLabel by remember { mutableStateOf(true) }
-        var copiesCountStr by remember { mutableStateOf("24") }
-        var selectedUnitLabel by remember { mutableStateOf("Piece") }
-        var labelPrice by remember { mutableStateOf(exportProd.sellingPricePiecePaise) }
-        var selectedPreset by remember { mutableStateOf(com.alieducational.app.data.service.LabelPreset.A4_3X8) }
-        val exportContext = LocalContext.current
-
-        val barcodeBitmap = remember(exportBarcode) {
-            try {
-                if (exportBarcode.isNotBlank()) barcodeService.generateBarcodeBitmap(exportBarcode, 360, 100) else null
-            } catch (e: Exception) {
-                android.util.Log.w("StockScreen", "Failed to generate barcode preview bitmap: ${e.message}", e)
-                null
-            }
-        }
-
-        AlertDialog(
-            onDismissRequest = { showBarcodeLabelExport = null },
-            title = { Text("Print / Export Barcode Labels", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(exportProd.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                    if (exportProd.packSize > 1 && exportProd.barcode?.startsWith("AE-P") == true) {
-                        Row {
-                            TextButton(onClick = { exportBarcode = exportProd.barcode ?: ""; selectedUnitLabel = "Piece"; labelPrice = exportProd.sellingPricePiecePaise }) { Text("Piece") }
-                            TextButton(onClick = { viewModel.generateShopBarcode(exportProd.id, "PACK", exportProd.packSize) { b -> exportBarcode = b.barcode; selectedUnitLabel = "Pack of ${b.packQuantity}"; labelPrice = exportProd.sellingPricePackPaise } }) { Text("Pack of ${exportProd.packSize}") }
-                        }
-                    }
-                    Text("Barcode: $exportBarcode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-
-                    if (barcodeBitmap != null) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(100.dp),
-                            colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color.White),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Image(
-                                    bitmap = barcodeBitmap.asImageBitmap(),
-                                    contentDescription = "Barcode Preview",
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = includePriceOnLabel,
-                            onCheckedChange = { includePriceOnLabel = it }
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Include Price: ${CostCalculator.formatPaiseToRupees(labelPrice)}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-
-                    Text("Label Size / Layout", style = MaterialTheme.typography.labelMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        com.alieducational.app.data.service.LabelPreset.values().forEach { preset ->
-                            FilterChip(
-                                selected = selectedPreset == preset,
-                                onClick = { selectedPreset = preset },
-                                label = { Text(preset.title, fontSize = 10.sp) }
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = copiesCountStr,
-                        onValueChange = { copiesCountStr = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Number of Copies (1 - 100)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val copies = (copiesCountStr.toIntOrNull() ?: 24).coerceIn(1, 100)
-                        val price = if (includePriceOnLabel) labelPrice else null
-                        try {
-                            val pdfFile = barcodeService.generateMultiLabelsPdf(
-                                context = exportContext,
-                                items = listOf(
-                                    com.alieducational.app.data.service.LabelItem(
-                                        productName = exportProd.name,
-                                        barcode = exportBarcode,
-                                        unitLabel = selectedUnitLabel,
-                                        pricePaise = price,
-                                        copies = copies
-                                    )
-                                ),
-                                preset = selectedPreset
-                            )
-                            val uri = FileProvider.getUriForFile(
-                                exportContext,
-                                "${exportContext.packageName}.fileprovider",
-                                pdfFile
-                            )
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/pdf"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            exportContext.startActivity(Intent.createChooser(shareIntent, "Share Barcode Labels PDF"))
-                            showBarcodeLabelExport = null
-                        } catch (e: Exception) {
-                            android.util.Log.w("StockScreen", "Error creating barcode label PDF", e)
-                            android.widget.Toast.makeText(exportContext, "Failed to create barcode label PDF. Please retry.", android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    }
-                ) {
-                    Text("Export / Share PDF")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showBarcodeLabelExport = null }) {
-                    Text("Close")
-                }
+    // ── MULTI-PRODUCT BARCODE LABEL EXPORT DIALOG (Item 13) ─────────
+    if (showMultiBarcodeExportDialog) {
+        MultiBarcodeLabelExportDialog(
+            allProducts = allProducts,
+            preSelectedProducts = preSelectedBarcodeProducts,
+            barcodeService = barcodeService,
+            onDismiss = {
+                showMultiBarcodeExportDialog = false
+                preSelectedBarcodeProducts = emptyList()
             }
         )
     }
@@ -489,19 +465,27 @@ fun StockScreen(
 @Composable
 fun ProductItemCard(
     product: ProductEntity,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onPrintLabels: () -> Unit,
+    onArchiveOrDelete: () -> Unit,
+    onRestore: () -> Unit
 ) {
-    val isLowStock = product.currentSellableStock <= product.lowStockThreshold
+    val isLowStock = !product.isArchived && product.currentSellableStock <= product.lowStockThreshold
     val marginPct = if (product.sellingPricePiecePaise > 0L && product.sellingPricePiecePaise > product.movingAvgCostPaise) {
         ((product.sellingPricePiecePaise - product.movingAvgCostPaise).toDouble() / product.sellingPricePiecePaise.toDouble()) * 100.0
     } else 0.0
+    var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+        colors = CardDefaults.cardColors(
+            containerColor = if (product.isArchived)
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
     ) {
         Column(
             modifier = Modifier
@@ -514,11 +498,27 @@ fun ProductItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = product.name,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = product.name,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (product.isArchived) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(AliDimens.radiusPill),
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                            ) {
+                                Text(
+                                    text = "Archived",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
                     val subtitle = buildList {
                         if (!product.brand.isNullOrBlank()) add(product.brand)
                         add(product.category)
@@ -532,26 +532,73 @@ fun ProductItemCard(
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "${product.currentSellableStock} pcs",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = if (isLowStock) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                    )
-                    if (isLowStock) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.Warning,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = Color(0xFFE4B765)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "${product.currentSellableStock} pcs",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isLowStock) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (isLowStock) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = Color(0xFFE4B765)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "Low stock",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFE4B765)
+                                )
+                            }
+                        }
+                    }
+
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Product options")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit Stock & Details") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onClick()
+                                }
                             )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "Low stock",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFE4B765)
-                            )
+                            if (!product.barcode.isNullOrBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Print Barcode Labels") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onPrintLabels()
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            if (!product.isArchived) {
+                                DropdownMenuItem(
+                                    text = { Text("Archive / Delete Product", color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onArchiveOrDelete()
+                                    }
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Restore Product", color = MaterialTheme.colorScheme.primary) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onRestore()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -640,6 +687,9 @@ fun IntegratedAddStockProductDialog(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val statusColors = LocalAliStatusColors.current
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val isCrowded = configuration.screenWidthDp < 400 || density.fontScale > 1.1f
 
     // Initial state tracking for discard protection
     val initialName = existingProduct?.name ?: ""
@@ -860,7 +910,7 @@ fun IntegratedAddStockProductDialog(
             Column(modifier = Modifier.fillMaxSize()) {
                 // Pinned Top Bar
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding(),
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 2.dp
                 ) {
@@ -871,7 +921,10 @@ fun IntegratedAddStockProductDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             IconButton(onClick = { onAttemptDismiss() }) {
                                 Icon(Icons.Filled.Close, contentDescription = "Close")
                             }
@@ -879,7 +932,9 @@ fun IntegratedAddStockProductDialog(
                             Text(
                                 text = if (existingProduct != null) "Edit Stock & Product" else "Add Stock & Product",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                         Button(
@@ -898,7 +953,8 @@ fun IntegratedAddStockProductDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = AliDimens.spacingLg, vertical = AliDimens.spacingMd),
+                        .padding(horizontal = AliDimens.spacingLg),
+                    contentPadding = PaddingValues(top = AliDimens.spacingMd, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(AliDimens.spacingLg)
                 ) {
                     // ── SECTION 1: PRODUCT ─────────────────────────────────────
@@ -1027,14 +1083,11 @@ fun IntegratedAddStockProductDialog(
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
-                                ) {
+                                val categoryMenuContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     ExposedDropdownMenuBox(
                                         expanded = categoryExpanded,
                                         onExpandedChange = { categoryExpanded = !categoryExpanded },
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     ) {
                                         OutlinedTextField(
                                             value = category,
@@ -1055,7 +1108,7 @@ fun IntegratedAddStockProductDialog(
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                                         Spacer(modifier = Modifier.width(6.dp))
-                                                        Text("+ New category...", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                        Text("New category...", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                                     }
                                                 },
                                                 onClick = {
@@ -1075,7 +1128,9 @@ fun IntegratedAddStockProductDialog(
                                             }
                                         }
                                     }
+                                }
 
+                                val brandFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = brand,
                                         onValueChange = { brand = it },
@@ -1083,8 +1138,26 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("Optional") },
                                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
+
+                                if (isCrowded) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        categoryMenuContent(Modifier.fillMaxWidth())
+                                        brandFieldContent(Modifier.fillMaxWidth())
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        categoryMenuContent(Modifier.weight(1f))
+                                        brandFieldContent(Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
@@ -1126,10 +1199,7 @@ fun IntegratedAddStockProductDialog(
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
-                                ) {
+                                val stockQtyContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = piecesStr,
                                         onValueChange = { piecesStr = it },
@@ -1137,8 +1207,10 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("0") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
+                                val lowStockContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = lowStockStr,
                                         onValueChange = { lowStockStr = it },
@@ -1146,8 +1218,25 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("5") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
+                                if (isCrowded) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        stockQtyContent(Modifier.fillMaxWidth())
+                                        lowStockContent(Modifier.fillMaxWidth())
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        stockQtyContent(Modifier.weight(1f))
+                                        lowStockContent(Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
@@ -1170,10 +1259,7 @@ fun IntegratedAddStockProductDialog(
                                     color = MaterialTheme.colorScheme.primary
                                 )
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
-                                ) {
+                                val costFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = costPerPieceStr,
                                         onValueChange = {
@@ -1190,9 +1276,11 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("0.00") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
 
+                                val sellingFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = sellingPieceStr,
                                         onValueChange = {
@@ -1207,14 +1295,29 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("0.00") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
-                                ) {
+                                if (isCrowded) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        costFieldContent(Modifier.fillMaxWidth())
+                                        sellingFieldContent(Modifier.fillMaxWidth())
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        costFieldContent(Modifier.weight(1f))
+                                        sellingFieldContent(Modifier.weight(1f))
+                                    }
+                                }
+
+                                val wholesaleFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = wholesalePieceStr,
                                         onValueChange = { wholesalePieceStr = it },
@@ -1222,9 +1325,11 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("Optional") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
 
+                                val marginFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                     OutlinedTextField(
                                         value = marginPercentStr,
                                         onValueChange = {
@@ -1240,8 +1345,26 @@ fun IntegratedAddStockProductDialog(
                                         placeholder = { Text("0.0") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = fieldMod
                                     )
+                                }
+
+                                if (isCrowded) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        wholesaleFieldContent(Modifier.fillMaxWidth())
+                                        marginFieldContent(Modifier.fillMaxWidth())
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                    ) {
+                                        wholesaleFieldContent(Modifier.weight(1f))
+                                        marginFieldContent(Modifier.weight(1f))
+                                    }
                                 }
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1398,7 +1521,7 @@ fun IntegratedAddStockProductDialog(
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                                         Spacer(modifier = Modifier.width(6.dp))
-                                                        Text("+ Add new supplier", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                                        Text("Add supplier", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                                     }
                                                 },
                                                 onClick = {
@@ -1427,10 +1550,7 @@ fun IntegratedAddStockProductDialog(
                                         }
                                     }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
-                                    ) {
+                                    val billNoFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                         OutlinedTextField(
                                             value = billNo,
                                             onValueChange = { billNo = it },
@@ -1438,9 +1558,11 @@ fun IntegratedAddStockProductDialog(
                                             placeholder = { Text("Optional #") },
                                             leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp)) },
                                             singleLine = true,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = fieldMod
                                         )
+                                    }
 
+                                    val transportFieldContent: @Composable (Modifier) -> Unit = { fieldMod ->
                                         OutlinedTextField(
                                             value = transportChargesStr,
                                             onValueChange = { transportChargesStr = it },
@@ -1449,8 +1571,26 @@ fun IntegratedAddStockProductDialog(
                                             leadingIcon = { Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp)) },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                             singleLine = true,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = fieldMod
                                         )
+                                    }
+
+                                    if (isCrowded) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                        ) {
+                                            billNoFieldContent(Modifier.fillMaxWidth())
+                                            transportFieldContent(Modifier.fillMaxWidth())
+                                        }
+                                    } else {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
+                                        ) {
+                                            billNoFieldContent(Modifier.weight(1f))
+                                            transportFieldContent(Modifier.weight(1f))
+                                        }
                                     }
 
                                     // Payment Status
@@ -1514,7 +1654,10 @@ fun IntegratedAddStockProductDialog(
 
                 // Pinned Bottom Bar (Summary + Actions)
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding(),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 4.dp
                 ) {
@@ -1540,6 +1683,15 @@ fun IntegratedAddStockProductDialog(
                                     color = if (profitPaise >= 0L) statusColors.paidFg else statusColors.dueFg
                                 )
                             }
+                        }
+
+                        if (name.isBlank()) {
+                            Text(
+                                text = "⚠️ Product name is required to save",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(AliDimens.spacingXs))
@@ -1669,16 +1821,25 @@ fun IntegratedAddStockProductDialog(
         var inlineSupplierName by remember { mutableStateOf("") }
         var inlineSupplierPhone by remember { mutableStateOf("") }
         var inlineSupplierNotes by remember { mutableStateOf("") }
+        var inlineSupplierError by remember { mutableStateOf<String?>(null) }
 
         AlertDialog(
-            onDismissRequest = { showAddSupplierInlineDialog = false },
-            title = { Text("Add New Supplier", fontWeight = FontWeight.Bold) },
+            onDismissRequest = {
+                showAddSupplierInlineDialog = false
+                inlineSupplierError = null
+            },
+            title = { Text("Add Supplier", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = inlineSupplierName,
-                        onValueChange = { inlineSupplierName = it },
+                        onValueChange = {
+                            inlineSupplierName = it
+                            inlineSupplierError = null
+                        },
                         label = { Text("Supplier / Company Name *") },
+                        isError = inlineSupplierError != null,
+                        supportingText = inlineSupplierError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1703,7 +1864,11 @@ fun IntegratedAddStockProductDialog(
                 Button(
                     onClick = {
                         val trimmed = inlineSupplierName.trim()
-                        if (trimmed.isNotBlank()) {
+                        if (trimmed.isBlank()) {
+                            inlineSupplierError = "Supplier name is required"
+                        } else if (suppliers.any { it.name.equals(trimmed, ignoreCase = true) }) {
+                            inlineSupplierError = "Supplier '$trimmed' already exists"
+                        } else {
                             val newSup = SupplierEntity(
                                 id = java.util.UUID.randomUUID().toString(),
                                 name = trimmed,
@@ -1714,6 +1879,7 @@ fun IntegratedAddStockProductDialog(
                                 selectedSupplier = created
                                 supplierName = created.name
                                 showAddSupplierInlineDialog = false
+                                inlineSupplierError = null
                             }
                         }
                     }
@@ -1722,7 +1888,10 @@ fun IntegratedAddStockProductDialog(
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showAddSupplierInlineDialog = false }) {
+                OutlinedButton(onClick = {
+                    showAddSupplierInlineDialog = false
+                    inlineSupplierError = null
+                }) {
                     Text("Cancel")
                 }
             }
@@ -1826,6 +1995,414 @@ fun IntegratedAddStockProductDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MultiBarcodeLabelExportDialog(
+    allProducts: List<ProductEntity>,
+    preSelectedProducts: List<ProductEntity>,
+    barcodeService: BarcodeGeneratorService,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedPieceCopies by remember {
+        mutableStateOf(preSelectedProducts.filter { !it.barcode.isNullOrBlank() }.associate { it.id to 24 }.toMutableMap())
+    }
+    var selectedPackCopies by remember {
+        mutableStateOf(mutableMapOf<String, Int>())
+    }
+    var includePriceOnLabel by remember { mutableStateOf(true) }
+    var selectedPreset by remember { mutableStateOf(com.alieducational.app.data.service.LabelPreset.A4_3X8) }
+    var isExporting by remember { mutableStateOf(false) }
+
+    val eligibleProducts = remember(allProducts) {
+        allProducts.filter { !it.isArchived && !it.barcode.isNullOrBlank() }
+    }
+    val filteredProducts = remember(eligibleProducts, searchQuery) {
+        if (searchQuery.isBlank()) eligibleProducts
+        else eligibleProducts.filter {
+            it.name.contains(searchQuery, ignoreCase = true) ||
+                    (it.barcode?.contains(searchQuery, ignoreCase = true) == true) ||
+                    it.category.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    val totalSelectedLabels = selectedPieceCopies.values.sum() + selectedPackCopies.values.sum()
+
+    Dialog(
+        onDismissRequest = { if (!isExporting) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { if (!isExporting) onDismiss() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Print / Export Barcodes",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider()
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Search products to print...") },
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${selectedPieceCopies.size + selectedPackCopies.size} variant(s) selected",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        val newMap = selectedPieceCopies.toMutableMap()
+                                        filteredProducts.forEach { p ->
+                                            if (!newMap.containsKey(p.id)) newMap[p.id] = 24
+                                        }
+                                        selectedPieceCopies = newMap
+                                    }
+                                ) {
+                                    Text("Select All (${filteredProducts.size})")
+                                }
+                                TextButton(
+                                    onClick = {
+                                        selectedPieceCopies = mutableMapOf()
+                                        selectedPackCopies = mutableMapOf()
+                                    }
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                        }
+                    }
+
+                    items(filteredProducts) { prod ->
+                        val isPieceSelected = selectedPieceCopies.containsKey(prod.id)
+                        val pieceCount = selectedPieceCopies[prod.id] ?: 24
+                        val isPackSelected = selectedPackCopies.containsKey(prod.id)
+                        val packCount = selectedPackCopies[prod.id] ?: 24
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isPieceSelected || isPackSelected)
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                else MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isPieceSelected,
+                                        onCheckedChange = { checked ->
+                                            val newMap = selectedPieceCopies.toMutableMap()
+                                            if (checked) newMap[prod.id] = 24 else newMap.remove(prod.id)
+                                            selectedPieceCopies = newMap
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(prod.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("Barcode: ${prod.barcode} • Selling: ${CostCalculator.formatPaiseToRupees(prod.sellingPricePiecePaise)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+
+                                if (isPieceSelected) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(start = 36.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Piece label copies:", style = MaterialTheme.typography.bodySmall)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    val newMap = selectedPieceCopies.toMutableMap()
+                                                    val cur = newMap[prod.id] ?: 24
+                                                    if (cur > 1) newMap[prod.id] = cur - 1
+                                                    selectedPieceCopies = newMap
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Text("-", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            }
+                                            Text(
+                                                text = "$pieceCount",
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.width(36.dp),
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val newMap = selectedPieceCopies.toMutableMap()
+                                                    val cur = newMap[prod.id] ?: 24
+                                                    if (cur < 100) newMap[prod.id] = cur + 1
+                                                    selectedPieceCopies = newMap
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Text("+", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (prod.packSize > 1) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(start = 24.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = isPackSelected,
+                                            onCheckedChange = { checked ->
+                                                val newMap = selectedPackCopies.toMutableMap()
+                                                if (checked) newMap[prod.id] = 24 else newMap.remove(prod.id)
+                                                selectedPackCopies = newMap
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Pack of ${prod.packSize}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                                            Text("Selling: ${CostCalculator.formatPaiseToRupees(prod.sellingPricePackPaise)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+
+                                    if (isPackSelected) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(start = 48.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Pack label copies:", style = MaterialTheme.typography.bodySmall)
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        val newMap = selectedPackCopies.toMutableMap()
+                                                        val cur = newMap[prod.id] ?: 24
+                                                        if (cur > 1) newMap[prod.id] = cur - 1
+                                                        selectedPackCopies = newMap
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Text("-", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                                }
+                                                Text(
+                                                    text = "$packCount",
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    modifier = Modifier.width(36.dp),
+                                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val newMap = selectedPackCopies.toMutableMap()
+                                                        val cur = newMap[prod.id] ?: 24
+                                                        if (cur < 100) newMap[prod.id] = cur + 1
+                                                        selectedPackCopies = newMap
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Text("+", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = includePriceOnLabel,
+                                        onCheckedChange = { includePriceOnLabel = it }
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Include Price on Labels", fontWeight = FontWeight.SemiBold)
+                                }
+
+                                Text("Paper Sheet Layout", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    com.alieducational.app.data.service.LabelPreset.values().forEach { preset ->
+                                        FilterChip(
+                                            selected = selectedPreset == preset,
+                                            onClick = { selectedPreset = preset },
+                                            label = { Text(preset.title, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Total Labels: $totalSelectedLabels",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            val perPage = selectedPreset.cols * selectedPreset.rows
+                            val pages = if (totalSelectedLabels > 0) (totalSelectedLabels + perPage - 1) / perPage else 0
+                            Text(
+                                text = if (pages > 0) "$pages page(s) on ${selectedPreset.title}" else "Select at least 1 label",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                if (totalSelectedLabels <= 0) return@Button
+                                isExporting = true
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        val labelItems = mutableListOf<com.alieducational.app.data.service.LabelItem>()
+                                        selectedPieceCopies.forEach { (prodId, count) ->
+                                            val p = allProducts.firstOrNull { it.id == prodId }
+                                            if (p != null && count > 0) {
+                                                labelItems.add(
+                                                    com.alieducational.app.data.service.LabelItem(
+                                                        productName = p.name,
+                                                        barcode = p.barcode ?: "",
+                                                        unitLabel = "PIECE",
+                                                        pricePaise = if (includePriceOnLabel) p.sellingPricePiecePaise else null,
+                                                        copies = count
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        selectedPackCopies.forEach { (prodId, count) ->
+                                            val p = allProducts.firstOrNull { it.id == prodId }
+                                            if (p != null && count > 0) {
+                                                labelItems.add(
+                                                    com.alieducational.app.data.service.LabelItem(
+                                                        productName = p.name,
+                                                        barcode = p.barcode ?: "",
+                                                        unitLabel = "PACK OF ${p.packSize}",
+                                                        pricePaise = if (includePriceOnLabel) p.sellingPricePackPaise else null,
+                                                        copies = count
+                                                    )
+                                                )
+                                            }
+                                        }
+
+                                        val pdfFile = barcodeService.generateMultiLabelsPdf(
+                                            context = context,
+                                            items = labelItems,
+                                            preset = selectedPreset
+                                        )
+
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            isExporting = false
+                                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                pdfFile
+                                            )
+                                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(intent, "Share / Print Barcode Labels"))
+                                            onDismiss()
+                                        }
+                                    } catch (e: Exception) {
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            isExporting = false
+                                            android.widget.Toast.makeText(context, "Failed to generate PDF: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = totalSelectedLabels > 0 && !isExporting,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            if (isExporting) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text("Export / Share PDF", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

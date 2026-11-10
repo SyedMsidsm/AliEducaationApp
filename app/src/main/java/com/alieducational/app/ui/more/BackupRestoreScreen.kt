@@ -170,6 +170,7 @@ fun BackupRestoreScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Daily Closing Routine Reminder Card

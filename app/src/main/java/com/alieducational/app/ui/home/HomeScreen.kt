@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -89,6 +91,7 @@ fun HomeScreen(
     val customersOweUs by viewModel.totalCustomersOweUsPaise.collectAsState()
     val lastBackupTime by viewModel.lastBackupTime.collectAsState()
     val recentMovements by viewModel.recentMovements.collectAsState()
+    val statusColors = com.alieducational.app.ui.theme.LocalAliStatusColors.current
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -98,6 +101,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 80.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header: Logo & Shop Name
@@ -211,7 +215,7 @@ fun HomeScreen(
                             title = stringResource(R.string.home_we_owe),
                             value = CostCalculator.formatPaiseToRupees(weOweSuppliers ?: 0L),
                             icon = Icons.Filled.ArrowUpward,
-                            iconTint = Color(0xFFE57373),
+                            iconTint = statusColors.dueFg,
                             modifier = Modifier.weight(1f),
                             onClick = { onNavigateToAccounts(0) }
                         )
@@ -219,7 +223,7 @@ fun HomeScreen(
                             title = stringResource(R.string.home_customers_owe),
                             value = CostCalculator.formatPaiseToRupees(customersOweUs ?: 0L),
                             icon = Icons.Filled.ArrowDownward,
-                            iconTint = Color(0xFF75B890),
+                            iconTint = statusColors.paidFg,
                             modifier = Modifier.weight(1f),
                             onClick = { onNavigateToAccounts(1) }
                         )
@@ -369,7 +373,7 @@ fun PrimaryActionButton(
 ) {
     Card(
         modifier = modifier
-            .height(72.dp)
+            .defaultMinSize(minHeight = 72.dp)
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = containerColor),
         shape = RoundedCornerShape(14.dp)
@@ -392,7 +396,8 @@ fun PrimaryActionButton(
                 text = title,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = contentColor,
-                maxLines = 1
+                maxLines = 2,
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -451,7 +456,7 @@ fun ToolQuickCard(
 ) {
     Card(
         modifier = modifier
-            .height(58.dp)
+            .defaultMinSize(minHeight = 58.dp)
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp)

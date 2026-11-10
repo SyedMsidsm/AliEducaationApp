@@ -78,6 +78,7 @@ fun ExpensesScreen(
     val grossExpenses = allExpenses.filter { !it.isIncome }.sumOf { it.amountPaise }
     val refunds = allExpenses.filter { it.isExpenseRefund }.sumOf { it.amountPaise }
     var showAddDialog by remember { mutableStateOf(false) }
+    val statusColors = com.alieducational.app.ui.theme.LocalAliStatusColors.current
 
     Scaffold(
         topBar = {
@@ -114,6 +115,7 @@ fun ExpensesScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
@@ -172,7 +174,7 @@ fun ExpensesScreen(
                                 Text(
                                     text = "${if (expense.isIncome) "+" else "-"}${CostCalculator.formatPaiseToRupees(expense.amountPaise)}",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = if (expense.isIncome) Color(0xFF75B890) else Color(0xFFE57373)
+                                    color = if (expense.isIncome) statusColors.paidFg else statusColors.dueFg
                                 )
                             }
                         }

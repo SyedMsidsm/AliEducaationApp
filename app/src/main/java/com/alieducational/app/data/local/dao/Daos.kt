@@ -66,7 +66,7 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isArchived = 0 AND category = :category ORDER BY name ASC")
     fun getProductsByCategory(category: String): Flow<List<ProductEntity>>
 
-    @Query("SELECT SUM(currentSellableStock * movingAvgCostPaise) FROM products WHERE isArchived = 0 AND currentSellableStock > 0")
+    @Query("SELECT SUM(currentSellableStock * movingAvgCostPaise) FROM products WHERE currentSellableStock > 0")
     fun getTotalStockValuePaise(): Flow<Long?>
 
     @Query("SELECT COUNT(*) FROM products WHERE isArchived = 0 AND currentSellableStock <= lowStockThreshold")
@@ -95,6 +95,21 @@ interface ProductDao {
 
     @Query("UPDATE products SET isArchived = 1, updatedAt = :timestamp WHERE id = :productId")
     suspend fun archiveProduct(productId: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE products SET isArchived = 0, updatedAt = :timestamp WHERE id = :productId")
+    suspend fun unarchiveProduct(productId: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM products WHERE id = :productId")
+    suspend fun deleteProduct(productId: String)
+
+    @Query("SELECT COUNT(*) FROM sale_lines WHERE productId = :productId")
+    suspend fun countSaleLinesForProduct(productId: String): Int
+
+    @Query("SELECT COUNT(*) FROM stock_movements WHERE productId = :productId")
+    suspend fun countStockMovementsForProduct(productId: String): Int
+
+    @Query("SELECT COUNT(*) FROM product_giveaways WHERE productId = :productId")
+    suspend fun countGiveawaysForProduct(productId: String): Int
 }
 
 @Dao
@@ -368,6 +383,9 @@ interface ProductBarcodeDao {
 
     @Query("DELETE FROM product_barcodes WHERE id = :id")
     suspend fun deleteBarcode(id: String)
+
+    @Query("DELETE FROM product_barcodes WHERE productId = :productId")
+    suspend fun deleteBarcodesForProduct(productId: String)
 }
 
 @Dao
@@ -479,6 +497,18 @@ interface ServiceDefinitionDao {
 
     @Query("UPDATE service_definitions SET isArchived = 1 WHERE id = :id")
     suspend fun archiveService(id: String)
+
+    @Query("UPDATE service_definitions SET isArchived = 0 WHERE id = :id")
+    suspend fun unarchiveService(id: String)
+
+    @Query("DELETE FROM service_definitions WHERE id = :id")
+    suspend fun deleteService(id: String)
+
+    @Query("SELECT COUNT(*) FROM sale_lines WHERE serviceId = :serviceId")
+    suspend fun countSaleLinesForService(serviceId: String): Int
+
+    @Query("SELECT COUNT(*) FROM shop_expenses WHERE serviceTarget = :serviceId OR serviceTarget = :serviceName")
+    suspend fun countExpensesForService(serviceId: String, serviceName: String): Int
 }
 
 @Dao

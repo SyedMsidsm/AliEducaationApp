@@ -306,13 +306,13 @@ class CashTrackerExcelService @Inject constructor(
      * - Summary sheet: metadata, filters, transaction count, inflow, outflow, net movement, category subtotals.
      * - Transactions sheet: frozen header, stable ID, date, time, direction, purpose, category, classification, sanitized notes, source, inflow/outflow numeric cells.
      */
-    suspend fun exportCashTrackerExcel(
+    fun buildCashTrackerWorkbook(
         items: List<ShopExpenseEntity>,
         periodTitle: String = "All Transactions",
         fromDate: Long? = null,
         toDate: Long? = null,
         activeFiltersSummary: String = "All Categories, Active Transactions"
-    ): Intent = withContext(Dispatchers.IO) {
+    ): XSSFWorkbook {
         val workbook = XSSFWorkbook()
         val dataFormat = workbook.createDataFormat()
         val currencyFormatIndex = dataFormat.getFormat("#,##,##0.00")
@@ -575,6 +575,20 @@ class CashTrackerExcelService @Inject constructor(
             12 * 256  // Status
         )
         txWidths.forEachIndexed { i, w -> txSheet.setColumnWidth(i, w) }
+        return workbook
+    }
+
+    /**
+     * Export Cash Tracker items to a real multi-sheet Excel workbook and prepare a share Intent.
+     */
+    suspend fun exportCashTrackerExcel(
+        items: List<ShopExpenseEntity>,
+        periodTitle: String = "All Transactions",
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        activeFiltersSummary: String = "All Categories, Active Transactions"
+    ): Intent = withContext(Dispatchers.IO) {
+        val workbook = buildCashTrackerWorkbook(items, periodTitle, fromDate, toDate, activeFiltersSummary)
 
         // Meaningful dated filename: Ali_Educational_Cash_YYYY-MM-DD_to_YYYY-MM-DD.xlsx
         val dfFile = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -582,7 +596,6 @@ class CashTrackerExcelService @Inject constructor(
         val toStr = if (toDate != null && toDate < Long.MAX_VALUE) dfFile.format(Date(toDate)) else dfFile.format(Date())
         val fileName = "Ali_Educational_Cash_${fromStr}_to_${toStr}.xlsx"
 
-        // 1. Save to public Documents/AliEducational/Exports (visible in My Files)
         val exportFile = File(exportFolder, fileName)
         FileOutputStream(exportFile).use { fos ->
             workbook.write(fos)
@@ -599,6 +612,11 @@ class CashTrackerExcelService @Inject constructor(
             "${ctx.packageName}.fileprovider",
             cacheFile
         )
+
+        val activeItems = items.filter { !it.isVoided }
+        val totalInflowPaise = activeItems.filter { it.isIncome }.sumOf { it.amountPaise }
+        val totalOutflowPaise = activeItems.filter { !it.isIncome }.sumOf { it.amountPaise }
+        val netMovementPaise = totalInflowPaise - totalOutflowPaise
 
         val shareMessage = buildString {
             appendLine("📚 *Ali Educational - Cash In & Out Ledger*")
@@ -617,6 +635,25 @@ class CashTrackerExcelService @Inject constructor(
             putExtra(Intent.EXTRA_TEXT, shareMessage)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+    }
+
+    /**
+     * Export Cash Tracker items directly to a destination OutputStream (e.g., SAF CreateDocument Uri).
+     */
+    suspend fun exportCashTrackerToStream(
+        items: List<ShopExpenseEntity>,
+        outputStream: java.io.OutputStream,
+        periodTitle: String = "All Transactions",
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        activeFiltersSummary: String = "All Categories, Active Transactions"
+    ) = withContext(Dispatchers.IO) {
+        val workbook = buildCashTrackerWorkbook(items, periodTitle, fromDate, toDate, activeFiltersSummary)
+        outputStream.use { os ->
+            workbook.write(os)
+            os.flush()
+        }
+        workbook.close()
     }
 
     private fun getCellString(cell: Cell?): String {

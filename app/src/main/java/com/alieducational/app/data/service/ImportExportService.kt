@@ -1117,14 +1117,16 @@ class ImportExportService @Inject constructor(
             excelRow.createCell(cIdx++).setCellValue(issuesStr)
         }
 
-        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outDir = File(context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File("."), "exports").apply {
+            if (!exists()) mkdirs()
+        }
         val outFile = File(outDir, "import_errors_${System.currentTimeMillis()}.xlsx")
         return try {
             FileOutputStream(outFile).use { fos ->
                 workbook.write(fos)
             }
             workbook.close()
-            outFile
+            if (outFile.exists() && outFile.length() > 0) outFile else null
         } catch (_: Exception) {
             try { workbook.close() } catch (_: Exception) {}
             null
@@ -1220,14 +1222,16 @@ class ImportExportService @Inject constructor(
             row.createCell(0).setCellValue(text)
         }
 
-        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outDir = File(context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File("."), "exports").apply {
+            if (!exists()) mkdirs()
+        }
         val outFile = File(outDir, "product_catalog_template.xlsx")
         return try {
             FileOutputStream(outFile).use { fos ->
                 workbook.write(fos)
             }
             workbook.close()
-            outFile
+            if (outFile.exists() && outFile.length() > 0) outFile else null
         } catch (_: Exception) {
             try { workbook.close() } catch (_: Exception) {}
             null
@@ -1274,14 +1278,16 @@ class ImportExportService @Inject constructor(
             row.createCell(11).setCellValue(p.lowStockThreshold.toDouble())
         }
 
-        val outDir = context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File(".")
+        val outDir = File(context?.getExternalFilesDir(null) ?: context?.cacheDir ?: File("."), "exports").apply {
+            if (!exists()) mkdirs()
+        }
         val outFile = File(outDir, "current_stock_${System.currentTimeMillis()}.xlsx")
         return@withContext try {
             FileOutputStream(outFile).use { fos ->
                 workbook.write(fos)
             }
             workbook.close()
-            outFile
+            if (outFile.exists() && outFile.length() > 0) outFile else null
         } catch (_: Exception) {
             try { workbook.close() } catch (_: Exception) {}
             null

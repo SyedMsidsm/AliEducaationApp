@@ -118,7 +118,7 @@ fun AliEducationalTheme(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     androidx.compose.runtime.CompositionLocalProvider(
-        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, density.fontScale * scaleFactor),
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, fontScale = scaleFactor),
         LocalAliStatusColors provides statusColors
     ) {
         MaterialTheme(colorScheme = colorScheme, typography = getScaledTypography(1f), content = content)

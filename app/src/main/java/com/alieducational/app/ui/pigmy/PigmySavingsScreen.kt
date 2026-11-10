@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -183,6 +184,7 @@ fun PigmySavingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Combined Summary Card at Top
@@ -803,7 +805,7 @@ fun PigmySchemeCard(
                     enabled = !scheme.isArchived,
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp),
+                        .defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                 ) {
@@ -813,7 +815,8 @@ fun PigmySchemeCard(
                         text = "Deposit",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        maxLines = 1
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
 
@@ -822,7 +825,7 @@ fun PigmySchemeCard(
                     enabled = !scheme.isArchived && trackedBalancePaise > 0,
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp),
+                        .defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
                 ) {
@@ -832,7 +835,8 @@ fun PigmySchemeCard(
                         text = "Withdraw",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        maxLines = 1
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

@@ -42,6 +42,9 @@ import com.alieducational.app.data.local.entity.SyncEventEntity
 import com.alieducational.app.domain.calculation.CostCalculator
 import com.alieducational.app.domain.calculation.PurchaseLineInput
 import com.alieducational.app.domain.calculation.SaleLineInput
+import com.alieducational.app.domain.model.BulkResult
+import com.alieducational.app.domain.model.RemovalAction
+import com.alieducational.app.domain.model.RemovalResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
@@ -1778,6 +1781,136 @@ class AppRepository @Inject constructor(
         expenseDao.voidExpense(expenseId, reason)
         pigmyDepositDao.voidByLinkedExpenseId(expenseId, reason)
         pigmyWithdrawalDao.voidByLinkedExpenseId(expenseId, reason)
+    }
+
+    suspend fun voidExpensesBatch(ids: List<String>, reason: String): BulkResult = db.withTransaction {
+        requireOwner()
+        val distinctIds = ids.distinct()
+        if (distinctIds.isEmpty()) return@withTransaction BulkResult(0, emptyList())
+
+        val entries = distinctIds.mapNotNull { expenseDao.getExpenseById(it) }
+        val foundIds = entries.map { it.id }.toSet()
+        val missingIds = distinctIds.filter { it !in foundIds }
+
+        val alreadyVoided = entries.filter { it.isVoided }
+        val activeEntries = entries.filter { !it.isVoided }
+
+        val batchIdsSet = activeEntries.map { it.id }.toSet()
+
+        // Order so refunds are processed before parent expenses
+        val orderedActive = activeEntries.sortedWith(
+            compareByDescending<ShopExpenseEntity> { it.isExpenseRefund }
+                .thenByDescending { it.timestamp }
+        )
+
+        // Validate all active items before executing any mutations
+        for (entry in orderedActive) {
+            if (!entry.isExpenseRefund) {
+                val activeRefunds = expenseDao.getActiveRefundsForExpense(entry.id)
+                val unvoidedOutsideBatch = activeRefunds.filter { it.id !in batchIdsSet }
+                if (unvoidedOutsideBatch.isNotEmpty()) {
+                    throw IllegalStateException("Expense ${entry.id.take(8)} has active linked refunds not included in this batch. Please cancel linked refunds first.")
+                }
+            }
+
+            pigmyDepositDao.getByExpense(entry.id)?.takeUnless { it.isVoided }?.let { dep ->
+                val curBalance = pigmyBalance(dep.accountSchemeId)
+                require(curBalance >= dep.amountPaise) {
+                    "Voiding entry ${entry.id.take(8)} would make savings scheme negative."
+                }
+            }
+        }
+
+        var done = 0
+        for (entry in orderedActive) {
+            expenseDao.voidExpense(entry.id, reason)
+            pigmyDepositDao.voidByLinkedExpenseId(entry.id, reason)
+            pigmyWithdrawalDao.voidByLinkedExpenseId(entry.id, reason)
+            done++
+        }
+
+        val skipped = mutableListOf<Pair<String, String>>()
+        for (mId in missingIds) {
+            skipped.add(mId to "Not found")
+        }
+        for (av in alreadyVoided) {
+            skipped.add(av.id to "Already voided")
+        }
+
+        BulkResult(done = done, skipped = skipped)
+    }
+
+    suspend fun removeService(serviceId: String): RemovalResult = db.withTransaction {
+        requireOwner()
+        val service = serviceDefinitionDao.getServiceById(serviceId)
+            ?: throw IllegalArgumentException("Service not found")
+
+        val saleLinesCount = serviceDefinitionDao.countSaleLinesForService(serviceId)
+        val expenseCount = serviceDefinitionDao.countExpensesForService(serviceId, service.name)
+
+        if (saleLinesCount > 0 || expenseCount > 0) {
+            serviceDefinitionDao.archiveService(serviceId)
+            RemovalResult(
+                id = serviceId,
+                name = service.name,
+                action = RemovalAction.ARCHIVED,
+                message = "Service '${service.name}' has transaction history ($saleLinesCount sales, $expenseCount expenses) and was safely archived."
+            )
+        } else {
+            serviceDefinitionDao.deleteService(serviceId)
+            RemovalResult(
+                id = serviceId,
+                name = service.name,
+                action = RemovalAction.DELETED,
+                message = "Service '${service.name}' had no history and was permanently deleted."
+            )
+        }
+    }
+
+    suspend fun unarchiveService(serviceId: String) = db.withTransaction {
+        requireOwner()
+        serviceDefinitionDao.unarchiveService(serviceId)
+    }
+
+    suspend fun removeProduct(productId: String): RemovalResult = db.withTransaction {
+        requireOwner()
+        val product = productDao.getProductById(productId)
+            ?: throw IllegalArgumentException("Product not found")
+
+        val saleLinesCount = productDao.countSaleLinesForProduct(productId)
+        val movementsCount = productDao.countStockMovementsForProduct(productId)
+        val giveawaysCount = productDao.countGiveawaysForProduct(productId)
+        val hasHistory = saleLinesCount > 0 || movementsCount > 0 || giveawaysCount > 0
+
+        if (hasHistory || product.currentSellableStock > 0 || product.currentDamagedStock > 0) {
+            productDao.archiveProduct(productId)
+            val msg = when {
+                product.currentSellableStock > 0 || product.currentDamagedStock > 0 ->
+                    "Product '${product.name}' has remaining physical stock (${product.currentSellableStock} sellable, ${product.currentDamagedStock} damaged) and was archived. To remove physical units, use Stock Adjustment."
+                else ->
+                    "Product '${product.name}' has historical transactions ($saleLinesCount sales, $movementsCount stock movements) and was safely archived."
+            }
+            RemovalResult(
+                id = productId,
+                name = product.name,
+                action = RemovalAction.ARCHIVED,
+                message = msg
+            )
+        } else {
+            productBarcodeDao.deleteBarcodesForProduct(productId)
+            productDao.deleteProduct(productId)
+            RemovalResult(
+                id = productId,
+                name = product.name,
+                action = RemovalAction.DELETED,
+                message = "Product '${product.name}' had zero stock and no transactions, and was permanently deleted."
+            )
+        }
+    }
+
+    suspend fun unarchiveProduct(productId: String) = db.withTransaction {
+        requireOwner()
+        productDao.unarchiveProduct(productId)
     }
 
     suspend fun deleteCashCategory(id: String) {

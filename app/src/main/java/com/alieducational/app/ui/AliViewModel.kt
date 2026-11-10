@@ -38,6 +38,11 @@ import com.alieducational.app.data.service.OwnerSyncService
 import com.alieducational.app.data.service.ReceiptService
 import com.alieducational.app.data.service.SpreadsheetPreview
 import com.alieducational.app.data.service.SyncConnectionState
+import com.alieducational.app.domain.model.BulkResult
+import com.alieducational.app.domain.model.RemovalAction
+import com.alieducational.app.domain.model.RemovalResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.alieducational.app.data.service.TwoPhoneSyncService
 import com.alieducational.app.util.StepUpAuth
 import android.content.Context
@@ -122,7 +127,7 @@ data class BillingState(
         } else 0L
 }
 
-data class BulkResult(val done: Int, val skipped: List<Pair<String, String>>)
+typealias BulkResult = com.alieducational.app.domain.model.BulkResult
 
 @HiltViewModel
 class AliViewModel @Inject constructor(
@@ -302,6 +307,9 @@ class AliViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeServices = repository.activeServices
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allServices = repository.allServices
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val pendingSyncCount = repository.pendingSyncCount
@@ -1227,31 +1235,157 @@ class AliViewModel @Inject constructor(
         }
     }
 
+    var isVoidingExpenses by mutableStateOf(false)
+        private set
+
     fun voidExpenses(ids: List<String>, reason: String, onResult: (BulkResult) -> Unit) {
-        require(reason.isNotBlank()) { "Void reason cannot be blank" }
+        val trimmed = reason.trim()
+        require(trimmed.isNotBlank()) { "Void reason cannot be blank" }
         require(ids.size <= 200) { "Cannot void more than 200 items in a single batch" }
+        if (isVoidingExpenses) return
+        isVoidingExpenses = true
         viewModelScope.launch(operationHandler) {
-            val entries = ids.mapNotNull { repository.getExpenseById(it) }
-            val ordered = entries.sortedWith(
-                compareByDescending<com.alieducational.app.data.local.entity.ShopExpenseEntity> { it.isExpenseRefund }
-                    .thenByDescending { it.timestamp }
-            )
-            var done = 0
-            val skipped = mutableListOf<Pair<String, String>>()
-            for (e in ordered) {
-                try {
-                    repository.voidExpense(e.id, reason)
-                    done++
-                } catch (x: IllegalStateException) {
-                    skipped += e.id to (x.message ?: "Not allowed")
-                } catch (x: IllegalArgumentException) {
-                    skipped += e.id to (x.message ?: "Not found")
-                } catch (x: Exception) {
-                    skipped += e.id to (x.message ?: "Failed")
+            try {
+                val res = repository.voidExpensesBatch(ids, trimmed)
+                if (res.done > 0) {
+                    clearCashEntrySelection()
                 }
+                onResult(res)
+            } finally {
+                isVoidingExpenses = false
             }
-            clearCashEntrySelection()
-            onResult(BulkResult(done, skipped))
+        }
+    }
+
+    fun removeService(serviceId: String, onResult: (RemovalResult) -> Unit) {
+        viewModelScope.launch(operationHandler) {
+            val res = repository.removeService(serviceId)
+            onResult(res)
+        }
+    }
+
+    fun unarchiveService(serviceId: String, onDone: () -> Unit) {
+        viewModelScope.launch(operationHandler) {
+            repository.unarchiveService(serviceId)
+            onDone()
+        }
+    }
+
+    fun removeProduct(productId: String, onResult: (RemovalResult) -> Unit) {
+        viewModelScope.launch(operationHandler) {
+            val res = repository.removeProduct(productId)
+            onResult(res)
+        }
+    }
+
+    fun unarchiveProduct(productId: String, onDone: () -> Unit) {
+        viewModelScope.launch(operationHandler) {
+            repository.unarchiveProduct(productId)
+            onDone()
+        }
+    }
+
+    fun saveCashTrackerToUri(
+        items: List<ShopExpenseEntity>,
+        uri: Uri,
+        periodTitle: String,
+        fromDate: Long? = null,
+        toDate: Long? = null,
+        activeFiltersSummary: String = "All Categories, Active Transactions",
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val os = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Cannot open output stream for destination")
+                cashTrackerExcelService.exportCashTrackerToStream(
+                    items = items,
+                    outputStream = os,
+                    periodTitle = periodTitle,
+                    fromDate = fromDate,
+                    toDate = toDate,
+                    activeFiltersSummary = activeFiltersSummary
+                )
+                withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Failed to save file") }
+            }
+        }
+    }
+
+    fun saveCurrentStockToUri(
+        uri: Uri,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val os = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Cannot open destination")
+                os.use { outStream ->
+                    val tmpFile = importExportService.exportCurrentStock()
+                    if (tmpFile != null && tmpFile.exists() && tmpFile.length() > 0) {
+                        tmpFile.inputStream().use { it.copyTo(outStream) }
+                    } else {
+                        throw java.io.IOException("Stock export returned no data")
+                    }
+                }
+                withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Failed to save file") }
+            }
+        }
+    }
+
+    fun saveImportTemplateToUri(
+        uri: Uri,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val os = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Cannot open destination")
+                os.use { outStream ->
+                    val tmpFile = importExportService.generateTemplate()
+                    if (tmpFile != null && tmpFile.exists() && tmpFile.length() > 0) {
+                        tmpFile.inputStream().use { it.copyTo(outStream) }
+                    } else {
+                        throw java.io.IOException("Template generation failed")
+                    }
+                }
+                withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Failed to save template") }
+            }
+        }
+    }
+
+    fun saveErrorReportToUri(
+        uri: Uri,
+        headers: List<String>,
+        allRows: List<List<String>>,
+        plannedRows: List<com.alieducational.app.data.service.PlannedRow>,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val os = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Cannot open destination")
+                os.use { outStream ->
+                    val tmpFile = importExportService.exportErrorReport(headers, allRows, plannedRows)
+                    if (tmpFile != null && tmpFile.exists() && tmpFile.length() > 0) {
+                        tmpFile.inputStream().use { it.copyTo(outStream) }
+                    } else {
+                        throw java.io.IOException("Error report generation failed")
+                    }
+                }
+                withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Failed to save error report") }
+            }
         }
     }
 

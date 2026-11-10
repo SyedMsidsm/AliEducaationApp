@@ -4,6 +4,7 @@
     <cache-path name="barcode_exports" path="barcode_exports/" />
     <cache-path name="receipts" path="receipts/" />
     <cache-path name="camera" path="camera_temp/" />
+    <files-path name="exports_files" path="exports/" />
     <files-path name="receipts" path="receipts/" />
     <files-path name="backups" path="backups/" />
     <external-files-path name="exports_ext" path="exports/" />

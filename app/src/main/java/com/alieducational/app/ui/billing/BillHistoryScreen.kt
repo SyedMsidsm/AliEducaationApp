@@ -335,6 +335,7 @@ fun BillHistoryScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = AliDimens.spacingLg),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = AliDimens.spacingXs, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(AliDimens.spacingSm)
             ) {
                 item {

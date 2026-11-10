@@ -108,6 +108,7 @@ class MainActivity : FragmentActivity() {
                     androidx.compose.runtime.LaunchedEffect(pendingWidgetAction, isLockEnabled, viewModel.isAppLocked, isFirstLaunch) {
                         val action = pendingWidgetAction
                         if (action != null && !isFirstLaunch && (!isLockEnabled || !viewModel.isAppLocked)) {
+                            viewModel.landingShown = true
                             while (runCatching { navController.graph }.isFailure) {
                                 kotlinx.coroutines.delay(50)
                             }
@@ -145,7 +146,7 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    val isShowingLanding = !isFirstLaunch && !isLockEnabled && !viewModel.landingShown
+                    val isShowingLanding = !isFirstLaunch && !isLockEnabled && !viewModel.landingShown && (pendingWidgetAction == null)
                     val isShowingUnlock = isLockEnabled && viewModel.isAppLocked && !isFirstLaunch
 
                     Scaffold(

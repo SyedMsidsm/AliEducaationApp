@@ -31,6 +31,15 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.alieducational.app.data.repository.SaleItemParam
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
@@ -39,6 +48,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -58,7 +68,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import com.alieducational.app.data.local.entity.CustomerEntity
 import com.alieducational.app.data.local.entity.ServiceDefinitionEntity
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -98,14 +114,20 @@ fun BillingScreen(
     val allCategories by viewModel.allCategories.collectAsState()
     val allHeldBills by viewModel.allHeldBills.collectAsState()
     val activeServices by viewModel.activeServices.collectAsState()
+    val allServices by viewModel.allServices.collectAsState()
+    val allCustomers by viewModel.allCustomers.collectAsState()
     val deviceRole by viewModel.deviceRole.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
     val rejectedSyncCount by viewModel.rejectedSyncCount.collectAsState()
     val pairedOwnerHost by viewModel.pairedOwnerHost.collectAsState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var activeTab by remember { mutableStateOf("PRODUCTS") } // PRODUCTS or SERVICES
+    var serviceFilter by remember { mutableStateOf("ACTIVE") } // ACTIVE or ARCHIVED
     var showEnterServiceDialog by remember { mutableStateOf(false) }
     var selectedServiceForJob by remember { mutableStateOf<ServiceDefinitionEntity?>(null) }
+    var serviceToDelete by remember { mutableStateOf<ServiceDefinitionEntity?>(null) }
     var showAddServiceDialog by remember { mutableStateOf(false) }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -548,11 +570,25 @@ fun BillingScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Services",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val activeCount = allServices.count { !it.isArchived }
+                                val archivedCount = allServices.count { it.isArchived }
+                                FilterChip(
+                                    selected = serviceFilter == "ACTIVE",
+                                    onClick = { serviceFilter = "ACTIVE" },
+                                    label = { Text("Active ($activeCount)") }
+                                )
+                                if (archivedCount > 0) {
+                                    FilterChip(
+                                        selected = serviceFilter == "ARCHIVED",
+                                        onClick = { serviceFilter = "ARCHIVED" },
+                                        label = { Text("Archived ($archivedCount)") }
+                                    )
+                                }
+                            }
                             TextButton(onClick = { showAddServiceDialog = true }) {
                                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -561,13 +597,39 @@ fun BillingScreen(
                         }
                     }
 
-                    items(activeServices) { service ->
+                    val displayedServices = if (serviceFilter == "ACTIVE") {
+                        allServices.filter { !it.isArchived }
+                    } else {
+                        allServices.filter { it.isArchived }
+                    }
+
+                    if (displayedServices.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (serviceFilter == "ACTIVE") "No active services. Add one above." else "No archived services.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    items(displayedServices, key = { it.id }) { service ->
+                        var showMenu by remember { mutableStateOf(false) }
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    selectedServiceForJob = service
-                                    showEnterServiceDialog = true
+                                    if (!service.isArchived) {
+                                        selectedServiceForJob = service
+                                        showEnterServiceDialog = true
+                                    }
                                 },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -579,7 +641,10 @@ fun BillingScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     val icon = when {
                                         service.name.contains("Print", ignoreCase = true) -> Icons.Filled.Print
                                         service.name.contains("Copy", ignoreCase = true) -> Icons.Filled.ContentCopy
@@ -590,26 +655,78 @@ fun BillingScreen(
                                         modifier = Modifier
                                             .size(40.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                            .background(
+                                                if (service.isArchived) MaterialTheme.colorScheme.surfaceVariant
+                                                else MaterialTheme.colorScheme.primaryContainer
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Icon(
+                                            icon,
+                                            contentDescription = null,
+                                            tint = if (service.isArchived) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(
                                             text = service.name,
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = if (service.isArchived) MaterialTheme.colorScheme.onSurfaceVariant
+                                            else MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "Unit: ${service.unitLabel} · Variable job rate",
+                                            text = if (service.isArchived) "Archived · Unit: ${service.unitLabel}"
+                                            else "Unit: ${service.unitLabel} · Service amount",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
-                                Icon(Icons.Filled.Add, contentDescription = "Add Job", tint = MaterialTheme.colorScheme.primary)
+
+                                Box {
+                                    IconButton(onClick = { showMenu = true }) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = "Service options")
+                                    }
+                                    DropdownMenu(
+                                        expanded = showMenu,
+                                        onDismissRequest = { showMenu = false }
+                                    ) {
+                                        if (!service.isArchived) {
+                                            DropdownMenuItem(
+                                                text = { Text("Bill Service") },
+                                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                                onClick = {
+                                                    showMenu = false
+                                                    selectedServiceForJob = service
+                                                    showEnterServiceDialog = true
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Archive / Delete Service", color = MaterialTheme.colorScheme.error) },
+                                                leadingIcon = { Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                                onClick = {
+                                                    showMenu = false
+                                                    serviceToDelete = service
+                                                }
+                                            )
+                                        } else {
+                                            DropdownMenuItem(
+                                                text = { Text("Restore Service") },
+                                                leadingIcon = { Icon(Icons.Filled.Restore, contentDescription = null) },
+                                                onClick = {
+                                                    showMenu = false
+                                                    viewModel.unarchiveService(service.id) {
+                                                        scope.launch {
+                                                            snackbarHostState.showSnackbar("Service '${service.name}' restored")
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -759,6 +876,13 @@ fun BillingScreen(
                     }
                 }
             }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            )
         }
     }
 
@@ -769,21 +893,98 @@ fun BillingScreen(
         )
     }
 
+    if (serviceToDelete != null) {
+        val s = serviceToDelete!!
+        AlertDialog(
+            onDismissRequest = { serviceToDelete = null },
+            icon = { Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Archive or Delete Service?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Service: ${s.name}\n\n" +
+                    "• If this service has existing bills or recorded expenses, it will be safely ARCHIVED (hidden from active selection, but preserved in historical reports).\n" +
+                    "• If it has never been used, it will be PERMANENTLY DELETED."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toRemove = s
+                        serviceToDelete = null
+                        viewModel.removeService(toRemove.id) { res ->
+                            scope.launch {
+                                snackbarHostState.showSnackbar(res.message)
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Confirm")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { serviceToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showEnterServiceDialog && selectedServiceForJob != null) {
         EnterServiceJobDialog(
             service = selectedServiceForJob!!,
+            customers = allCustomers,
             onDismiss = {
                 showEnterServiceDialog = false
                 selectedServiceForJob = null
             },
-            onAddJob = { option, quantity, ratePaise ->
+            onAddToCart = { option, amountPaise ->
+                val s = selectedServiceForJob!!
                 viewModel.addServiceToBill(
-                    serviceName = selectedServiceForJob!!.name,
+                    serviceName = s.name,
                     option = option,
-                    unitLabel = selectedServiceForJob!!.unitLabel,
-                    quantity = quantity,
-                    unitRatePaise = ratePaise,
-                    serviceId = selectedServiceForJob!!.id
+                    unitLabel = s.unitLabel,
+                    quantity = 1,
+                    unitRatePaise = amountPaise,
+                    serviceId = s.id
+                )
+                showEnterServiceDialog = false
+                selectedServiceForJob = null
+            },
+            onDirectCheckout = { option, amountPaise, paidPaise, paymentMethod, customer ->
+                val s = selectedServiceForJob!!
+                val displayName = if (!option.isNullOrBlank()) "${s.name} — $option" else s.name
+                viewModel.recordSale(
+                    customerId = customer?.id,
+                    customerName = customer?.name,
+                    items = listOf(
+                        SaleItemParam(
+                            productId = s.id,
+                            productName = displayName,
+                            quantityBase = 1,
+                            unitSellingPricePaise = amountPaise,
+                            lineType = "SERVICE",
+                            serviceId = s.id,
+                            serviceName = s.name,
+                            serviceOption = option,
+                            unitLabel = s.unitLabel
+                        )
+                    ),
+                    discountType = "FIXED",
+                    discountInput = 0.0,
+                    amountReceivedPaise = paidPaise,
+                    paymentMethod = paymentMethod,
+                    notes = "Direct Service Sale",
+                    onSuccess = { sale ->
+                        scope.launch {
+                            val msg = if (sale.remainingCreditPaise > 0) {
+                                "Recorded $displayName: Paid ${CostCalculator.formatPaiseToRupees(paidPaise)}, Due ${CostCalculator.formatPaiseToRupees(sale.remainingCreditPaise)} for ${customer?.name ?: "Customer"}"
+                            } else {
+                                "Recorded $displayName: Paid in full ${CostCalculator.formatPaiseToRupees(paidPaise)}"
+                            }
+                            snackbarHostState.showSnackbar(msg)
+                        }
+                    }
                 )
                 showEnterServiceDialog = false
                 selectedServiceForJob = null
@@ -802,26 +1003,71 @@ fun BillingScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnterServiceJobDialog(
     service: ServiceDefinitionEntity,
+    customers: List<CustomerEntity>,
     onDismiss: () -> Unit,
-    onAddJob: (option: String?, quantity: Int, ratePaise: Long) -> Unit
+    onAddToCart: (option: String?, amountPaise: Long) -> Unit,
+    onDirectCheckout: (
+        option: String?,
+        amountPaise: Long,
+        paidPaise: Long,
+        paymentMethod: String,
+        customer: CustomerEntity?
+    ) -> Unit
 ) {
     val isPrinting = service.name.contains("Print", ignoreCase = true)
     var selectedOption by remember { mutableStateOf(if (isPrinting) "A4 B&W" else null) }
-    var quantityText by remember { mutableStateOf("1") }
-    var rateText by remember { mutableStateOf("") } // Starts BLANK per requirement
+    var serviceAmountText by remember { mutableStateOf("") }
+    var checkoutMode by remember { mutableStateOf("CART") } // "CART" or "DIRECT"
 
-    val qty = quantityText.toIntOrNull() ?: 0
-    val rateDouble = rateText.toDoubleOrNull() ?: 0.0
-    val totalAmount = qty * rateDouble
+    // Direct checkout payment state
+    var paymentStatus by remember { mutableStateOf("PAID") } // "PAID", "PARTIAL", "UNPAID"
+    var paidNowText by remember { mutableStateOf("") }
+    var selectedPaymentMethod by remember { mutableStateOf("CASH") } // "CASH", "UPI", "BANK_TRANSFER", "CHEQUE"
+    var selectedCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
+    var customerDropdownExpanded by remember { mutableStateOf(false) }
+
+    val amountDouble = serviceAmountText.toDoubleOrNull() ?: 0.0
+    val amountPaise = (amountDouble * 100).toLong()
+
+    val paidDouble = when (paymentStatus) {
+        "PAID" -> amountDouble
+        "UNPAID" -> 0.0
+        else -> paidNowText.toDoubleOrNull() ?: 0.0
+    }
+    val paidPaise = (paidDouble * 100).toLong()
+    val duePaise = (amountPaise - paidPaise).coerceAtLeast(0L)
+
+    // Validation
+    val isAmountValid = amountPaise > 0
+    val isPaidValid = when (paymentStatus) {
+        "PAID" -> true
+        "UNPAID" -> true
+        "PARTIAL" -> paidDouble > 0 && paidDouble < amountDouble
+        else -> false
+    }
+    val isCustomerValid = if (duePaise > 0) selectedCustomer != null else true
+    val canDirectCheckout = isAmountValid && isPaidValid && isCustomerValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add ${service.name}", fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                text = "Service: ${service.name}",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // If printing, options
                 if (isPrinting) {
                     Text("Print Mode", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     Row(
@@ -830,80 +1076,212 @@ fun EnterServiceJobDialog(
                     ) {
                         FilterChip(
                             selected = selectedOption == "A4 B&W",
-                            onClick = {
-                                if (selectedOption != "A4 B&W") {
-                                    selectedOption = "A4 B&W"
-                                    rateText = "" // Reset rate on toggle per requirement
-                                }
-                            },
+                            onClick = { selectedOption = "A4 B&W" },
                             label = { Text("A4 B&W") },
                             modifier = Modifier.weight(1f)
                         )
                         FilterChip(
                             selected = selectedOption == "A4 Colour",
-                            onClick = {
-                                if (selectedOption != "A4 Colour") {
-                                    selectedOption = "A4 Colour"
-                                    rateText = "" // Reset rate on toggle per requirement
-                                }
-                            },
+                            onClick = { selectedOption = "A4 Colour" },
                             label = { Text("A4 Colour") },
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
+                // Service Amount (₹) * - single required field!
                 OutlinedTextField(
-                    value = quantityText,
-                    onValueChange = { if (it.all { ch -> ch.isDigit() }) quantityText = it },
-                    label = { Text("Quantity (${service.unitLabel})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                )
-
-                OutlinedTextField(
-                    value = rateText,
-                    onValueChange = { rateText = it },
-                    label = { Text("Rate per ${service.unitLabel} (₹) *") },
-                    placeholder = { Text("Enter rate for this job") },
+                    value = serviceAmountText,
+                    onValueChange = { serviceAmountText = it },
+                    label = { Text("Service amount (₹) *") },
+                    placeholder = { Text("e.g. 500") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                if (qty > 0 && rateDouble > 0) {
+                // Mode switch: Add to Bill vs Direct Checkout
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = checkoutMode == "CART",
+                        onClick = { checkoutMode = "CART" },
+                        label = { Text("Add to Bill Cart") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = checkoutMode == "DIRECT",
+                        onClick = { checkoutMode = "DIRECT" },
+                        label = { Text("Direct Checkout") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (checkoutMode == "DIRECT" && isAmountValid) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Job Total:", fontWeight = FontWeight.SemiBold)
-                            Text("₹${String.format(java.util.Locale.ENGLISH, "%.2f", totalAmount)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "Payment Allocation",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+
+                            // Status chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = paymentStatus == "PAID",
+                                    onClick = { paymentStatus = "PAID" },
+                                    label = { Text("Fully Paid") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = paymentStatus == "PARTIAL",
+                                    onClick = { paymentStatus = "PARTIAL" },
+                                    label = { Text("Partial") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = paymentStatus == "UNPAID",
+                                    onClick = { paymentStatus = "UNPAID" },
+                                    label = { Text("Unpaid (Due)") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            if (paymentStatus == "PARTIAL") {
+                                OutlinedTextField(
+                                    value = paidNowText,
+                                    onValueChange = { paidNowText = it },
+                                    label = { Text("Paid now (₹) *") },
+                                    placeholder = { Text("e.g. 300") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
+
+                            // Summary row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Charge: ${CostCalculator.formatPaiseToRupees(amountPaise)}")
+                                Text("Paid: ${CostCalculator.formatPaiseToRupees(paidPaise)}")
+                                if (duePaise > 0) {
+                                    Text(
+                                        "Due: ${CostCalculator.formatPaiseToRupees(duePaise)}",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            // Payment method selector (for paid amount > 0)
+                            if (paidPaise > 0) {
+                                Text("Payment Method:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf("CASH" to "Cash", "UPI" to "UPI", "BANK_TRANSFER" to "Bank").forEach { (mode, label) ->
+                                        FilterChip(
+                                            selected = selectedPaymentMethod == mode,
+                                            onClick = { selectedPaymentMethod = mode },
+                                            label = { Text(label, fontSize = 11.sp) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Customer selection (mandatory if duePaise > 0)
+                            Column {
+                                Text(
+                                    text = if (duePaise > 0) "Customer * (Required for due balance)" else "Customer (Optional)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (duePaise > 0 && selectedCustomer == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                ExposedDropdownMenuBox(
+                                    expanded = customerDropdownExpanded,
+                                    onExpandedChange = { customerDropdownExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedCustomer?.name ?: "Select Customer...",
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = customerDropdownExpanded) },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .menuAnchor(),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = customerDropdownExpanded,
+                                        onDismissRequest = { customerDropdownExpanded = false }
+                                    ) {
+                                        customers.forEach { c ->
+                                            DropdownMenuItem(
+                                                text = { Text("${c.name} (${c.phone ?: "No phone"})") },
+                                                onClick = {
+                                                    selectedCustomer = c
+                                                    customerDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val ratePaise = (rateDouble * 100).toLong()
-                    if (qty > 0 && ratePaise > 0) {
-                        onAddJob(selectedOption, qty, ratePaise)
-                    }
-                },
-                enabled = qty > 0 && rateDouble > 0,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Text("Add to Bill")
+            if (checkoutMode == "CART") {
+                Button(
+                    onClick = {
+                        if (isAmountValid) {
+                            onAddToCart(selectedOption, amountPaise)
+                        }
+                    },
+                    enabled = isAmountValid,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Add to Bill")
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (canDirectCheckout) {
+                            onDirectCheckout(
+                                selectedOption,
+                                amountPaise,
+                                paidPaise,
+                                selectedPaymentMethod,
+                                selectedCustomer
+                            )
+                        }
+                    },
+                    enabled = canDirectCheckout,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Record Sale")
+                }
             }
         },
         dismissButton = {

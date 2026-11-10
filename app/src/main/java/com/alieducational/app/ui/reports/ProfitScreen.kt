@@ -268,6 +268,7 @@ fun ProfitScreen(
     }
 
     var selectedBucketDetail by remember { mutableStateOf<ProfitTrendBucket?>(null) }
+    val statusColors = com.alieducational.app.ui.theme.LocalAliStatusColors.current
 
     Scaffold(
         topBar = {
@@ -304,6 +305,7 @@ fun ProfitScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (unresolvedProductCount > 0 || summaryCount > 0) item {
@@ -393,10 +395,12 @@ fun ProfitScreen(
                     // 1. Prominent Gross Profit Card (with Gross Margin %)
                     item {
                         val isGrossProfitPositive = productGrossProfitPaise >= 0
+                        val gpSign = if (productGrossProfitPaise > 0) "+" else if (productGrossProfitPaise < 0) "-" else ""
+                        val gpLabel = if (productGrossProfitPaise >= 0) "Profit" else "Loss"
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isGrossProfitPositive) Color(0xFF1B3828) else Color(0xFF3E1B1B)
+                                containerColor = if (isGrossProfitPositive) statusColors.paidBg else statusColors.dueBg
                             ),
                             shape = RoundedCornerShape(16.dp)
                         ) {
@@ -410,12 +414,12 @@ fun ProfitScreen(
                                         Icon(
                                             imageVector = if (isGrossProfitPositive) Icons.Filled.TrendingUp else Icons.Filled.TrendingDown,
                                             contentDescription = null,
-                                            tint = if (isGrossProfitPositive) Color(0xFF75B890) else Color(0xFFE57373),
+                                            tint = if (isGrossProfitPositive) statusColors.paidFg else statusColors.dueFg,
                                             modifier = Modifier.size(24.dp)
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "Product Gross Profit",
+                                            text = "Product Gross $gpLabel",
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
@@ -423,17 +427,17 @@ fun ProfitScreen(
                                     Text(
                                         text = if (productRevenuePaise > 0) {
                                             "Margin: ${String.format(Locale.US, "%.2f", productGrossMarginPct)}%"
-                                        } else "Margin: Not applicable",
+                                        } else "Margin: N/A",
                                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isGrossProfitPositive) Color(0xFF75B890) else Color(0xFFE57373)
+                                        color = if (isGrossProfitPositive) statusColors.paidFg else statusColors.dueFg
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = CostCalculator.formatPaiseToRupees(productGrossProfitPaise),
+                                    text = "$gpSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(productGrossProfitPaise))}",
                                     style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isGrossProfitPositive) Color(0xFF75B890) else Color(0xFFE57373)
+                                    color = if (isGrossProfitPositive) statusColors.paidFg else statusColors.dueFg
                                 )
 
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -515,7 +519,7 @@ fun ProfitScreen(
                                     Text(
                                         CostCalculator.formatPaiseToRupees(netProductExpensesPaise),
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFFE57373)
+                                        color = statusColors.dueFg
                                     )
                                 }
 
@@ -528,14 +532,16 @@ fun ProfitScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val prodResSign = if (productResultAfterExpensesPaise > 0) "+" else if (productResultAfterExpensesPaise < 0) "-" else ""
+                                    val prodResLabel = if (productResultAfterExpensesPaise >= 0) "Profit" else "Loss"
                                     Text(
-                                        "Result After Product Expenses",
+                                        "Result After Product Expenses ($prodResLabel)",
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                     Text(
-                                        CostCalculator.formatPaiseToRupees(productResultAfterExpensesPaise),
+                                        "$prodResSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(productResultAfterExpensesPaise))}",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (productResultAfterExpensesPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                                        color = if (productResultAfterExpensesPaise >= 0) statusColors.paidFg else statusColors.dueFg
                                     )
                                 }
                                 Text(
@@ -610,24 +616,27 @@ fun ProfitScreen(
                 // ── TAB CONTENT: SERVICES ──────────────────────────────────────────
                 if (activeTab == "SERVICES" && isOwner) {
                     item {
+                        val isServicePositive = serviceResultAfterExpensesPaise >= 0
+                        val srvSign = if (serviceResultAfterExpensesPaise > 0) "+" else if (serviceResultAfterExpensesPaise < 0) "-" else ""
+                        val srvLabel = if (isServicePositive) "Net Profit" else "Net Loss"
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (serviceResultAfterExpensesPaise >= 0) Color(0xFF1B3828) else Color(0xFF3E1B1B)
+                                containerColor = if (isServicePositive) statusColors.paidBg else statusColors.dueBg
                             ),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(18.dp)) {
                                 Text(
-                                    "Service Revenue Minus Service Expenses",
+                                    "Service $srvLabel (Revenue Minus Costs)",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    CostCalculator.formatPaiseToRupees(serviceResultAfterExpensesPaise),
+                                    "$srvSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(serviceResultAfterExpensesPaise))}",
                                     style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = if (serviceResultAfterExpensesPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                                    color = if (isServicePositive) statusColors.paidFg else statusColors.dueFg
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
@@ -690,24 +699,27 @@ fun ProfitScreen(
                 // ── TAB CONTENT: COMBINED ──────────────────────────────────────────
                 if (activeTab == "COMBINED" && isOwner) {
                     item {
+                        val isCombPositive = combinedRecordedOperatingResultPaise >= 0
+                        val combSign = if (combinedRecordedOperatingResultPaise > 0) "+" else if (combinedRecordedOperatingResultPaise < 0) "-" else ""
+                        val combLabel = if (isCombPositive) "Operating Profit" else "Operating Loss"
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (combinedRecordedOperatingResultPaise >= 0) Color(0xFF1B3828) else Color(0xFF3E1B1B)
+                                containerColor = if (isCombPositive) statusColors.paidBg else statusColors.dueBg
                             ),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(modifier = Modifier.padding(18.dp)) {
                                 Text(
-                                    "Combined Recorded Operating Result",
+                                    "Combined $combLabel",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    CostCalculator.formatPaiseToRupees(combinedRecordedOperatingResultPaise),
+                                    "$combSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(combinedRecordedOperatingResultPaise))}",
                                     style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = if (combinedRecordedOperatingResultPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                                    color = if (isCombPositive) statusColors.paidFg else statusColors.dueFg
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
@@ -733,39 +745,41 @@ fun ProfitScreen(
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("1. Product Gross Profit:", style = MaterialTheme.typography.bodySmall)
-                                    Text(CostCalculator.formatPaiseToRupees(productGrossProfitPaise), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color(0xFF75B890))
+                                    Text(CostCalculator.formatPaiseToRupees(productGrossProfitPaise), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = statusColors.paidFg)
                                 }
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("2. Service Revenue:", style = MaterialTheme.typography.bodySmall)
-                                    Text(CostCalculator.formatPaiseToRupees(serviceRevenuePaise), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color(0xFF75B890))
+                                    Text(CostCalculator.formatPaiseToRupees(serviceRevenuePaise), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = statusColors.paidFg)
                                 }
 
                                 HorizontalDivider()
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("3. Product Expenses (Net):", style = MaterialTheme.typography.bodySmall)
-                                    Text("-${CostCalculator.formatPaiseToRupees(netProductExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE57373))
+                                    Text("-${CostCalculator.formatPaiseToRupees(netProductExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = statusColors.dueFg)
                                 }
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("4. Service Expenses (Net):", style = MaterialTheme.typography.bodySmall)
-                                    Text("-${CostCalculator.formatPaiseToRupees(netServiceExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE57373))
+                                    Text("-${CostCalculator.formatPaiseToRupees(netServiceExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = statusColors.dueFg)
                                 }
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("5. Shared Expenses (Net):", style = MaterialTheme.typography.bodySmall)
-                                    Text("-${CostCalculator.formatPaiseToRupees(netSharedExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE57373))
+                                    Text("-${CostCalculator.formatPaiseToRupees(netSharedExpensesPaise)}", style = MaterialTheme.typography.bodySmall, color = statusColors.dueFg)
                                 }
 
                                 HorizontalDivider()
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Net Operating Result:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                                    val finalSign = if (combinedRecordedOperatingResultPaise > 0) "+" else if (combinedRecordedOperatingResultPaise < 0) "-" else ""
+                                    val finalLabel = if (combinedRecordedOperatingResultPaise >= 0) "Profit" else "Loss"
+                                    Text("Net Operating Result ($finalLabel):", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(
-                                        CostCalculator.formatPaiseToRupees(combinedRecordedOperatingResultPaise),
+                                        "$finalSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(combinedRecordedOperatingResultPaise))}",
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (combinedRecordedOperatingResultPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                                        color = if (combinedRecordedOperatingResultPaise >= 0) statusColors.paidFg else statusColors.dueFg
                                     )
                                 }
                             }
@@ -804,11 +818,13 @@ fun ProfitScreen(
                         Text(CostCalculator.formatPaiseToRupees(bucket.cogsPaise), fontWeight = FontWeight.Bold)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Gross Profit:")
+                        val gpSign = if (bucket.grossProfitPaise > 0) "+" else if (bucket.grossProfitPaise < 0) "-" else ""
+                        val gpLabel = if (bucket.grossProfitPaise >= 0) "Profit" else "Loss"
+                        Text("Gross $gpLabel:")
                         Text(
-                            CostCalculator.formatPaiseToRupees(bucket.grossProfitPaise),
+                            "$gpSign${CostCalculator.formatPaiseToRupees(kotlin.math.abs(bucket.grossProfitPaise))}",
                             fontWeight = FontWeight.Bold,
-                            color = if (bucket.grossProfitPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                            color = if (bucket.grossProfitPaise >= 0) statusColors.paidFg else statusColors.dueFg
                         )
                     }
                 }
@@ -880,6 +896,7 @@ fun SalesProfitTrendChart(
     onBucketClick: (ProfitTrendBucket) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val statusColors = com.alieducational.app.ui.theme.LocalAliStatusColors.current
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -899,7 +916,7 @@ fun SalesProfitTrendChart(
                         Text("Sales", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(8.dp).background(Color(0xFF75B890), RoundedCornerShape(2.dp)))
+                        Box(modifier = Modifier.size(8.dp).background(statusColors.paidFg, RoundedCornerShape(2.dp)))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Gross Profit", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -969,7 +986,7 @@ fun SalesProfitTrendChart(
                             // Profit Bar (positive upwards, negative downwards)
                             val profitHeight = (kotlin.math.abs(b.grossProfitPaise).toFloat() / totalSpan) * size.height
                             val profitTop = if (b.grossProfitPaise >= 0) zeroY - profitHeight else zeroY
-                            val profitColor = if (b.grossProfitPaise >= 0) Color(0xFF75B890) else Color(0xFFE57373)
+                            val profitColor = if (b.grossProfitPaise >= 0) statusColors.paidFg else statusColors.dueFg
 
                             drawRect(
                                 color = profitColor,
@@ -1003,6 +1020,7 @@ fun ExpenseBreakdownChart(
     title: String,
     modifier: Modifier = Modifier
 ) {
+    val statusColors = com.alieducational.app.ui.theme.LocalAliStatusColors.current
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1047,7 +1065,7 @@ fun ExpenseBreakdownChart(
                                     CostCalculator.formatPaiseToRupees(netPaise),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isNegative) Color(0xFF75B890) else MaterialTheme.colorScheme.onSurface
+                                    color = if (isNegative) statusColors.paidFg else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             Spacer(modifier = Modifier.height(3.dp))
@@ -1062,7 +1080,7 @@ fun ExpenseBreakdownChart(
                                         .fillMaxWidth(fraction)
                                         .height(6.dp)
                                         .background(
-                                            if (isNegative) Color(0xFF75B890) else Color(0xFFE57373),
+                                            if (isNegative) statusColors.paidFg else statusColors.dueFg,
                                             RoundedCornerShape(3.dp)
                                         )
                                 )

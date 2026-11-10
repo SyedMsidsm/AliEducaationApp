@@ -72,6 +72,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -139,7 +140,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import java.io.File
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -173,6 +174,38 @@ fun CashTrackerScreen(
     var isImporting by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var importPreview by remember { mutableStateOf<CashTrackerImportPreview?>(null) }
+    var showExportPreviewDialog by remember { mutableStateOf(false) }
+    var pendingExportItems by remember { mutableStateOf<List<ShopExpenseEntity>>(emptyList()) }
+    var pendingExportTitle by remember { mutableStateOf("All Transactions") }
+    var pendingExportFromDate by remember { mutableStateOf<Long?>(null) }
+    var pendingExportToDate by remember { mutableStateOf<Long?>(null) }
+    var pendingExportSummary by remember { mutableStateOf("All Categories, Active Transactions") }
+
+    val createCashDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            isExporting = true
+            viewModel.saveCashTrackerToUri(
+                items = pendingExportItems,
+                uri = uri,
+                periodTitle = pendingExportTitle,
+                fromDate = pendingExportFromDate,
+                toDate = pendingExportToDate,
+                activeFiltersSummary = pendingExportSummary,
+                onSuccess = {
+                    isExporting = false
+                    android.widget.Toast.makeText(context, "Cash Book saved successfully to device", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                onError = { msg ->
+                    isExporting = false
+                    android.widget.Toast.makeText(context, "Failed to save: $msg", android.widget.Toast.LENGTH_LONG).show()
+                }
+            )
+        } else {
+            isExporting = false
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -422,26 +455,14 @@ fun CashTrackerScreen(
                     }
                 }
 
-                // Share / Export via WhatsApp Button
+                // Share / Export Excel Button
                 IconButton(
                     onClick = {
                         val itemsToExport = if (filteredItems.isNotEmpty()) filteredItems else allExpenses
                         if (itemsToExport.isEmpty()) {
                             Toast.makeText(context, "No transactions to export", Toast.LENGTH_SHORT).show()
                         } else {
-                            isExporting = true
-                            viewModel.exportCashTrackerExcel(itemsToExport, rangeText) { shareIntent ->
-                                isExporting = false
-                                try {
-                                    val chooser = Intent.createChooser(shareIntent, "Share Cash Book").apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(chooser)
-                                } catch (e: Exception) {
-                                    android.util.Log.w("CashTracker", "Failed to share cash records", e)
-                                    Toast.makeText(context, "Failed to share cash records. Please retry.", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            showExportPreviewDialog = true
                         }
                     },
                     enabled = !isImporting && !isExporting
@@ -455,7 +476,7 @@ fun CashTrackerScreen(
                     } else {
                         Icon(
                             imageVector = Icons.Filled.Share,
-                            contentDescription = "Share / Export (WhatsApp)",
+                            contentDescription = "Share / Export Excel",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -1799,21 +1820,35 @@ fun CashTrackerScreen(
                             errorMsg = "Reason is required"
                             return@Button
                         }
-                        showBulkVoidConfirmDialog = false
                         viewModel.voidExpenses(selectedCashEntryIds.toList(), trimmed) { res ->
                             bulkVoidResult = res
+                            showBulkVoidConfirmDialog = false
                         }
                     },
+                    enabled = !viewModel.isVoidingExpenses && reasonText.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError
                     )
                 ) {
-                    Text("Confirm Void")
+                    if (viewModel.isVoidingExpenses) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = MaterialTheme.colorScheme.onError,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Voiding...")
+                    } else {
+                        Text("Confirm Void")
+                    }
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showBulkVoidConfirmDialog = false }) {
+                OutlinedButton(
+                    onClick = { showBulkVoidConfirmDialog = false },
+                    enabled = !viewModel.isVoidingExpenses
+                ) {
                     Text("Cancel")
                 }
             }
@@ -1857,7 +1892,48 @@ fun CashTrackerScreen(
         )
     }
 
-
+    if (showExportPreviewDialog) {
+        CashTrackerExportPreviewDialog(
+            allExpenses = allExpenses,
+            activeCategories = activeCategories,
+            onDismiss = { showExportPreviewDialog = false },
+            onExportAndShare = { items, periodTitle, fromDate, toDate, summary, isShare ->
+                showExportPreviewDialog = false
+                if (isShare) {
+                    isExporting = true
+                    viewModel.exportCashTrackerExcel(
+                        items = items,
+                        periodTitle = periodTitle,
+                        fromDate = fromDate,
+                        toDate = toDate,
+                        activeFiltersSummary = summary
+                    ) { shareIntent ->
+                        isExporting = false
+                        try {
+                            val chooser = Intent.createChooser(shareIntent, "Share Cash Book").apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(chooser)
+                        } catch (e: Exception) {
+                            android.util.Log.w("CashTracker", "Failed to share cash records", e)
+                            Toast.makeText(context, "Failed to share cash records. Please retry.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    pendingExportItems = items
+                    pendingExportTitle = periodTitle
+                    pendingExportFromDate = fromDate
+                    pendingExportToDate = toDate
+                    pendingExportSummary = summary
+                    val dfFile = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                    val fromStr = if (fromDate != null && fromDate > 0L) dfFile.format(Date(fromDate)) else "start"
+                    val toStr = if (toDate != null && toDate < Long.MAX_VALUE) dfFile.format(Date(toDate)) else dfFile.format(Date())
+                    val defaultName = "Ali_Educational_Cash_${fromStr}_to_${toStr}.xlsx"
+                    createCashDocumentLauncher.launch(defaultName)
+                }
+            }
+        )
+    }
 }
 
 private fun queryFileName(context: Context, uri: Uri): String {
@@ -2144,6 +2220,31 @@ fun CashTrackerExportPreviewDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val fmt = SimpleDateFormat("dd MMM yyyy", Locale.US)
+                        val periodTitle = when (selectedPeriod) {
+                            "TODAY" -> "Today"
+                            "WEEK" -> "This Week"
+                            "MONTH" -> "This Month"
+                            "ALL" -> "All Time"
+                            else -> "${fmt.format(Date(effectiveStart))} to ${fmt.format(Date(effectiveEnd))}"
+                        }
+                        onExportAndShare(
+                            matchingItems,
+                            periodTitle,
+                            if (selectedPeriod == "ALL") null else effectiveStart,
+                            if (selectedPeriod == "ALL") null else effectiveEnd,
+                            filtersSummary,
+                            false
+                        )
+                    }
+                ) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save to Device", fontWeight = FontWeight.Bold)
+                }
+
                 Button(
                     onClick = {
                         val fmt = SimpleDateFormat("dd MMM yyyy", Locale.US)
@@ -2167,7 +2268,7 @@ fun CashTrackerExportPreviewDialog(
                 ) {
                     Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Share Excel", fontWeight = FontWeight.Bold)
+                    Text("Share", fontWeight = FontWeight.Bold)
                 }
             }
         },

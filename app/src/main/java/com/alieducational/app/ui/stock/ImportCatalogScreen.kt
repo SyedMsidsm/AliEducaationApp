@@ -104,6 +104,73 @@ fun ImportCatalogScreen(
     val importResult by viewModel.importResult.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
     val plannedRows by viewModel.plannedRows.collectAsState()
+    var isExporting by remember { mutableStateOf(false) }
+
+    val createTemplateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            isExporting = true
+            viewModel.saveImportTemplateToUri(
+                uri = uri,
+                onSuccess = {
+                    isExporting = false
+                    Toast.makeText(context, "Template saved successfully", Toast.LENGTH_SHORT).show()
+                },
+                onError = { msg ->
+                    isExporting = false
+                    Toast.makeText(context, "Failed to save template: $msg", Toast.LENGTH_LONG).show()
+                }
+            )
+        } else {
+            isExporting = false
+        }
+    }
+
+    val createStockExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            isExporting = true
+            viewModel.saveCurrentStockToUri(
+                uri = uri,
+                onSuccess = {
+                    isExporting = false
+                    Toast.makeText(context, "Current stock saved successfully", Toast.LENGTH_SHORT).show()
+                },
+                onError = { msg ->
+                    isExporting = false
+                    Toast.makeText(context, "Failed to export stock: $msg", Toast.LENGTH_LONG).show()
+                }
+            )
+        } else {
+            isExporting = false
+        }
+    }
+
+    val createErrorReportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            isExporting = true
+            viewModel.saveErrorReportToUri(
+                uri = uri,
+                headers = headers,
+                allRows = allLoadedRows,
+                plannedRows = plannedRows,
+                onSuccess = {
+                    isExporting = false
+                    Toast.makeText(context, "Error report saved successfully", Toast.LENGTH_SHORT).show()
+                },
+                onError = { msg ->
+                    isExporting = false
+                    Toast.makeText(context, "Failed to save error report: $msg", Toast.LENGTH_LONG).show()
+                }
+            )
+        } else {
+            isExporting = false
+        }
+    }
 
     // File picker launcher
     val filePicker = rememberLauncherForActivityResult(
@@ -328,33 +395,13 @@ fun ImportCatalogScreen(
                                 }
                             },
                             onDownloadTemplate = {
-                                val tFile = viewModel.downloadImportTemplate()
-                                if (tFile != null) {
-                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tFile)
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Share Catalog Template"))
-                                } else {
-                                    Toast.makeText(context, "Failed to create template", Toast.LENGTH_SHORT).show()
+                                if (!isExporting) {
+                                    createTemplateLauncher.launch("product_catalog_template.xlsx")
                                 }
                             },
                             onExportCurrentStock = {
-                                coroutineScope.launch {
-                                    val sFile = viewModel.exportCurrentStockToExcel()
-                                    if (sFile != null) {
-                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", sFile)
-                                        val intent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                            putExtra(Intent.EXTRA_STREAM, uri)
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                        context.startActivity(Intent.createChooser(intent, "Share Current Stock"))
-                                    } else {
-                                        Toast.makeText(context, "No stock available to export", Toast.LENGTH_SHORT).show()
-                                    }
+                                if (!isExporting) {
+                                    createStockExportLauncher.launch("current_stock_${System.currentTimeMillis()}.xlsx")
                                 }
                             },
                             onNext = {
@@ -393,22 +440,8 @@ fun ImportCatalogScreen(
                             filter = reviewStatusFilter,
                             onFilterChange = { reviewStatusFilter = it },
                             onExportErrorReport = {
-                                val file = viewModel.exportImportErrorReport(
-                                    headers = headers,
-                                    allRows = allLoadedRows,
-                                    plan = plannedRows,
-                                    fileName = selectedFileName
-                                )
-                                if (file != null) {
-                                    val shareUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                        putExtra(Intent.EXTRA_STREAM, shareUri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(shareIntent, "Share Import Issues Report"))
-                                } else {
-                                    Toast.makeText(context, "No issues found to export", Toast.LENGTH_SHORT).show()
+                                if (!isExporting) {
+                                    createErrorReportLauncher.launch("import_errors_${System.currentTimeMillis()}.xlsx")
                                 }
                             },
                             onBack = { currentStep = 2 },
